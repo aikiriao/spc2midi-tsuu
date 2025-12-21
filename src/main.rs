@@ -30,17 +30,11 @@ enum Message {
     OpenWindow,
     WindowOpened(window::Id),
     WindowClosed(window::Id),
-    ScaleInputChanged(window::Id, String),
-    ScaleChanged(window::Id, String),
-    TitleChanged(window::Id, String),
 }
 
 #[derive(Debug)]
 struct Window {
     title: String,
-    scale_input: String,
-    current_scale: f32,
-    count: usize,
 }
 
 struct App {
@@ -101,26 +95,8 @@ impl App {
             }
             Message::WindowClosed(id) => {
                 self.windows.remove(&id);
-                if self.windows.is_empty() {
+                if self.windows.is_empty() || id.to_string() == "1" {
                     return iced::exit();
-                }
-            }
-            Message::ScaleInputChanged(id, scale) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    window.scale_input = scale;
-                }
-            }
-            Message::ScaleChanged(id, scale) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    window.current_scale = scale
-                        .parse()
-                        .unwrap_or(window.current_scale)
-                        .clamp(0.5, 5.0);
-                }
-            }
-            Message::TitleChanged(id, title) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    window.title = title;
                 }
             }
         }
@@ -129,7 +105,7 @@ impl App {
 
     fn view(&self, window_id: window::Id) -> iced::Element<'_, Message> {
         if let Some(window) = self.windows.get(&window_id) {
-            if window.count == 1 {
+            if window_id.to_string() == "1" {
                 let menu_tpl_1 = |items| Menu::new(items).width(180.0).offset(15.0).spacing(5.0);
                 let menu_tpl_2 = |items| Menu::new(items).width(180.0).offset(0.0).spacing(5.0);
 
@@ -292,30 +268,11 @@ impl Window {
             } else {
                 format!("Window_{count}")
             },
-            scale_input: "1.0".to_string(),
-            current_scale: 1.0,
-            count: count,
         }
     }
 
     fn view(&self, id: window::Id) -> Element<'_, Message> {
-        let scale_input = column![
-            text("Window scale factor:"),
-            text_input("Window Scale", &self.scale_input)
-                .on_input(Message::ScaleInputChanged.with(id))
-                .on_submit(Message::ScaleChanged(id, self.scale_input.to_string()))
-        ];
-
-        let title_input = column![
-            text("Window title:"),
-            text_input("Window Title", &self.title)
-                .on_input(Message::TitleChanged.with(id))
-                .id(format!("input-{id}"))
-        ];
-
-        let new_window_button = button(text("New Window")).on_press(Message::OpenWindow);
-
-        let content = column![scale_input, title_input, new_window_button]
+        let content = column![]
             .spacing(50)
             .width(Length::Fill)
             .align_x(alignment::Alignment::Center)
