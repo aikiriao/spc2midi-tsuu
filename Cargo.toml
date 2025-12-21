@@ -1,0 +1,9 @@
+[package]
+name = "spc2midi-tsuu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = "0.14.0"
+iced_aw = { version = "0.13.0", features = ["full"] }
+iced_widget = "0.14.2"
