@@ -27,20 +27,27 @@ pub fn main() -> iced::Result {
 #[derive(Debug, Clone)]
 enum Message {
     Debug(String),
-    OpenWindow,
+    OpenWindow(WindowType),
     WindowOpened(window::Id),
     WindowClosed(window::Id),
+}
+
+#[derive(Debug, Clone)]
+enum WindowType {
+    Main,
+    Config,
+    SRN(u8),
 }
 
 #[derive(Debug)]
 struct Window {
     title: String,
+    window_type: WindowType,
 }
 
 struct App {
     title: String,
     theme: iced::Theme,
-    close_on_click: bool,
     windows: BTreeMap<window::Id, Window>,
 }
 
@@ -55,9 +62,8 @@ impl Default for App {
         );
 
         Self {
-            title: "Menu Test".to_string(),
-            theme,
-            close_on_click: true,
+            title: "spc2midi-tsuu".to_string(),
+            theme: iced::Theme::Nord,
             windows: BTreeMap::new(),
         }
     }
@@ -65,8 +71,10 @@ impl Default for App {
 
 impl App {
     fn new() -> (Self, Task<Message>) {
-        let (_, open) = window::open(window::Settings::default());
-        (App { ..App::default() }, open.map(Message::WindowOpened))
+        (
+            App { ..App::default() },
+            Task::done(Message::OpenWindow(WindowType::Main)),
+        )
     }
 
     fn title(&self, window_id: window::Id) -> String {
@@ -81,102 +89,36 @@ impl App {
             Message::Debug(s) => {
                 self.title = s;
             }
-            Message::OpenWindow => {
-                let (_, open) = window::open(window::Settings::default());
+            Message::OpenWindow(window_type) => {
+                let (id, open) = window::open(window::Settings::default());
+                let title = match window_type {
+                    WindowType::Main => self.title.clone(),
+                    WindowType::Config => "Config".to_string(),
+                    WindowType::SRN(no) => format!("SRN {}", no),
+                };
+                let window = Window::new(title, window_type);
+                self.windows.insert(id, window);
                 return open.map(Message::WindowOpened);
             }
-            Message::WindowOpened(id) => {
-                let window = Window::new(self.windows.len() + 1);
-                let focus_input = operation::focus(format!("input-{id}"));
-
-                self.windows.insert(id, window);
-
-                return focus_input;
-            }
+            Message::WindowOpened(id) => {}
             Message::WindowClosed(id) => {
-                self.windows.remove(&id);
-                if self.windows.is_empty() || id.to_string() == "1" {
-                    return iced::exit();
+                if let Some(window) = self.windows.get(&id) {
+                    return match window.window_type {
+                        WindowType::Main => iced::exit(),
+                        _ => {
+                            self.windows.remove(&id);
+                            Task::none()
+                        }
+                    };
                 }
             }
         }
         Task::none()
     }
 
-    fn view(&self, window_id: window::Id) -> iced::Element<'_, Message> {
-        if let Some(window) = self.windows.get(&window_id) {
-            if window_id.to_string() == "1" {
-                let menu_tpl_1 = |items| Menu::new(items).width(180.0).offset(15.0).spacing(5.0);
-                let menu_tpl_2 = |items| Menu::new(items).width(180.0).offset(0.0).spacing(5.0);
-
-                #[rustfmt::skip]
-            let mb = menu_bar!(
-                (debug_button_s("File"), {
-                    let sub5 = menu_tpl_2(menu_items!(
-                            (debug_button_f("5")),
-                    ));
-
-                    let sub4 = menu_tpl_2(menu_items!(
-                            (debug_button_f("4")),
-                    )).width(200.0);
-
-                    let sub3 = menu_tpl_2(menu_items!(
-                            (debug_button_f("3")),
-                            (submenu_button("4"), sub4),
-                            (submenu_button("5"), sub5),
-                    )).width(180.0);
-
-                    let sub2 = menu_tpl_2(menu_items!(
-                            (debug_button_f("2")),
-                            (submenu_button("More sub menus"), sub3),
-                    )).width(160.0);
-
-                    let sub1 = menu_tpl_2(menu_items!(
-                            (debug_button_f("1")),
-                            (submenu_button("Another sub menu"), sub2),
-                    )).width(220.0);
-
-                    menu_tpl_1(menu_items!(
-                            (submenu_button("A sub menu"), sub1),
-                            (debug_button_f("0")),
-                    )).width(140.0)
-                }),
-                (debug_button_s("Option"), {
-                    menu_tpl_1(menu_items!(
-                            (debug_button_f("0")),
-                    )).width(140.0)
-                }),
-                )
-                    .draw_path(menu::DrawPath::Backdrop)
-                    .close_on_item_click_global(self.close_on_click)
-                    .close_on_background_click_global(self.close_on_click)
-                    .padding(Padding::new(5.0))
-                    .style(|theme:&iced::Theme, status: Status | menu::Style{
-                        path_border: Border{
-                            radius: Radius::new(0.0),
-                            ..Default::default()
-                        },
-                        path: Color::from_rgb(
-                                  theme.extended_palette().primary.weak.color.r * 1.2,
-                                  theme.extended_palette().primary.weak.color.g * 1.2,
-                                  theme.extended_palette().primary.weak.color.b * 1.2,
-                              ).into(),
-                              ..primary(theme, status)
-                    });
-
-                let r = row![mb, space::horizontal().width(Length::Fill),]
-                    .align_y(alignment::Alignment::Center);
-
-                let c = column![
-                    r,
-                    button(text("New Window")).on_press(Message::OpenWindow),
-                    space::vertical().height(Length::Fill),
-                ];
-
-                c.into()
-            } else {
-                center(window.view(window_id)).into()
-            }
+    fn view(&self, id: window::Id) -> iced::Element<'_, Message> {
+        if let Some(window) = self.windows.get(&id) {
+            center(window.view()).into()
         } else {
             space().into()
         }
@@ -261,23 +203,88 @@ fn submenu_button(label: &str) -> Element<'_, Message, iced::Theme, iced::Render
 }
 
 impl Window {
-    fn new(count: usize) -> Self {
+    fn new(title: String, window_type: WindowType) -> Self {
         Self {
-            title: if count == 1 {
-                "spc2midi-tsuu".to_string()
-            } else {
-                format!("Window_{count}")
-            },
+            title: title,
+            window_type: window_type,
         }
     }
 
-    fn view(&self, id: window::Id) -> Element<'_, Message> {
-        let content = column![]
-            .spacing(50)
-            .width(Length::Fill)
-            .align_x(alignment::Alignment::Center)
-            .width(200);
+    fn view(&self) -> Element<'_, Message> {
+        match self.window_type {
+            WindowType::Main => {
+                let menu_tpl_1 = |items| Menu::new(items).width(180.0).offset(15.0).spacing(5.0);
+                let menu_tpl_2 = |items| Menu::new(items).width(180.0).offset(0.0).spacing(5.0);
 
-        container(scrollable(center_x(content))).padding(10).into()
+                let mb = menu_bar!(
+                    (debug_button_s("File"), {
+                        let sub1 = menu_tpl_2(menu_items!((debug_button_f("5")),));
+
+                        menu_tpl_1(menu_items!(
+                            (submenu_button("A sub menu"), sub1),
+                            (debug_button_f("0")),
+                        ))
+                        .width(140.0)
+                    }),
+                    (debug_button_s("Option"), {
+                        menu_tpl_1(menu_items!(
+                            (base_button(
+                                text("Config...")
+                                    .height(Length::Shrink)
+                                    .align_y(alignment::Vertical::Center),
+                                Message::OpenWindow(WindowType::Config),
+                            )
+                            .width(Length::Fill)
+                            .height(Length::Shrink)),
+                        ))
+                        .width(140.0)
+                    }),
+                )
+                .draw_path(menu::DrawPath::Backdrop)
+                .close_on_item_click_global(true)
+                .close_on_background_click_global(true)
+                .padding(Padding::new(5.0))
+                .style(|theme: &iced::Theme, status: Status| menu::Style {
+                    path_border: Border {
+                        radius: Radius::new(0.0),
+                        ..Default::default()
+                    },
+                    path: Color::from_rgb(
+                        theme.extended_palette().primary.weak.color.r * 1.2,
+                        theme.extended_palette().primary.weak.color.g * 1.2,
+                        theme.extended_palette().primary.weak.color.b * 1.2,
+                    )
+                    .into(),
+                    ..primary(theme, status)
+                });
+
+                let r = row![mb, space::horizontal().width(Length::Fill),]
+                    .align_y(alignment::Alignment::Center);
+
+                let c = column![
+                    r,
+                    button(text("New Window")).on_press(Message::OpenWindow(WindowType::SRN(0))),
+                    space::vertical().height(Length::Fill),
+                ];
+
+                c.into()
+            }
+            WindowType::Config => {
+                let content = column![text("Super awesome config")]
+                    .spacing(50)
+                    .width(Length::Fill)
+                    .align_x(alignment::Alignment::Center)
+                    .width(100);
+                content.into()
+            }
+            WindowType::SRN(..) => {
+                let content = column![]
+                    .spacing(50)
+                    .width(Length::Fill)
+                    .align_x(alignment::Alignment::Center)
+                    .width(100);
+                container(scrollable(center_x(content))).padding(10).into()
+            }
+        }
     }
 }
