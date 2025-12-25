@@ -4,7 +4,7 @@ use iced::widget::{
     slider, space, text, text_input, toggler, tooltip, vertical_slider, Space,
 };
 use iced::{
-    alignment, theme, window, Border, Color, Element, Function, Length, Padding, Size,
+    alignment, event, theme, window, Border, Color, Element, Function, Length, Padding, Size,
     Subscription, Task, Theme, Vector,
 };
 
@@ -38,6 +38,7 @@ enum Message {
     OpenFile,
     FileOpened(Result<(PathBuf, Vec<u8>), Error>),
     MenuSelected,
+    EventOccurred(iced::Event),
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +162,14 @@ impl App {
                 }
             },
             Message::MenuSelected => {}
+            Message::EventOccurred(event) => match event {
+                iced::event::Event::Window(event) => {
+                    if let iced::window::Event::FileDropped(path) = event {
+                        return Task::perform(load_file(path), Message::FileOpened);
+                    }
+                }
+                _ => {}
+            },
         }
         Task::none()
     }
@@ -178,7 +187,10 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        window::close_events().map(Message::WindowClosed)
+        Subscription::batch(vec![
+            window::close_events().map(Message::WindowClosed),
+            event::listen().map(Message::EventOccurred),
+        ])
     }
 }
 
@@ -191,7 +203,7 @@ pub enum Error {
 
 async fn open_file() -> Result<(PathBuf, Vec<u8>), Error> {
     let picked_file = AsyncFileDialog::new()
-        .set_title("Open a spc file...")
+        .set_title("Open a file...")
         .add_filter("SPC", &["spc", "SPC"])
         .pick_file()
         .await
