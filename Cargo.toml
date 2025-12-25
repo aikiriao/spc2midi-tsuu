@@ -7,3 +7,4 @@ edition = "2024"
 iced = "0.14.0"
 iced_aw = { version = "0.13.0", features = ["full"] }
 iced_widget = "0.14.2"
+rfd = "0.16.0"

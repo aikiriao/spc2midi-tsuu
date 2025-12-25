@@ -13,7 +13,11 @@ use iced_aw::style::{menu_bar::primary, Status};
 use iced_aw::{iced_aw_font, menu_bar, menu_items, ICED_AW_FONT_BYTES};
 use iced_aw::{quad, widgets::InnerBounds};
 
+use rfd::AsyncFileDialog;
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
+use std::io;
+use std::path::PathBuf;
 
 pub fn main() -> iced::Result {
     iced::daemon(App::new, App::update, App::view)
@@ -26,16 +30,18 @@ pub fn main() -> iced::Result {
 
 #[derive(Debug, Clone)]
 enum Message {
-    Debug(String),
     OpenWindow(WindowType),
     WindowOpened(window::Id),
     WindowClosed(window::Id),
+    OpenFile,
+    FileOpened(Result<(PathBuf, Vec<u8>), Error>),
+    MenuSelected,
 }
 
 #[derive(Debug, Clone)]
 enum WindowType {
     Main,
-    Config,
+    Preferences,
     SRN(u8),
 }
 
@@ -78,14 +84,11 @@ impl App {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Debug(s) => {
-                self.title = s;
-            }
             Message::OpenWindow(window_type) => {
                 let (id, open) = window::open(window::Settings::default());
                 let title = match window_type {
                     WindowType::Main => self.title.clone(),
-                    WindowType::Config => "Config".to_string(),
+                    WindowType::Preferences => "Preferences".to_string(),
                     WindowType::SRN(no) => format!("SRN 0x{:02X}", no),
                 };
                 let window = Window::new(title, window_type);
@@ -104,6 +107,18 @@ impl App {
                     };
                 }
             }
+            Message::OpenFile => {
+                return Task::perform(open_file(), Message::FileOpened);
+            }
+            Message::FileOpened(result) => match result {
+                Ok((path, data)) => {
+                    println!("Open {:?} {}", path, data.len());
+                }
+                Err(e) => {
+                    eprintln!("ERROR: failed to open wav file: {:?}", e);
+                }
+            },
+            Message::MenuSelected => {}
         }
         Task::none()
     }
@@ -125,7 +140,43 @@ impl App {
     }
 }
 
-fn base_button<'a>(
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum Error {
+    DialogClosed,
+    IoError(io::ErrorKind),
+}
+
+async fn open_file() -> Result<(PathBuf, Vec<u8>), Error> {
+    let picked_file = AsyncFileDialog::new()
+        .set_title("Open a spc file...")
+        .add_filter("SPC", &["spc", "SPC"])
+        .pick_file()
+        .await
+        .ok_or(Error::DialogClosed)?;
+
+    load_file(picked_file).await
+}
+
+async fn load_file(path: impl Into<PathBuf>) -> Result<(PathBuf, Vec<u8>), Error> {
+    let path = path.into();
+
+    if let Some(extension) = path.extension().and_then(OsStr::to_str) {
+        match extension.to_lowercase().as_str() {
+            "spc" => {
+                let data = std::fs::read(&path).unwrap();
+                return Ok((path, data.to_vec()));
+            }
+            _ => {
+                return Err(Error::IoError(io::ErrorKind::Unsupported));
+            }
+        }
+    }
+
+    return Err(Error::IoError(io::ErrorKind::Unsupported));
+}
+
+fn menu_button<'a>(
     content: impl Into<Element<'a, Message>>,
     msg: Message,
 ) -> button::Button<'a, Message> {
@@ -154,46 +205,6 @@ fn base_button<'a>(
         .on_press(msg)
 }
 
-fn debug_button_s(label: &str) -> Element<'_, Message, iced::Theme, iced::Renderer> {
-    base_button(
-        text(label)
-            .height(Length::Shrink)
-            .align_y(alignment::Vertical::Center),
-        Message::Debug(label.into()),
-    )
-    .width(Length::Shrink)
-    .height(Length::Shrink)
-    .into()
-}
-
-fn debug_button_f(label: &str) -> Element<'_, Message, iced::Theme, iced::Renderer> {
-    base_button(
-        text(label)
-            .height(Length::Shrink)
-            .align_y(alignment::Vertical::Center),
-        Message::Debug(label.into()),
-    )
-    .width(Length::Fill)
-    .height(Length::Shrink)
-    .into()
-}
-
-fn submenu_button(label: &str) -> Element<'_, Message, iced::Theme, iced::Renderer> {
-    row![
-        base_button(
-            text(label)
-                .width(Length::Fill)
-                .align_y(alignment::Vertical::Center),
-            Message::Debug(label.into())
-        ),
-        iced_aw_font::right_open()
-            .width(Length::Shrink)
-            .align_y(alignment::Vertical::Center),
-    ]
-    .align_y(iced::Alignment::Center)
-    .into()
-}
-
 impl Window {
     fn new(title: String, window_type: WindowType) -> Self {
         Self {
@@ -205,32 +216,55 @@ impl Window {
     fn view(&self) -> Element<'_, Message> {
         match self.window_type {
             WindowType::Main => {
-                let menu_tpl_1 = |items| Menu::new(items).width(180.0).offset(15.0).spacing(5.0);
-                let menu_tpl_2 = |items| Menu::new(items).width(180.0).offset(0.0).spacing(5.0);
+                let menu_tuple = |items| Menu::new(items).width(180.0).offset(15.0).spacing(5.0);
 
-                let mb = menu_bar!(
-                    (debug_button_s("File"), {
-                        let sub1 = menu_tpl_2(menu_items!((debug_button_f("5")),));
-
-                        menu_tpl_1(menu_items!(
-                            (submenu_button("A sub menu"), sub1),
-                            (debug_button_f("0")),
-                        ))
-                        .width(140.0)
-                    }),
-                    (debug_button_s("Option"), {
-                        menu_tpl_1(menu_items!(
-                            (base_button(
-                                text("Config...")
-                                    .height(Length::Shrink)
-                                    .align_y(alignment::Vertical::Center),
-                                Message::OpenWindow(WindowType::Config),
-                            )
-                            .width(Length::Fill)
-                            .height(Length::Shrink)),
-                        ))
-                        .width(140.0)
-                    }),
+                let menu_bar = menu_bar!(
+                    (
+                        menu_button(
+                            text("File")
+                                .height(Length::Shrink)
+                                .align_y(alignment::Vertical::Center),
+                            Message::MenuSelected,
+                        )
+                        .width(Length::Shrink)
+                        .height(Length::Shrink),
+                        {
+                            menu_tuple(menu_items!(
+                                (menu_button(
+                                    text("Open file...")
+                                        .height(Length::Shrink)
+                                        .align_y(alignment::Vertical::Center),
+                                    Message::OpenFile,
+                                )
+                                .width(Length::Fill)
+                                .height(Length::Shrink)),
+                            ))
+                            .width(140.0)
+                        }
+                    ),
+                    (
+                        menu_button(
+                            text("Option")
+                                .height(Length::Shrink)
+                                .align_y(alignment::Vertical::Center),
+                            Message::MenuSelected,
+                        )
+                        .width(Length::Shrink)
+                        .height(Length::Shrink),
+                        {
+                            menu_tuple(menu_items!(
+                                (menu_button(
+                                    text("Preferences...")
+                                        .height(Length::Shrink)
+                                        .align_y(alignment::Vertical::Center),
+                                    Message::OpenWindow(WindowType::Preferences),
+                                )
+                                .width(Length::Fill)
+                                .height(Length::Shrink)),
+                            ))
+                            .width(140.0)
+                        }
+                    ),
                 )
                 .draw_path(menu::DrawPath::Backdrop)
                 .close_on_item_click_global(true)
@@ -250,7 +284,7 @@ impl Window {
                     ..primary(theme, status)
                 });
 
-                let r = row![mb, space::horizontal().width(Length::Fill),]
+                let r = row![menu_bar, space::horizontal().width(Length::Fill),]
                     .align_y(alignment::Alignment::Center);
 
                 let c = column![
@@ -261,7 +295,7 @@ impl Window {
 
                 c.into()
             }
-            WindowType::Config => {
+            WindowType::Preferences => {
                 let content = column![text("Super awesome config")]
                     .spacing(50)
                     .width(Length::Fill)
