@@ -53,14 +53,6 @@ struct App {
 
 impl Default for App {
     fn default() -> Self {
-        let theme = iced::Theme::custom(
-            "Custom Theme",
-            theme::Palette {
-                primary: Color::from([0.45, 0.25, 0.57]),
-                ..iced::Theme::Light.palette()
-            },
-        );
-
         Self {
             title: "spc2midi-tsuu".to_string(),
             theme: iced::Theme::Nord,
@@ -94,7 +86,7 @@ impl App {
                 let title = match window_type {
                     WindowType::Main => self.title.clone(),
                     WindowType::Config => "Config".to_string(),
-                    WindowType::SRN(no) => format!("SRN {}", no),
+                    WindowType::SRN(no) => format!("SRN 0x{:02X}", no),
                 };
                 let window = Window::new(title, window_type);
                 self.windows.insert(id, window);
