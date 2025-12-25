@@ -19,6 +19,8 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::PathBuf;
 
+use spc700::spc_file::*;
+
 pub fn main() -> iced::Result {
     iced::daemon(App::new, App::update, App::view)
         .subscription(App::subscription)
@@ -112,7 +114,47 @@ impl App {
             }
             Message::FileOpened(result) => match result {
                 Ok((path, data)) => {
-                    println!("Open {:?} {}", path, data.len());
+                    if let Some(spcfile) = parse_spc_file(&data) {
+                        println!(
+                            "Info: {} \n\
+                            SPC Register PC: {:#X} A: {:#X} X: {:#X} Y: {:#X} PSW: {:#X} SP: {:#X} \n\
+                            Music Title: {} \n\
+                            Game Title: {} \n\
+                            Creator: {} \n\
+                            Comment: {} \n\
+                            Generate Date: {}/{}/{} \n\
+                            Music Duration: {} (sec) \n\
+                            Fadeout Time: {} (msec) \n\
+                            Composer: {}",
+                            std::str::from_utf8(&spcfile.header.info).unwrap(),
+                            spcfile.header.spc_register.pc,
+                            spcfile.header.spc_register.a,
+                            spcfile.header.spc_register.x,
+                            spcfile.header.spc_register.y,
+                            spcfile.header.spc_register.psw,
+                            spcfile.header.spc_register.sp,
+                            std::str::from_utf8(&spcfile.header.music_title)
+                                .unwrap()
+                                .trim_end_matches('\0'),
+                            std::str::from_utf8(&spcfile.header.game_title)
+                                .unwrap()
+                                .trim_end_matches('\0'),
+                            std::str::from_utf8(&spcfile.header.creator)
+                                .unwrap()
+                                .trim_end_matches('\0'),
+                            std::str::from_utf8(&spcfile.header.comment)
+                                .unwrap()
+                                .trim_end_matches('\0'),
+                            spcfile.header.generate_date,
+                            spcfile.header.generate_month,
+                            spcfile.header.generate_year,
+                            spcfile.header.duration,
+                            spcfile.header.fadeout_time,
+                            std::str::from_utf8(&spcfile.header.composer)
+                                .unwrap()
+                                .trim_end_matches('\0'),
+                        );
+                    }
                 }
                 Err(e) => {
                     eprintln!("ERROR: failed to open wav file: {:?}", e);
