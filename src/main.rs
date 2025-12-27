@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::io;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use spc700::decoder::*;
 use spc700::mididsp::*;
@@ -67,7 +67,7 @@ struct SourceInformation {
 #[derive(Debug)]
 struct MainWindow {
     title: String,
-    source_infos: Arc<Mutex<BTreeMap<u8, SourceInformation>>>,
+    source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
 }
 
 #[derive(Debug)]
@@ -86,7 +86,7 @@ struct App {
     main_window_id: window::Id,
     windows: BTreeMap<window::Id, Arc<dyn SPC2MIDI2Window>>,
     spc_file: Option<SPCFile>,
-    source_infos: Arc<Mutex<BTreeMap<u8, SourceInformation>>>,
+    source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
 }
 
 impl Default for App {
@@ -96,7 +96,7 @@ impl Default for App {
             main_window_id: window::Id::unique(),
             windows: BTreeMap::new(),
             spc_file: None,
-            source_infos: Arc::new(Mutex::new(BTreeMap::new())),
+            source_infos: Arc::new(RwLock::new(BTreeMap::new())),
         }
     }
 }
@@ -138,7 +138,7 @@ impl App {
             Message::PreferenceWindowOpened(id) => {}
             Message::OpenSRNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings::default());
-                let infos = self.source_infos.lock().unwrap();
+                let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
                     let window = SRNWindow::new(format!("SRN 0x{:02X}", srn_no), source);
                     self.windows.insert(id, Arc::new(window));
@@ -214,7 +214,7 @@ impl App {
         let analyze_duration_64khz_tick = analyze_duration_sec * 64000;
 
         // リストを作り直す
-        let mut infos = self.source_infos.lock().unwrap();
+        let mut infos = self.source_infos.write().unwrap();
         *infos = BTreeMap::new();
 
         // 一定期間シミュレートし、サンプルソース番号とそれに紐づく開始アドレスを取得
@@ -425,7 +425,7 @@ impl SPC2MIDI2Window for MainWindow {
                 .on_press(Message::OpenSRNWindow(1)),
         ]);
 
-        let infos = self.source_infos.lock().unwrap();
+        let infos = self.source_infos.read().unwrap();
         // TODO: 情報に応じて書き換え
 
         let r = row![menu_bar, space::horizontal().width(Length::Fill),]
@@ -438,7 +438,7 @@ impl SPC2MIDI2Window for MainWindow {
 }
 
 impl MainWindow {
-    fn new(title: String, source_info: Arc<Mutex<BTreeMap<u8, SourceInformation>>>) -> Self {
+    fn new(title: String, source_info: Arc<RwLock<BTreeMap<u8, SourceInformation>>>) -> Self {
         Self {
             title: title,
             source_infos: source_info,
