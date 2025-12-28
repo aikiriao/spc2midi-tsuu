@@ -1,6 +1,7 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, PauseStreamError, PlayStreamError, Stream, StreamConfig};
 use iced::border::Radius;
+use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{
     button, center, center_x, checkbox, column, container, operation, pick_list, row, scrollable,
@@ -17,6 +18,7 @@ use iced_aw::{iced_aw_font, menu_bar, menu_items, ICED_AW_FONT_BYTES};
 use iced_aw::{quad, widgets::InnerBounds};
 use rfd::AsyncFileDialog;
 use samplerate::{convert, ConverterType};
+use std::any::Any;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -29,6 +31,9 @@ use spc700::mididsp::*;
 use spc700::spc::*;
 use spc700::spc_file::*;
 use spc700::types::*;
+
+// SPCの出力サンプリングレート
+const SPC_SAMPLING_RATE: u32 = 32000;
 
 pub fn main() -> iced::Result {
     iced::daemon(App::new, App::update, App::view)
@@ -53,9 +58,15 @@ enum Message {
     MenuSelected,
     EventOccurred(iced::Event),
     ReceivedSRNPlayStartRequest(u8, bool),
+    SRNPlayLoopFlagToggled(window::Id, bool),
 }
 
-trait SPC2MIDI2Window {
+trait AsAny {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+trait SPC2MIDI2Window: AsAny {
     fn title(&self) -> String;
     fn view(&self) -> Element<'_, Message>;
 }
@@ -83,15 +94,17 @@ struct PreferenceWindow {
 #[derive(Debug)]
 struct SRNWindow {
     title: String,
+    window_id: window::Id,
     srn_no: u8,
     source_info: Arc<SourceInformation>,
+    enable_loop_play: bool,
     cache: Cache,
 }
 
 struct App {
     theme: iced::Theme,
     main_window_id: window::Id,
-    windows: BTreeMap<window::Id, Arc<dyn SPC2MIDI2Window>>,
+    windows: BTreeMap<window::Id, Box<dyn SPC2MIDI2Window>>,
     spc_file: Option<SPCFile>,
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
     stream_device: Device,
@@ -144,7 +157,7 @@ impl App {
                 let window =
                     MainWindow::new("spc2midi-tsuu".to_string(), self.source_infos.clone());
                 self.main_window_id = id;
-                self.windows.insert(id, Arc::new(window));
+                self.windows.insert(id, Box::new(window));
                 return open.map(Message::MainWindowOpened);
             }
             Message::MainWindowOpened(id) => {}
@@ -152,7 +165,7 @@ impl App {
                 let (id, open) = window::open(window::Settings::default());
                 self.windows.insert(
                     id,
-                    Arc::new(PreferenceWindow::new("Preference".to_string())),
+                    Box::new(PreferenceWindow::new("Preference".to_string())),
                 );
                 return open.map(Message::PreferenceWindowOpened);
             }
@@ -161,8 +174,9 @@ impl App {
                 let (id, open) = window::open(window::Settings::default());
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
-                    let window = SRNWindow::new(format!("SRN 0x{:02X}", srn_no), srn_no, source);
-                    self.windows.insert(id, Arc::new(window));
+                    let window =
+                        SRNWindow::new(id, format!("SRN 0x{:02X}", srn_no), srn_no, source);
+                    self.windows.insert(id, Box::new(window));
                     return open.map(Message::SRNWindowOpened);
                 }
             }
@@ -170,6 +184,10 @@ impl App {
             Message::WindowClosed(id) => {
                 if id == self.main_window_id {
                     return iced::exit();
+                }
+                // 再生中の場合は止める
+                if self.stream_is_playing.load(Ordering::Relaxed) {
+                    self.stream_play_stop().expect("Failed to stop play");
                 }
             }
             Message::OpenFile => {
@@ -209,6 +227,14 @@ impl App {
                     if let Err(_) = self.srn_play_start(srn_no, loop_flag) {
                         eprintln!("[spc2midi-tsuu] Faild to start playback");
                     }
+                }
+            }
+            Message::SRNPlayLoopFlagToggled(id, flag) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    // ダウンキャストしてSRNWindowを引っ張り出し変更
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    srn_win.enable_loop_play = flag;
                 }
             }
         }
@@ -327,10 +353,14 @@ impl App {
         let num_channels = self.stream_config.channels as usize;
         let is_playing = self.stream_is_playing.clone();
         let played_samples = self.stream_played_samples.clone();
+        let loop_start_sample = f64::round(
+            (source.loop_start_sample * self.stream_config.sample_rate as usize) as f64
+                / SPC_SAMPLING_RATE as f64,
+        ) as usize;
 
         // 出力先デバイスのレートに合わせてレート変換
         let resampled_pcm = convert(
-            32000,
+            SPC_SAMPLING_RATE,
             self.stream_config.sample_rate,
             1,
             ConverterType::SincFastest,
@@ -365,14 +395,14 @@ impl App {
                     // 端点に来た時の処理
                     if loop_flag {
                         // ループ点から再開
-                        played_samples.store(source.loop_start_sample, Ordering::Relaxed);
+                        played_samples.store(loop_start_sample, Ordering::Relaxed);
                     } else {
                         // 再生終了
                         is_playing.store(false, Ordering::Relaxed);
                     }
                 }
             },
-            |err| eprintln!("[WavSpectrumViewer] {err}"),
+            |err| eprintln!("[SPC2MIDI2] {err}"),
             None,
         ) {
             Ok(stream) => stream,
@@ -597,8 +627,19 @@ impl SPC2MIDI2Window for SRNWindow {
 
     fn view(&self) -> Element<'_, Message> {
         let content = column![
-            Canvas::new(self).width(Length::Fill),
-            button("play").on_press(Message::ReceivedSRNPlayStartRequest(self.srn_no, true)),
+            Canvas::new(self).width(Length::Fill).height(200),
+            row![
+                button("play / pause").on_press(Message::ReceivedSRNPlayStartRequest(
+                    self.srn_no,
+                    self.enable_loop_play
+                )),
+                checkbox(self.enable_loop_play)
+                    .label("Loop")
+                    .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(self.window_id, flag)),
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center)
         ]
         .spacing(10)
         .padding(10)
@@ -609,11 +650,18 @@ impl SPC2MIDI2Window for SRNWindow {
 }
 
 impl SRNWindow {
-    fn new(title: String, srn_no: u8, source_info: &SourceInformation) -> Self {
+    fn new(
+        window_id: window::Id,
+        title: String,
+        srn_no: u8,
+        source_info: &SourceInformation,
+    ) -> Self {
         Self {
+            window_id: window_id,
             title: title,
             srn_no: srn_no,
             source_info: source_info.clone().into(),
+            enable_loop_play: false,
             cache: Cache::default(),
         }
     }
@@ -643,26 +691,34 @@ impl canvas::Program<Message> for SRNWindow {
 
     fn update(
         &self,
-        state: &mut Self::State,
+        _state: &mut Self::State,
         event: &Event,
-        bounds: Rectangle,
-        cursor: mouse::Cursor,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
     ) -> Option<iced_widget::Action<Message>> {
-        /*
         match event {
-            Event::Keyboard(keyboard::Event::KeyReleased {
+            Event::Keyboard(iced::keyboard::Event::KeyReleased {
                 key: iced::keyboard::Key::Named(Named::Space),
                 ..
-            }) => {
-                return (
-                    iced::widget::canvas::event::Status::Captured,
-                    Some(Message::ReceivedPlayStartRequest),
-                );
-            }
-            _ => {}
+            }) => Some(iced_widget::Action::publish(
+                Message::ReceivedSRNPlayStartRequest(self.srn_no, self.enable_loop_play),
+            )),
+            _ => None,
         }
-        */
-        None
+    }
+}
+
+// AsAnyの実装
+impl<T> AsAny for T
+where
+    T: 'static,
+{
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
