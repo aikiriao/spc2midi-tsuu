@@ -1,11 +1,13 @@
 use iced::border::Radius;
+use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{
     button, center, center_x, checkbox, column, container, operation, pick_list, row, scrollable,
-    slider, space, text, text_input, toggler, tooltip, vertical_slider, Space,
+    slider, space, stack, text, text_input, toggler, tooltip, vertical_slider, Column, Space,
+    Stack,
 };
 use iced::{
-    alignment, event, theme, window, Border, Color, Element, Function, Length, Padding, Size,
-    Subscription, Task, Theme, Vector,
+    alignment, event, mouse, theme, window, Border, Color, Element, Function, Length, Padding,
+    Point, Rectangle, Renderer, Size, Subscription, Task, Theme, Vector,
 };
 
 use iced_aw::menu::{self, Item, Menu};
@@ -16,9 +18,9 @@ use iced_aw::{quad, widgets::InnerBounds};
 use rfd::AsyncFileDialog;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
-use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use std::{cmp, io};
 
 use spc700::decoder::*;
 use spc700::mididsp::*;
@@ -58,7 +60,7 @@ trait SPC2MIDI2Window {
 /// 音源情報
 #[derive(Debug, Clone)]
 struct SourceInformation {
-    signal: Vec<i16>,
+    signal: Vec<f32>,
     start_address: usize,
     end_address: usize,
     loop_start_sample: usize,
@@ -78,7 +80,8 @@ struct PreferenceWindow {
 #[derive(Debug)]
 struct SRNWindow {
     title: String,
-    source_info: SourceInformation,
+    source_info: Arc<SourceInformation>,
+    cache: Cache,
 }
 
 struct App {
@@ -159,7 +162,7 @@ impl App {
                     if let Some(spcfile) = parse_spc_file(&data) {
                         self.spc_file = Some(spcfile.clone());
                         self.analyze_sources(
-                            60 * 10,
+                            60 * 1,
                             &spcfile.header.spc_register,
                             &spcfile.ram,
                             &spcfile.dsp_register,
@@ -249,14 +252,20 @@ impl App {
 
         // 波形情報の読み込み
         for (srn, dir_address) in start_address_map.iter() {
+            const PCM_NORMALIZE_CONST: f32 = 1.0 / 32768.0;
             let mut decoder = Decoder::new();
             let mut signal = Vec::new();
             decoder.keyon(ram, *dir_address);
             // 原音ピッチで終端までデコード
+            let mut last_block_sample = 0;
             loop {
-                signal.push(decoder.process(ram, 0x1000));
+                let pcm = decoder.process(ram, 0x1000) as f32;
+                signal.push(pcm * PCM_NORMALIZE_CONST);
                 if decoder.end {
-                    break;
+                    last_block_sample += 1;
+                    if last_block_sample >= 16 {
+                        break;
+                    }
                 }
             }
             // データ追記
@@ -416,22 +425,23 @@ impl SPC2MIDI2Window for MainWindow {
             ..primary(theme, status)
         });
 
-        let srn_list = scrollable(column![
-            button(text("New Window"))
-                .width(Length::Fill)
-                .on_press(Message::OpenSRNWindow(0)),
-            button(text("New Window"))
-                .width(Length::Fill)
-                .on_press(Message::OpenSRNWindow(1)),
-        ]);
-
         let infos = self.source_infos.read().unwrap();
-        // TODO: 情報に応じて書き換え
+        let srn_list: Vec<_> = infos
+            .iter()
+            .map(|(key, info)| {
+                row![
+                    text(format!("{} {}", key, info.start_address)),
+                    button("Configure").on_press(Message::OpenSRNWindow(*key))
+                ]
+                .into()
+            })
+            .collect();
+        let srn_list_view = Column::from_vec(srn_list);
 
         let r = row![menu_bar, space::horizontal().width(Length::Fill),]
             .align_y(alignment::Alignment::Center);
 
-        let c = column![r, srn_list, space::vertical().height(Length::Fill),];
+        let c = column![r, srn_list_view.width(Length::Fill).height(Length::Fill),];
 
         c.into()
     }
@@ -473,12 +483,12 @@ impl SPC2MIDI2Window for SRNWindow {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let content = column![]
-            .spacing(50)
+        let content = column![Canvas::new(self).width(Length::Fill),]
+            .spacing(10)
+            .padding(10)
             .width(Length::Fill)
-            .align_x(alignment::Alignment::Center)
-            .width(100);
-        container(scrollable(center_x(content))).padding(10).into()
+            .align_x(alignment::Alignment::Center);
+        content.into()
     }
 }
 
@@ -486,7 +496,141 @@ impl SRNWindow {
     fn new(title: String, source_info: &SourceInformation) -> Self {
         Self {
             title: title,
-            source_info: source_info.clone(),
+            source_info: source_info.clone().into(),
+            cache: Cache::default(),
+        }
+    }
+}
+
+impl canvas::Program<Message> for SRNWindow {
+    type State = Option<()>;
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
+            // 波形描画
+            draw_waveform(
+                frame,
+                &Rectangle::new(Point::new(0.0, 0.0), Size::new(bounds.width, bounds.height)),
+                &self.source_info.signal,
+            );
+        });
+        vec![geometry]
+    }
+
+    fn update(
+        &self,
+        state: &mut Self::State,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<iced_widget::Action<Message>> {
+        /*
+        match event {
+            Event::Keyboard(keyboard::Event::KeyReleased {
+                key: iced::keyboard::Key::Named(Named::Space),
+                ..
+            }) => {
+                return (
+                    iced::widget::canvas::event::Status::Captured,
+                    Some(Message::ReceivedPlayStartRequest),
+                );
+            }
+            _ => {}
+        }
+        */
+        None
+    }
+}
+
+/// 波形描画
+fn draw_waveform(frame: &mut Frame, bounds: &Rectangle, pcm: &[f32]) {
+    let center = bounds.center();
+    let half_height = bounds.height / 2.0;
+    let center_left = Point::new(center.x - bounds.width / 2.0, center.y);
+
+    let num_points_to_draw = cmp::min(pcm.len(), 4 * bounds.width as usize); // 描画する点数（それ以外は間引く）
+    let sample_stride = pcm.len() as f32 / num_points_to_draw as f32;
+    let x_offset_delta = bounds.width / num_points_to_draw as f32;
+
+    // 描画する波形を拡大するため最大絶対値を計算
+    let max_abs_pcm = pcm
+        .iter()
+        .max_by(|a, b| a.abs().total_cmp(&b.abs()))
+        .unwrap()
+        .abs();
+    let pcm_normalizer = half_height / max_abs_pcm;
+
+    // 背景を塗りつぶす
+    frame.fill_rectangle(
+        Point::new(bounds.x, bounds.y),
+        Size::new(bounds.width, bounds.height),
+        Color::from_rgb8(0, 0, 0),
+    );
+
+    let line_color = Color::from_rgb8(0, 196, 0);
+    let samples_per_pixel = pcm.len() as f32 / bounds.width;
+    const USE_PATH_THRESHOLD: f32 = 200.0;
+    if samples_per_pixel < USE_PATH_THRESHOLD {
+        // 波形描画パスを生成
+        let path = Path::new(|b| {
+            b.move_to(Point::new(
+                center_left.x,
+                center.y - pcm[0] * pcm_normalizer,
+            ));
+            for i in 1..num_points_to_draw {
+                b.line_to(Point::new(
+                    center_left.x + i as f32 * x_offset_delta,
+                    center.y - pcm[(i as f32 * sample_stride).round() as usize] * pcm_normalizer,
+                ));
+            }
+        });
+        // 波形描画
+        frame.stroke(
+            &path,
+            Stroke {
+                style: stroke::Style::Solid(line_color),
+                width: 1.0,
+                ..Stroke::default()
+            },
+        );
+    } else {
+        // ピクセルあたりのサンプル数が多いときは、最小値と最大値をつなぐ矩形のみ描画
+        let mut prev_sample = 0;
+        for i in 0..num_points_to_draw {
+            const MIN_HEIGHT: f32 = 0.5;
+            let current_sample = ((i + 1) as f32 * sample_stride).round() as usize;
+            let max_val = pcm[prev_sample..current_sample]
+                .iter()
+                .max_by(|a, b| a.total_cmp(&b))
+                .unwrap();
+            let min_val = pcm[prev_sample..current_sample]
+                .iter()
+                .min_by(|a, b| a.total_cmp(&b))
+                .unwrap();
+
+            // 最大と最小の差がない（無音など）ときは高さをクリップ
+            let mut height = (max_val - min_val) * pcm_normalizer;
+            if height < MIN_HEIGHT {
+                height = MIN_HEIGHT;
+            }
+
+            // 矩形描画
+            frame.fill_rectangle(
+                Point::new(
+                    center_left.x + i as f32 * x_offset_delta,
+                    center.y - max_val * pcm_normalizer,
+                ),
+                Size::new(1.2, height),
+                line_color,
+            );
+            prev_sample = current_sample;
         }
     }
 }
