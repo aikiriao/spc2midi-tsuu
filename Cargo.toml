@@ -5,9 +5,12 @@ edition = "2024"
 
 [dependencies]
 cpal = "0.17.0"
+fixed-resample = "0.9.2"
 iced = "0.14.0"
 iced_aw = { version = "0.13.0", features = ["full"] }
 iced_widget = "0.14.2"
+midir = "0.10.3"
 rfd = "0.16.0"
+rimd = "0.0.1"
 samplerate = "0.2.4"
 spc700 = { git = "https://github.com/aikiriao/spc700.git" }

@@ -1,5 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, PauseStreamError, PlayStreamError, Stream, StreamConfig};
+use fixed_resample::ReadStatus;
 use iced::border::Radius;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
@@ -16,14 +17,17 @@ use iced_aw::menu::{self, Item, Menu};
 use iced_aw::style::{menu_bar::primary, Status};
 use iced_aw::{iced_aw_font, menu_bar, menu_items, ICED_AW_FONT_BYTES};
 use iced_aw::{quad, widgets::InnerBounds};
+use midir::{MidiOutput, MidiOutputPort};
 use rfd::AsyncFileDialog;
+use rimd::{Event as MidiEvent, MidiMessage, SMFFormat, SMFWriter, Track, TrackEvent, SMF};
 use samplerate::{convert, ConverterType};
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
+use std::num::NonZero;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::{cmp, io};
 
 use spc700::decoder::*;
@@ -32,8 +36,12 @@ use spc700::spc::*;
 use spc700::spc_file::*;
 use spc700::types::*;
 
-// SPCの出力サンプリングレート
+/// SPCの出力サンプリングレート
 const SPC_SAMPLING_RATE: u32 = 32000;
+/// PCM正規化定数
+const PCM_NORMALIZE_CONST: f32 = 1.0 / 32768.0;
+/// SPCの64kHzにおけるクロックティックカウント
+const CLOCK_TICK_CYCLE_64KHZ: u32 = 16;
 
 pub fn main() -> iced::Result {
     iced::daemon(App::new, App::update, App::view)
@@ -59,6 +67,10 @@ enum Message {
     EventOccurred(iced::Event),
     ReceivedSRNPlayStartRequest(u8, bool),
     SRNPlayLoopFlagToggled(window::Id, bool),
+    ReceivedPlayStartRequest,
+    ReceivedPlayStopRequest,
+    SPCMuteFlagToggled(bool),
+    MIDIMuteFlagToggled(bool),
 }
 
 trait AsAny {
@@ -84,6 +96,8 @@ struct SourceInformation {
 struct MainWindow {
     title: String,
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
+    pcm_spc_mute: bool,
+    midi_spc_mute: bool,
 }
 
 #[derive(Debug)]
@@ -105,13 +119,17 @@ struct App {
     theme: iced::Theme,
     main_window_id: window::Id,
     windows: BTreeMap<window::Id, Box<dyn SPC2MIDI2Window>>,
-    spc_file: Option<SPCFile>,
+    spc_file: Option<Box<SPCFile>>,
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
     stream_device: Device,
     stream_config: StreamConfig,
     stream: Option<Stream>,
     stream_played_samples: Arc<AtomicUsize>,
     stream_is_playing: Arc<AtomicBool>,
+    pcm_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::sdsp::SDSP>>>>>,
+    midi_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>>>>>,
+    pcm_spc_mute: Arc<AtomicBool>,
+    midi_spc_mute: Arc<AtomicBool>,
 }
 
 impl Default for App {
@@ -120,6 +138,8 @@ impl Default for App {
         let device = host
             .default_output_device()
             .expect("no output device available");
+        let midi_out = MidiOutput::new("spc2midi-tsuu").unwrap();
+
         Self {
             theme: iced::Theme::Nord,
             main_window_id: window::Id::unique(),
@@ -131,6 +151,10 @@ impl Default for App {
             stream: None,
             stream_played_samples: Arc::new(AtomicUsize::new(0)),
             stream_is_playing: Arc::new(AtomicBool::new(false)),
+            pcm_spc: None,
+            midi_spc: None,
+            pcm_spc_mute: Arc::new(AtomicBool::new(false)),
+            midi_spc_mute: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -185,24 +209,30 @@ impl App {
                 if id == self.main_window_id {
                     return iced::exit();
                 }
-                // 再生中の場合は止める
-                if self.stream_is_playing.load(Ordering::Relaxed) {
-                    self.stream_play_stop().expect("Failed to stop play");
-                }
             }
             Message::OpenFile => {
                 return Task::perform(open_file(), Message::FileOpened);
             }
             Message::FileOpened(result) => match result {
                 Ok((path, data)) => {
-                    if let Some(spcfile) = parse_spc_file(&data) {
-                        self.spc_file = Some(spcfile.clone());
+                    if let Some(spc_file) = parse_spc_file(&data) {
+                        self.spc_file = Some(Box::new(spc_file.clone()));
                         self.analyze_sources(
-                            60 * 1,
-                            &spcfile.header.spc_register,
-                            &spcfile.ram,
-                            &spcfile.dsp_register,
+                            60 * 2,
+                            &spc_file.header.spc_register,
+                            &spc_file.ram,
+                            &spc_file.dsp_register,
                         );
+                        self.pcm_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
+                            &spc_file.header.spc_register,
+                            &spc_file.ram,
+                            &spc_file.dsp_register,
+                        )))));
+                        self.midi_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
+                            &spc_file.header.spc_register,
+                            &spc_file.ram,
+                            &spc_file.dsp_register,
+                        )))));
                     }
                 }
                 Err(e) => {
@@ -237,6 +267,56 @@ impl App {
                     srn_win.enable_loop_play = flag;
                 }
             }
+            Message::ReceivedPlayStartRequest => {
+                if self.stream_is_playing.load(Ordering::Relaxed) {
+                    // 再生中の場合は止める
+                    self.stream_play_stop().expect("Failed to stop play");
+                } else {
+                    // 再生開始
+                    if let Err(_) = self.play_start() {
+                        eprintln!("[spc2midi-tsuu] Faild to start playback");
+                    }
+                }
+            }
+            Message::ReceivedPlayStopRequest => {
+                // 再生中の場合は止める
+                if self.stream_is_playing.load(Ordering::Relaxed) {
+                    self.stream_play_stop().expect("Failed to stop play");
+                }
+                // DSPをリセット
+                if let Some(spc_file) = &self.spc_file {
+                    self.pcm_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
+                        &spc_file.header.spc_register,
+                        &spc_file.ram,
+                        &spc_file.dsp_register,
+                    )))));
+                    self.midi_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
+                        &spc_file.header.spc_register,
+                        &spc_file.ram,
+                        &spc_file.dsp_register,
+                    )))));
+                }
+            }
+            Message::SPCMuteFlagToggled(flag) => {
+                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                    // トグルスイッチの値を書き換え
+                    let main_window: &mut MainWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    main_window.pcm_spc_mute = flag;
+                    // フラグ書き換え
+                    self.pcm_spc_mute.clone().store(flag, Ordering::Relaxed);
+                }
+            }
+            Message::MIDIMuteFlagToggled(flag) => {
+                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                    // トグルスイッチの値を書き換え
+                    let main_window: &mut MainWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    main_window.midi_spc_mute = flag;
+                    // フラグ書き換え
+                    self.midi_spc_mute.clone().store(flag, Ordering::Relaxed);
+                }
+            }
         }
         Task::none()
     }
@@ -268,7 +348,6 @@ impl App {
         ram: &[u8],
         dsp_register: &[u8; 128],
     ) {
-        const CLOCK_TICK_CYCLE_64KHZ: u32 = 16;
         let analyze_duration_64khz_tick = analyze_duration_sec * 64000;
 
         // リストを作り直す
@@ -307,7 +386,6 @@ impl App {
 
         // 波形情報の読み込み
         for (srn, dir_address) in start_address_map.iter() {
-            const PCM_NORMALIZE_CONST: f32 = 1.0 / 32768.0;
             let mut decoder = Decoder::new();
             let mut signal = Vec::new();
             decoder.keyon(ram, *dir_address);
@@ -338,6 +416,112 @@ impl App {
                 },
             );
         }
+    }
+
+    // 再生開始
+    fn play_start(&mut self) -> Result<(), PlayStreamError> {
+        const NUM_CHANNELS: usize = 2;
+        const BUFFER_SIZE: usize = 2048;
+
+        // SPCの参照をクローン
+        let (pcm_spc, midi_spc) =
+            if let (Some(pcm_spc_ref), Some(midi_spc_ref)) = (&self.pcm_spc, &self.midi_spc) {
+                (pcm_spc_ref.clone(), midi_spc_ref.clone())
+            } else {
+                return Ok(());
+            };
+
+        // リサンプラ初期化 32k -> デバイスの出力レート変換となるように
+        let (mut prod, mut cons) = fixed_resample::resampling_channel::<f32, NUM_CHANNELS>(
+            NonZero::new(NUM_CHANNELS).unwrap(),
+            SPC_SAMPLING_RATE,
+            self.stream_config.sample_rate,
+            Default::default(),
+        );
+
+        // FIXME: MIDI出力ポートの作成。出力MIDIデバイスを選べるべき
+        let midi_out = MidiOutput::new("spc2midi-tsuu").unwrap();
+        let out_ports = midi_out.ports();
+        let mut conn_out = midi_out.connect(&out_ports[0], "spc2midi-tsuu").unwrap();
+
+        // 各SPCのミュートフラグ取得
+        let pcm_spc_mute = self.pcm_spc_mute.clone();
+        let midi_spc_mute = self.midi_spc_mute.clone();
+
+        // 再生ストリーム作成
+        let mut cycle_count = 0;
+        let mut pcm_buffer = vec![0.0f32; BUFFER_SIZE * NUM_CHANNELS];
+        let stream = match self.stream_device.build_output_stream(
+            &self.stream_config,
+            move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                // SPCをロックして獲得
+                let mut spc = pcm_spc.lock().unwrap();
+                let mut midispc = midi_spc.lock().unwrap();
+
+                // レート変換比を信じ、バッファが一定量埋まるまで出力させる
+                let mut nsamples = prod.available_frames();
+                while nsamples > BUFFER_SIZE / 2 {
+                    let cycle = spc.execute_step();
+                    let _ = midispc.execute_step();
+                    cycle_count += cycle as u32;
+                    if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
+                        cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                        // PCM出力
+                        if let Some(pcm) = spc.clock_tick_64k_hz() {
+                            let fout = if !pcm_spc_mute.load(Ordering::Relaxed) {
+                                [
+                                    (pcm[0] as f32) * PCM_NORMALIZE_CONST,
+                                    (pcm[1] as f32) * PCM_NORMALIZE_CONST,
+                                ]
+                            } else {
+                                [0.0f32, 0.0f32]
+                            };
+                            prod.push_interleaved(&fout);
+                            nsamples = prod.available_frames();
+                        }
+                        // MIDI出力
+                        if let Some(msgs) = midispc.clock_tick_64k_hz() {
+                            if !midi_spc_mute.load(Ordering::Relaxed) {
+                                for i in 0..msgs.num_messages {
+                                    let msg = msgs.messages[i];
+                                    conn_out.send(&msg.data[..msg.length]).unwrap();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // リサンプラー出力の取り出し
+                let frames = buffer.len() / NUM_CHANNELS;
+                let status = cons.read_interleaved(&mut pcm_buffer[..frames * NUM_CHANNELS]);
+                if let ReadStatus::UnderflowOccurred { .. } = status {
+                    eprintln!("input stream fell behind: try increasing channel latency");
+                }
+
+                buffer.fill(0.0);
+                for ch in 0..NUM_CHANNELS {
+                    for (out_chunk, in_chunk) in buffer
+                        .chunks_exact_mut(NUM_CHANNELS)
+                        .zip(pcm_buffer.chunks_exact(NUM_CHANNELS))
+                    {
+                        out_chunk[ch] = in_chunk[ch];
+                    }
+                }
+            },
+            |err| eprintln!("[spc2midi-tsuu] {err}"),
+            None,
+        ) {
+            Ok(stream) => stream,
+            Err(_) => return Err(PlayStreamError::DeviceNotAvailable),
+        };
+
+        // 再生開始
+        self.stream_played_samples.store(0, Ordering::Relaxed);
+        self.stream_is_playing.store(true, Ordering::Relaxed);
+        stream.play()?;
+        self.stream = Some(stream);
+
+        Ok(())
     }
 
     // 再生開始
@@ -402,7 +586,7 @@ impl App {
                     }
                 }
             },
-            |err| eprintln!("[SPC2MIDI2] {err}"),
+            |err| eprintln!("[spc2midi-tsuu] {err}"),
             None,
         ) {
             Ok(stream) => stream,
@@ -576,15 +760,37 @@ impl SPC2MIDI2Window for MainWindow {
                     text(format!("{} {}", key, info.start_address)),
                     button("Configure").on_press(Message::OpenSRNWindow(*key))
                 ]
+                .spacing(10)
+                .width(Length::Fill)
+                .align_y(alignment::Alignment::Center)
                 .into()
             })
             .collect();
-        let srn_list_view = Column::from_vec(srn_list);
+
+        let preview_control = row![
+            button("Play / Pause").on_press(Message::ReceivedPlayStartRequest),
+            button("Stop").on_press(Message::ReceivedPlayStopRequest),
+            checkbox(self.pcm_spc_mute)
+                .label("SPC Mute")
+                .on_toggle(|flag| Message::SPCMuteFlagToggled(flag)),
+            checkbox(self.midi_spc_mute)
+                .label("MIDI Mute")
+                .on_toggle(|flag| Message::MIDIMuteFlagToggled(flag)),
+        ]
+        .spacing(10)
+        .width(Length::Fill)
+        .align_y(alignment::Alignment::Center);
 
         let r = row![menu_bar, space::horizontal().width(Length::Fill),]
             .align_y(alignment::Alignment::Center);
 
-        let c = column![r, srn_list_view.width(Length::Fill).height(Length::Fill),];
+        let c = column![
+            r,
+            Column::from_vec(srn_list)
+                .width(Length::Fill)
+                .height(Length::Fill),
+            preview_control,
+        ];
 
         c.into()
     }
@@ -595,6 +801,8 @@ impl MainWindow {
         Self {
             title: title,
             source_infos: source_info,
+            pcm_spc_mute: false,
+            midi_spc_mute: false,
         }
     }
 }
@@ -708,7 +916,7 @@ impl canvas::Program<Message> for SRNWindow {
     }
 }
 
-// AsAnyの実装
+/// AsAnyの実装
 impl<T> AsAny for T
 where
     T: 'static,
