@@ -1,3 +1,5 @@
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{Device, PauseStreamError, PlayStreamError, Stream, StreamConfig};
 use iced::border::Radius;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{
@@ -9,16 +11,16 @@ use iced::{
     alignment, event, mouse, theme, window, Border, Color, Element, Function, Length, Padding,
     Point, Rectangle, Renderer, Size, Subscription, Task, Theme, Vector,
 };
-
 use iced_aw::menu::{self, Item, Menu};
 use iced_aw::style::{menu_bar::primary, Status};
 use iced_aw::{iced_aw_font, menu_bar, menu_items, ICED_AW_FONT_BYTES};
 use iced_aw::{quad, widgets::InnerBounds};
-
 use rfd::AsyncFileDialog;
+use samplerate::{convert, ConverterType};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::{cmp, io};
 
@@ -50,6 +52,7 @@ enum Message {
     FileOpened(Result<(PathBuf, Vec<u8>), Error>),
     MenuSelected,
     EventOccurred(iced::Event),
+    ReceivedSRNPlayStartRequest(u8, bool),
 }
 
 trait SPC2MIDI2Window {
@@ -80,6 +83,7 @@ struct PreferenceWindow {
 #[derive(Debug)]
 struct SRNWindow {
     title: String,
+    srn_no: u8,
     source_info: Arc<SourceInformation>,
     cache: Cache,
 }
@@ -90,16 +94,30 @@ struct App {
     windows: BTreeMap<window::Id, Arc<dyn SPC2MIDI2Window>>,
     spc_file: Option<SPCFile>,
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
+    stream_device: Device,
+    stream_config: StreamConfig,
+    stream: Option<Stream>,
+    stream_played_samples: Arc<AtomicUsize>,
+    stream_is_playing: Arc<AtomicBool>,
 }
 
 impl Default for App {
     fn default() -> Self {
+        let host = cpal::default_host();
+        let device = host
+            .default_output_device()
+            .expect("no output device available");
         Self {
             theme: iced::Theme::Nord,
             main_window_id: window::Id::unique(),
             windows: BTreeMap::new(),
             spc_file: None,
             source_infos: Arc::new(RwLock::new(BTreeMap::new())),
+            stream_config: device.default_output_config().unwrap().into(),
+            stream_device: device,
+            stream: None,
+            stream_played_samples: Arc::new(AtomicUsize::new(0)),
+            stream_is_playing: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -143,7 +161,7 @@ impl App {
                 let (id, open) = window::open(window::Settings::default());
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
-                    let window = SRNWindow::new(format!("SRN 0x{:02X}", srn_no), source);
+                    let window = SRNWindow::new(format!("SRN 0x{:02X}", srn_no), srn_no, source);
                     self.windows.insert(id, Arc::new(window));
                     return open.map(Message::SRNWindowOpened);
                 }
@@ -182,6 +200,17 @@ impl App {
                 }
                 _ => {}
             },
+            Message::ReceivedSRNPlayStartRequest(srn_no, loop_flag) => {
+                if self.stream_is_playing.load(Ordering::Relaxed) {
+                    // 再生中の場合は止める
+                    self.stream_play_stop().expect("Failed to stop play");
+                } else {
+                    // 新規再生処理
+                    if let Err(_) = self.srn_play_start(srn_no, loop_flag) {
+                        eprintln!("[spc2midi-tsuu] Faild to start playback");
+                    }
+                }
+            }
         }
         Task::none()
     }
@@ -283,6 +312,90 @@ impl App {
                 },
             );
         }
+    }
+
+    // 再生開始
+    fn srn_play_start(&mut self, srn_no: u8, loop_flag: bool) -> Result<(), PlayStreamError> {
+        // 再生対象の音源をコピー
+        let infos = self.source_infos.read().unwrap();
+        let source = if let Some(srn) = infos.get(&srn_no) {
+            srn.clone()
+        } else {
+            return Ok(());
+        };
+
+        let num_channels = self.stream_config.channels as usize;
+        let is_playing = self.stream_is_playing.clone();
+        let played_samples = self.stream_played_samples.clone();
+
+        // 出力先デバイスのレートに合わせてレート変換
+        let resampled_pcm = convert(
+            32000,
+            self.stream_config.sample_rate,
+            1,
+            ConverterType::SincFastest,
+            &source.signal,
+        )
+        .unwrap();
+        let resampled_len = resampled_pcm.len();
+
+        // 音源はモノラルなので出力チャンネル数分コピー
+        let mut output = vec![0.0f32; resampled_len * num_channels];
+        for smpl in 0..resampled_len {
+            for ch in 0..num_channels {
+                output[ch as usize + num_channels * smpl] = resampled_pcm[smpl];
+            }
+        }
+
+        // 再生ストリーム作成
+        let stream = match self.stream_device.build_output_stream(
+            &self.stream_config,
+            move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                let progress = played_samples.load(Ordering::Relaxed);
+                // 一旦バッファを無音で埋める
+                buffer.fill(0.0);
+                if progress < output.len() {
+                    // バッファにコピー
+                    let num_copy_samples = cmp::min(output.len() - progress, buffer.len());
+                    buffer[..num_copy_samples]
+                        .copy_from_slice(&output[progress..progress + num_copy_samples]);
+                    // 再生サンプル増加
+                    played_samples.store(progress + num_copy_samples, Ordering::Relaxed);
+                } else {
+                    // 端点に来た時の処理
+                    if loop_flag {
+                        // ループ点から再開
+                        played_samples.store(source.loop_start_sample, Ordering::Relaxed);
+                    } else {
+                        // 再生終了
+                        is_playing.store(false, Ordering::Relaxed);
+                    }
+                }
+            },
+            |err| eprintln!("[WavSpectrumViewer] {err}"),
+            None,
+        ) {
+            Ok(stream) => stream,
+            Err(_) => return Err(PlayStreamError::DeviceNotAvailable),
+        };
+
+        // 再生開始
+        self.stream_played_samples.store(0, Ordering::Relaxed);
+        self.stream_is_playing.store(true, Ordering::Relaxed);
+        stream.play()?;
+        self.stream = Some(stream);
+
+        Ok(())
+    }
+
+    // 再生停止
+    fn stream_play_stop(&mut self) -> Result<(), PauseStreamError> {
+        if let Some(stream) = &self.stream {
+            self.stream_is_playing.store(false, Ordering::Relaxed);
+            stream.pause()?;
+            self.stream = None;
+        }
+        Ok(())
     }
 }
 
@@ -483,19 +596,23 @@ impl SPC2MIDI2Window for SRNWindow {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let content = column![Canvas::new(self).width(Length::Fill),]
-            .spacing(10)
-            .padding(10)
-            .width(Length::Fill)
-            .align_x(alignment::Alignment::Center);
+        let content = column![
+            Canvas::new(self).width(Length::Fill),
+            button("play").on_press(Message::ReceivedSRNPlayStartRequest(self.srn_no, true)),
+        ]
+        .spacing(10)
+        .padding(10)
+        .width(Length::Fill)
+        .align_x(alignment::Alignment::Center);
         content.into()
     }
 }
 
 impl SRNWindow {
-    fn new(title: String, source_info: &SourceInformation) -> Self {
+    fn new(title: String, srn_no: u8, source_info: &SourceInformation) -> Self {
         Self {
             title: title,
+            srn_no: srn_no,
             source_info: source_info.clone().into(),
             cache: Cache::default(),
         }
