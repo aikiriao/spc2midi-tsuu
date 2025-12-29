@@ -80,7 +80,7 @@ enum Message {
     ReceivedPlayStopRequest,
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
-    ProgramSelected(u8, Program),
+    ProgramSelected(window::Id, Program),
 }
 
 trait AsAny {
@@ -110,7 +110,7 @@ struct SourceInformation {
 #[derive(Debug, Clone)]
 struct SourceParameter {
     /// プログラム番号
-    program: u8,
+    program: Program,
     /// 基準ノート（8bit整数・8bit小数部）
     center_note: u16,
     /// ノートオンベロシティ
@@ -235,8 +235,10 @@ impl App {
                 let (id, open) = window::open(window::Settings::default());
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
-                    let window =
+                    let params = self.source_parameter.read().unwrap();
+                    let mut window =
                         SRNWindow::new(id, format!("SRN 0x{:02X}", srn_no), srn_no, source);
+                    window.program = Some(params.get(&srn_no).unwrap().program.clone());
                     self.windows.insert(id, Box::new(window));
                     return open.map(Message::SRNWindowOpened);
                 }
@@ -374,10 +376,15 @@ impl App {
                     self.midi_spc_mute.clone().store(flag, Ordering::Relaxed);
                 }
             }
-            Message::ProgramSelected(srn_no, program) => {
-                let mut params = self.source_parameter.write().unwrap();
-                if let Some(param) = params.get_mut(&srn_no) {
-                    param.program = program as u8;
+            Message::ProgramSelected(id, program) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        param.program = program.clone();
+                    }
+                    srn_win.program = Some(program);
                 }
             }
         }
@@ -483,7 +490,7 @@ impl App {
             params.insert(
                 *srn,
                 SourceParameter {
-                    program: 0,
+                    program: Program::AcousticGrand,
                     center_note: 64 << 8,
                     noteon_velocity: 100,
                     pitchbend_width: 12,
@@ -800,7 +807,7 @@ fn apply_source_parameter(
         }
         spc.dsp.write_register(ram, DSP_ADDRESS_SRN_FLAG, flag);
         spc.dsp
-            .write_register(ram, DSP_ADDRESS_SRN_PROGRAM, param.program);
+            .write_register(ram, DSP_ADDRESS_SRN_PROGRAM, param.program.clone() as u8);
         spc.dsp.write_register(
             ram,
             DSP_ADDRESS_SRN_CENTER_NOTE,
@@ -992,7 +999,7 @@ impl SPC2MIDI2Window for MainWindow {
             .iter()
             .map(|(key, info)| {
                 row![
-                    text(format!("{} {}", key, info.start_address)),
+                    text(format!("0x{:2X} {}", key, info.start_address)),
                     button("Configure").on_press(Message::OpenSRNWindow(*key))
                 ]
                 .spacing(10)
@@ -1069,7 +1076,7 @@ impl SPC2MIDI2Window for SRNWindow {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let srn_no = self.srn_no;
+        let window_id = self.window_id;
         let content = column![
             Canvas::new(self).width(Length::Fill).height(200),
             row![
@@ -1088,7 +1095,7 @@ impl SPC2MIDI2Window for SRNWindow {
                 &self.program_box,
                 "Program",
                 self.program.as_ref(),
-                move |program| Message::ProgramSelected(srn_no, program),
+                move |program| Message::ProgramSelected(window_id, program),
             ),
         ]
         .spacing(10)
