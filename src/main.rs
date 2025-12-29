@@ -86,6 +86,8 @@ enum Message {
     CenterNoteSubmitted(window::Id),
     NoteOnVelocityChanged(window::Id, u8),
     NoteOnVelocitySubmitted(window::Id),
+    PitchBendWidthChanged(window::Id, u8),
+    PitchBendWidthSubmitted(window::Id),
 }
 
 trait AsAny {
@@ -156,6 +158,7 @@ struct SRNWindow {
     center_note_int: u8,
     center_note_fraction: f32,
     noteon_velocity: u8,
+    pitchbend_width: u8,
 }
 
 struct App {
@@ -437,6 +440,23 @@ impl App {
                     let mut params = self.source_parameter.write().unwrap();
                     if let Some(param) = params.get_mut(&srn_win.srn_no) {
                         param.noteon_velocity = srn_win.noteon_velocity;
+                    }
+                }
+            }
+            Message::PitchBendWidthChanged(id, width) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    srn_win.pitchbend_width = width;
+                }
+            }
+            Message::PitchBendWidthSubmitted(id) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        param.pitchbend_width = srn_win.pitchbend_width;
                     }
                 }
             }
@@ -1168,8 +1188,13 @@ impl SPC2MIDI2Window for SRNWindow {
             number_input(&self.noteon_velocity, 0..=127, move |velocity| {
                 Message::NoteOnVelocityChanged(window_id, velocity)
             },)
-                .on_submit(Message::NoteOnVelocitySubmitted(window_id))
-                    .step(1),
+            .on_submit(Message::NoteOnVelocitySubmitted(window_id))
+            .step(1),
+            number_input(&self.pitchbend_width, 1..=48, move |width| {
+                Message::PitchBendWidthChanged(window_id, width)
+            },)
+            .on_submit(Message::PitchBendWidthSubmitted(window_id))
+            .step(1),
         ]
         .spacing(10)
         .padding(10)
@@ -1200,6 +1225,7 @@ impl SRNWindow {
             center_note_int: (source_parameter.center_note >> 8) as u8,
             center_note_fraction: ((source_parameter.center_note & 0xFF) as f32) / 256.0,
             noteon_velocity: source_parameter.noteon_velocity,
+            pitchbend_width: source_parameter.pitchbend_width,
         }
     }
 }
