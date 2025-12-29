@@ -36,6 +36,8 @@ use spc700::spc::*;
 use spc700::spc_file::*;
 use spc700::types::*;
 
+/// タイトル文字列
+const SPC2MIDI2_TITLE_STR: &'static str = "spc2midi-tsuu";
 /// SPCの出力サンプリングレート
 const SPC_SAMPLING_RATE: u32 = 32000;
 /// PCM正規化定数
@@ -138,7 +140,7 @@ impl Default for App {
         let device = host
             .default_output_device()
             .expect("no output device available");
-        let midi_out = MidiOutput::new("spc2midi-tsuu").unwrap();
+        let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
 
         Self {
             theme: iced::Theme::Nord,
@@ -179,7 +181,7 @@ impl App {
             Message::OpenMainWindow => {
                 let (id, open) = window::open(window::Settings::default());
                 let window =
-                    MainWindow::new("spc2midi-tsuu".to_string(), self.source_infos.clone());
+                    MainWindow::new(SPC2MIDI2_TITLE_STR.to_string(), self.source_infos.clone());
                 self.main_window_id = id;
                 self.windows.insert(id, Box::new(window));
                 return open.map(Message::MainWindowOpened);
@@ -233,6 +235,16 @@ impl App {
                             &spc_file.ram,
                             &spc_file.dsp_register,
                         )))));
+                        // ウィンドウタイトルに開いたファイル名を追記
+                        if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                            let main_window: &mut MainWindow =
+                                window.as_mut().as_any_mut().downcast_mut().unwrap();
+                            main_window.title = format!(
+                                "{} - {}",
+                                SPC2MIDI2_TITLE_STR,
+                                path.file_name().unwrap().to_str().unwrap()
+                            );
+                        }
                     }
                 }
                 Err(e) => {
@@ -255,7 +267,7 @@ impl App {
                 } else {
                     // 新規再生処理
                     if let Err(_) = self.srn_play_start(srn_no, loop_flag) {
-                        eprintln!("[spc2midi-tsuu] Faild to start playback");
+                        eprintln!("[{}] Faild to start playback", SPC2MIDI2_TITLE_STR);
                     }
                 }
             }
@@ -274,7 +286,7 @@ impl App {
                 } else {
                     // 再生開始
                     if let Err(_) = self.play_start() {
-                        eprintln!("[spc2midi-tsuu] Faild to start playback");
+                        eprintln!("[{}] Faild to start playback", SPC2MIDI2_TITLE_STR);
                     }
                 }
             }
@@ -440,9 +452,9 @@ impl App {
         );
 
         // FIXME: MIDI出力ポートの作成。出力MIDIデバイスを選べるべき
-        let midi_out = MidiOutput::new("spc2midi-tsuu").unwrap();
+        let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
         let out_ports = midi_out.ports();
-        let mut conn_out = midi_out.connect(&out_ports[0], "spc2midi-tsuu").unwrap();
+        let mut conn_out = midi_out.connect(&out_ports[0], SPC2MIDI2_TITLE_STR).unwrap();
 
         // 各SPCのミュートフラグ取得
         let pcm_spc_mute = self.pcm_spc_mute.clone();
@@ -508,7 +520,7 @@ impl App {
                     }
                 }
             },
-            |err| eprintln!("[spc2midi-tsuu] {err}"),
+            |err| eprintln!("[{}] {err}", SPC2MIDI2_TITLE_STR),
             None,
         ) {
             Ok(stream) => stream,
@@ -586,7 +598,7 @@ impl App {
                     }
                 }
             },
-            |err| eprintln!("[spc2midi-tsuu] {err}"),
+            |err| eprintln!("[{}] {err}", SPC2MIDI2_TITLE_STR),
             None,
         ) {
             Ok(stream) => stream,
