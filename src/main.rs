@@ -999,7 +999,7 @@ impl SPC2MIDI2Window for MainWindow {
             .iter()
             .map(|(key, info)| {
                 row![
-                    text(format!("0x{:2X} {}", key, info.start_address)),
+                    text(format!("0x{:02X} {}", key, info.start_address)),
                     button("Configure").on_press(Message::OpenSRNWindow(*key))
                 ]
                 .spacing(10)
