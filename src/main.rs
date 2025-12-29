@@ -92,10 +92,33 @@ trait SPC2MIDI2Window: AsAny {
 /// 音源情報
 #[derive(Debug, Clone)]
 struct SourceInformation {
+    /// デコードした信号
     signal: Vec<f32>,
+    /// 開始アドレス
     start_address: usize,
+    /// 終端アドレス
     end_address: usize,
+    /// ループ開始サンプル
     loop_start_sample: usize,
+}
+
+/// 1音源のパラメータ
+#[derive(Debug, Clone)]
+struct SourceParameter {
+    /// プログラム番号
+    program: u8,
+    /// 基準ノート（8bit整数・8bit小数部）
+    center_note: u16,
+    /// ノートオンベロシティ
+    noteon_velocity: u8,
+    /// ピッチベンド幅（半音単位）
+    pitchbend_width: u8,
+    /// エンベロープをエクスプレッションとして出力するか
+    envelope_as_expression: bool,
+    /// ボリューム・パンを発音中に更新するか
+    update_volume_pan: bool,
+    /// ピッチベンドを使うか
+    enable_pitch_bend: bool,
 }
 
 #[derive(Debug)]
@@ -127,6 +150,7 @@ struct App {
     windows: BTreeMap<window::Id, Box<dyn SPC2MIDI2Window>>,
     spc_file: Option<Box<SPCFile>>,
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
+    source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     stream_device: Device,
     stream_config: StreamConfig,
     stream: Option<Stream>,
@@ -152,6 +176,7 @@ impl Default for App {
             windows: BTreeMap::new(),
             spc_file: None,
             source_infos: Arc::new(RwLock::new(BTreeMap::new())),
+            source_parameter: Arc::new(RwLock::new(BTreeMap::new())),
             stream_config: device.default_output_config().unwrap().into(),
             stream_device: device,
             stream: None,
@@ -376,9 +401,11 @@ impl App {
     ) {
         let analyze_duration_64khz_tick = analyze_duration_sec * 64000;
 
-        // リストを作り直す
+        // 音源情報を作り直す
         let mut infos = self.source_infos.write().unwrap();
         *infos = BTreeMap::new();
+        let mut params = self.source_parameter.write().unwrap();
+        *params = BTreeMap::new();
 
         // 一定期間シミュレートし、サンプルソース番号とそれに紐づく開始アドレスを取得
         let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> =
@@ -441,6 +468,18 @@ impl App {
                     loop_start_sample: ((loop_address - start_address) * 16) / 9,
                 },
             );
+            params.insert(
+                *srn,
+                SourceParameter {
+                    program: 0,
+                    center_note: 64 << 8,
+                    noteon_velocity: 100,
+                    pitchbend_width: 12,
+                    envelope_as_expression: true,
+                    update_volume_pan: true,
+                    enable_pitch_bend: true,
+                },
+            );
         }
     }
 
@@ -467,7 +506,47 @@ impl App {
                 &spc_file.dsp_register,
             );
 
-            // TODO: ここで編集済みのパラメータを設定
+            // 編集済みのパラメータを設定
+            spc.dsp.write_register(&spc_file.ram, DSP_ADDRESS_PLAYBACK_PARAMETER_UPDATE_PERIOD, 10); // TODO: どこかで設定
+            let params = self.source_parameter.read().unwrap();
+            for (srn_no, param) in params.iter() {
+                spc.dsp
+                    .write_register(&spc_file.ram, DSP_ADDRESS_SRN_TARGET, *srn_no);
+                let mut flag = 0;
+                if param.envelope_as_expression {
+                    flag |= 0x80;
+                }
+                if param.update_volume_pan {
+                    flag |= 0x40;
+                }
+                if param.enable_pitch_bend {
+                    flag |= 0x20;
+                }
+                spc.dsp
+                    .write_register(&spc_file.ram, DSP_ADDRESS_SRN_FLAG, flag);
+                spc.dsp
+                    .write_register(&spc_file.ram, DSP_ADDRESS_SRN_PROGRAM, param.program);
+                spc.dsp.write_register(
+                    &spc_file.ram,
+                    DSP_ADDRESS_SRN_CENTER_NOTE,
+                    (param.center_note >> 8) as u8,
+                );
+                spc.dsp.write_register(
+                    &spc_file.ram,
+                    DSP_ADDRESS_SRN_CENTER_NOTE_FRACTION,
+                    (param.center_note & 0xFF) as u8,
+                );
+                spc.dsp.write_register(
+                    &spc_file.ram,
+                    DSP_ADDRESS_SRN_NOTEON_VELOCITY,
+                    param.noteon_velocity,
+                );
+                spc.dsp.write_register(
+                    &spc_file.ram,
+                    DSP_ADDRESS_SRN_PITCHBEND_SENSITIVITY,
+                    param.pitchbend_width,
+                );
+            }
 
             let mut cycle_count = 0;
             let mut total_elapsed_time_nanosec = 0;
