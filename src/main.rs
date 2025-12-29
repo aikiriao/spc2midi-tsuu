@@ -659,26 +659,37 @@ impl App {
         let stream = match self.stream_device.build_output_stream(
             &self.stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                let progress = played_samples.load(Ordering::Relaxed);
+                let mut progress = played_samples.load(Ordering::Relaxed);
                 // 一旦バッファを無音で埋める
                 buffer.fill(0.0);
-                if progress < output.len() {
-                    // バッファにコピー
-                    let num_copy_samples = cmp::min(output.len() - progress, buffer.len());
-                    buffer[..num_copy_samples]
-                        .copy_from_slice(&output[progress..progress + num_copy_samples]);
-                    // 再生サンプル増加
-                    played_samples.store(progress + num_copy_samples, Ordering::Relaxed);
-                } else {
-                    // 端点に来た時の処理
+                // バッファにコピー
+                let num_copy_samples = cmp::min(output.len() - progress, buffer.len());
+                buffer[..num_copy_samples]
+                    .copy_from_slice(&output[progress..progress + num_copy_samples]);
+                progress += num_copy_samples;
+                // 端点に来た時の処理
+                if progress >= output.len() {
                     if loop_flag {
-                        // ループ点から再開
-                        played_samples.store(loop_start_sample, Ordering::Relaxed);
+                        // ループしながらバッファがいっぱいになるまでコピー
+                        let mut buffer_pos = num_copy_samples;
+                        progress = loop_start_sample;
+                        while buffer_pos < buffer.len() {
+                            let num_copy_samples = cmp::min(output.len() - progress, buffer.len() - buffer_pos);
+                            buffer[buffer_pos..(buffer_pos + num_copy_samples)]
+                                .copy_from_slice(&output[progress..(progress + num_copy_samples)]);
+                            buffer_pos += num_copy_samples;
+                            progress += num_copy_samples;
+                            if progress >= output.len() {
+                                progress = loop_start_sample;
+                            }
+                        }
                     } else {
                         // 再生終了
                         is_playing.store(false, Ordering::Relaxed);
                     }
                 }
+                // 再生サンプル増加
+                played_samples.store(progress, Ordering::Relaxed);
             },
             |err| eprintln!("[{}] {err}", SPC2MIDI2_TITLE_STR),
             None,
