@@ -753,7 +753,8 @@ impl App {
                         let mut buffer_pos = num_copy_samples;
                         progress = loop_start_sample;
                         while buffer_pos < buffer.len() {
-                            let num_copy_samples = cmp::min(output.len() - progress, buffer.len() - buffer_pos);
+                            let num_copy_samples =
+                                cmp::min(output.len() - progress, buffer.len() - buffer_pos);
                             buffer[buffer_pos..(buffer_pos + num_copy_samples)]
                                 .copy_from_slice(&output[progress..(progress + num_copy_samples)]);
                             buffer_pos += num_copy_samples;
