@@ -42,8 +42,10 @@ const SPC2MIDI2_TITLE_STR: &'static str = "spc2midi-tsuu";
 const SPC_SAMPLING_RATE: u32 = 32000;
 /// PCM正規化定数
 const PCM_NORMALIZE_CONST: f32 = 1.0 / 32768.0;
-/// SPCの64kHzにおけるクロックティックカウント
+/// 64KHz周期のクロックサイクル SPCのクロック(1.024MHz)を64KHzで割って得られる = 1024000 / 64000
 const CLOCK_TICK_CYCLE_64KHZ: u32 = 16;
+/// 64kHz間隔に相当するナノ秒
+const CLOCK_TICK_CYCLE_64KHZ_NANOSEC: u64 = 15625;
 
 pub fn main() -> iced::Result {
     iced::daemon(App::new, App::update, App::view)
@@ -65,6 +67,8 @@ enum Message {
     WindowClosed(window::Id),
     OpenFile,
     FileOpened(Result<(PathBuf, Vec<u8>), Error>),
+    SaveSMF,
+    SMFSaved(Result<(), Error>),
     MenuSelected,
     EventOccurred(iced::Event),
     ReceivedSRNPlayStartRequest(u8, bool),
@@ -213,6 +217,10 @@ impl App {
                 }
             }
             Message::OpenFile => {
+                // 再生中の場合は止める
+                if self.stream_is_playing.load(Ordering::Relaxed) {
+                    self.stream_play_stop().expect("Failed to stop play");
+                }
                 return Task::perform(open_file(), Message::FileOpened);
             }
             Message::FileOpened(result) => match result {
@@ -251,6 +259,12 @@ impl App {
                     eprintln!("ERROR: failed to open wav file: {:?}", e);
                 }
             },
+            Message::SaveSMF => {
+                if let Some(smf) = self.create_smf() {
+                    return Task::perform(save_smf(smf), Message::SMFSaved);
+                }
+            }
+            Message::SMFSaved(result) => {}
             Message::MenuSelected => {}
             Message::EventOccurred(event) => match event {
                 iced::event::Event::Window(event) => {
@@ -367,27 +381,27 @@ impl App {
         *infos = BTreeMap::new();
 
         // 一定期間シミュレートし、サンプルソース番号とそれに紐づく開始アドレスを取得
-        let mut emu: spc700::spc::SPC<spc700::mididsp::MIDIDSP> =
+        let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> =
             SPC::new(&register, ram, dsp_register);
         let mut cycle_count = 0;
         let mut tick64khz_count = 0;
         let mut start_address_map = BTreeMap::new();
         while tick64khz_count < analyze_duration_64khz_tick {
-            cycle_count += emu.execute_step() as u32;
+            cycle_count += spc.execute_step() as u32;
             if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
-                emu.clock_tick_64k_hz();
+                spc.clock_tick_64k_hz();
                 cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
                 tick64khz_count += 1;
             }
             // キーオンが打たれていた時のサンプル番号を取得
-            let keyon = emu.dsp.read_register(ram, DSP_ADDRESS_KON);
+            let keyon = spc.dsp.read_register(ram, DSP_ADDRESS_KON);
             if keyon != 0 {
                 let brr_dir_base_address =
-                    (emu.dsp.read_register(ram, DSP_ADDRESS_DIR) as u16) << 8;
+                    (spc.dsp.read_register(ram, DSP_ADDRESS_DIR) as u16) << 8;
                 for ch in 0..8 {
                     if (keyon >> ch) & 1 != 0 {
                         let sample_source =
-                            emu.dsp.read_register(ram, (ch << 4) | DSP_ADDRESS_V0SRCN);
+                            spc.dsp.read_register(ram, (ch << 4) | DSP_ADDRESS_V0SRCN);
                         let dir_address =
                             (brr_dir_base_address + 4 * (sample_source as u16)) as usize;
                         start_address_map.insert(sample_source, dir_address);
@@ -430,6 +444,72 @@ impl App {
         }
     }
 
+    // SMFを作成
+    fn create_smf(&self) -> Option<SMF> {
+        if let Some(spc_file) = &self.spc_file {
+            const MIDI_BPM: u64 = 120; // TODO: ユーザが設定
+            const MIDI_DIVISIONS: u64 = 3200; // TODO: ユーザが設定
+
+            let mut smf = SMF {
+                format: SMFFormat::Single,
+                tracks: vec![Track {
+                    copyright: Some("tmp".to_string()), // TODO: SPCから出す or ユーザが設定した時間出力
+                    name: Some("tmp".to_string()), // TODO: SPCから出す or ユーザが設定した時間出力
+                    events: Vec::new(),
+                }],
+                division: MIDI_DIVISIONS as i16,
+            };
+
+            // SPCの作成
+            let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new(
+                &spc_file.header.spc_register,
+                &spc_file.ram,
+                &spc_file.dsp_register,
+            );
+
+            // TODO: ここで編集済みのパラメータを設定
+
+            let mut cycle_count = 0;
+            let mut total_elapsed_time_nanosec = 0;
+            let mut previous_event_time = 0.0;
+
+            // 60秒出力する TODO: SPCから読み取った時間 or ユーザが設定した時間出力
+            while total_elapsed_time_nanosec < 60 * 1000_000_000 {
+                // 64kHzタイマーティックするまで処理
+                while cycle_count < CLOCK_TICK_CYCLE_64KHZ {
+                    cycle_count += spc.execute_step() as u32;
+                }
+                cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                // MIDI出力
+                if let Some(out) = spc.clock_tick_64k_hz() {
+                    // 経過時間からティック数を計算
+                    let delta_nano_time = total_elapsed_time_nanosec as f64 - previous_event_time;
+                    let ticks = (delta_nano_time * (MIDI_BPM * MIDI_DIVISIONS) as f64)
+                        / (60.0 * 1000_000_000.0);
+                    // ティック数は切り捨てる（切り上げると経過時間が未来になって経過時間が負になりうる）
+                    for i in 0..out.num_messages {
+                        let msg = out.messages[i];
+                        smf.tracks[0].events.push(TrackEvent {
+                            vtime: if i == 0 { ticks.floor() as u64 } else { 0 },
+                            event: MidiEvent::Midi(MidiMessage {
+                                data: msg.data[..msg.length].to_vec(),
+                            }),
+                        });
+                    }
+                    // 実際のtickから経過時間計算
+                    previous_event_time += (ticks.floor() * 60.0 * 1000_000_000.0)
+                        / ((MIDI_DIVISIONS * MIDI_BPM) as f64);
+                }
+                // 時間を進める
+                total_elapsed_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
+            }
+
+            Some(smf)
+        } else {
+            None
+        }
+    }
+
     // 再生開始
     fn play_start(&mut self) -> Result<(), PlayStreamError> {
         const NUM_CHANNELS: usize = 2;
@@ -454,7 +534,9 @@ impl App {
         // FIXME: MIDI出力ポートの作成。出力MIDIデバイスを選べるべき
         let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
         let out_ports = midi_out.ports();
-        let mut conn_out = midi_out.connect(&out_ports[0], SPC2MIDI2_TITLE_STR).unwrap();
+        let mut conn_out = midi_out
+            .connect(&out_ports[0], SPC2MIDI2_TITLE_STR)
+            .unwrap();
 
         // 各SPCのミュートフラグ取得
         let pcm_spc_mute = self.pcm_spc_mute.clone();
@@ -661,6 +743,22 @@ async fn load_file(path: impl Into<PathBuf>) -> Result<(PathBuf, Vec<u8>), Error
     return Err(Error::IoError(io::ErrorKind::Unsupported));
 }
 
+async fn save_smf(smf: SMF) -> Result<(), Error> {
+    let picked_file = AsyncFileDialog::new()
+        .set_file_name("output.mid")
+        .set_title("Save to a MIDI file...")
+        .add_filter("SMF", &["mid", "midi", "MID"])
+        .save_file()
+        .await
+        .ok_or(Error::DialogClosed)?;
+
+    let writer = SMFWriter::from_smf(smf);
+    match writer.write_to_file(picked_file.path()) {
+        Ok(()) => Ok(()),
+        _ => Err(Error::DialogClosed),
+    }
+}
+
 fn menu_button<'a>(
     content: impl Into<Element<'a, Message>>,
     msg: Message,
@@ -715,6 +813,14 @@ impl SPC2MIDI2Window for MainWindow {
                                 .height(Length::Shrink)
                                 .align_y(alignment::Vertical::Center),
                             Message::OpenFile,
+                        )
+                        .width(Length::Fill)
+                        .height(Length::Shrink)),
+                        (menu_button(
+                            text("Save SMF...")
+                                .height(Length::Shrink)
+                                .align_y(alignment::Vertical::Center),
+                            Message::SaveSMF,
                         )
                         .width(Length::Fill)
                         .height(Length::Shrink)),
