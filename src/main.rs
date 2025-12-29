@@ -641,7 +641,7 @@ impl App {
             SPC_SAMPLING_RATE,
             self.stream_config.sample_rate,
             1,
-            ConverterType::SincFastest,
+            ConverterType::SincBestQuality,
             &source.signal,
         )
         .unwrap();
