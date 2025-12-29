@@ -955,7 +955,7 @@ impl SPC2MIDI2Window for SRNWindow {
         let content = column![
             Canvas::new(self).width(Length::Fill).height(200),
             row![
-                button("play / pause").on_press(Message::ReceivedSRNPlayStartRequest(
+                button("Play / Pause").on_press(Message::ReceivedSRNPlayStartRequest(
                     self.srn_no,
                     self.enable_loop_play
                 )),
@@ -1010,6 +1010,14 @@ impl canvas::Program<Message> for SRNWindow {
                 frame,
                 &Rectangle::new(Point::new(0.0, 0.0), Size::new(bounds.width, bounds.height)),
                 &self.source_info.signal,
+                false,
+            );
+            // ループポイント描画
+            draw_loop_point(
+                frame,
+                &Rectangle::new(Point::new(0.0, 0.0), Size::new(bounds.width, bounds.height)),
+                self.source_info.signal.len(),
+                self.source_info.loop_start_sample,
             );
         });
         vec![geometry]
@@ -1049,7 +1057,7 @@ where
 }
 
 /// 波形描画
-fn draw_waveform(frame: &mut Frame, bounds: &Rectangle, pcm: &[f32]) {
+fn draw_waveform(frame: &mut Frame, bounds: &Rectangle, pcm: &[f32], amplitude_normalize: bool) {
     let center = bounds.center();
     let half_height = bounds.height / 2.0;
     let center_left = Point::new(center.x - bounds.width / 2.0, center.y);
@@ -1058,13 +1066,17 @@ fn draw_waveform(frame: &mut Frame, bounds: &Rectangle, pcm: &[f32]) {
     let sample_stride = pcm.len() as f32 / num_points_to_draw as f32;
     let x_offset_delta = bounds.width / num_points_to_draw as f32;
 
-    // 描画する波形を拡大するため最大絶対値を計算
-    let max_abs_pcm = pcm
-        .iter()
-        .max_by(|a, b| a.abs().total_cmp(&b.abs()))
-        .unwrap()
-        .abs();
-    let pcm_normalizer = half_height / max_abs_pcm;
+    // 拡大が有効な場合描画する波形を拡大するため最大絶対値を計算
+    let pcm_normalizer = if amplitude_normalize {
+        let max_abs_pcm = pcm
+            .iter()
+            .max_by(|a, b| a.abs().total_cmp(&b.abs()))
+            .unwrap()
+            .abs();
+        half_height / max_abs_pcm
+    } else {
+        half_height
+    };
 
     // 背景を塗りつぶす
     frame.fill_rectangle(
@@ -1132,4 +1144,32 @@ fn draw_waveform(frame: &mut Frame, bounds: &Rectangle, pcm: &[f32]) {
             prev_sample = current_sample;
         }
     }
+}
+
+/// ループポイント描画
+fn draw_loop_point(
+    frame: &mut Frame,
+    bounds: &Rectangle,
+    num_samples: usize,
+    loop_start_sample: usize,
+) {
+    let line_color = Color::from_rgb8(200, 200, 200);
+    let path = Path::new(|b| {
+        b.move_to(Point::new(
+            (bounds.width * loop_start_sample as f32) / num_samples as f32,
+            0.0,
+        ));
+        b.line_to(Point::new(
+            (bounds.width * loop_start_sample as f32) / num_samples as f32,
+            bounds.height,
+        ));
+    });
+    frame.stroke(
+        &path,
+        Stroke {
+            style: stroke::Style::Solid(line_color),
+            width: 1.5,
+            ..Stroke::default()
+        },
+    );
 }
