@@ -1,3 +1,6 @@
+mod program;
+
+use crate::program::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, PauseStreamError, PlayStreamError, Stream, StreamConfig};
 use fixed_resample::ReadStatus;
@@ -5,9 +8,9 @@ use iced::border::Radius;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{
-    button, center, center_x, checkbox, column, container, operation, pick_list, row, scrollable,
-    slider, space, stack, text, text_input, toggler, tooltip, vertical_slider, Column, Space,
-    Stack,
+    button, center, center_x, checkbox, column, combo_box, container, operation, pick_list, row,
+    scrollable, slider, space, stack, text, text_input, toggler, tooltip, vertical_slider, Column,
+    Space, Stack,
 };
 use iced::{
     alignment, event, mouse, theme, window, Border, Color, Element, Function, Length, Padding,
@@ -77,6 +80,7 @@ enum Message {
     ReceivedPlayStopRequest,
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
+    ProgramSelected(u8, Program),
 }
 
 trait AsAny {
@@ -142,6 +146,8 @@ struct SRNWindow {
     source_info: Arc<SourceInformation>,
     enable_loop_play: bool,
     cache: Cache,
+    program: Option<Program>,
+    program_box: combo_box::State<Program>,
 }
 
 struct App {
@@ -366,6 +372,12 @@ impl App {
                     main_window.midi_spc_mute = flag;
                     // フラグ書き換え
                     self.midi_spc_mute.clone().store(flag, Ordering::Relaxed);
+                }
+            }
+            Message::ProgramSelected(srn_no, program) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.program = program as u8;
                 }
             }
         }
@@ -1057,6 +1069,7 @@ impl SPC2MIDI2Window for SRNWindow {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        let srn_no = self.srn_no;
         let content = column![
             Canvas::new(self).width(Length::Fill).height(200),
             row![
@@ -1070,7 +1083,13 @@ impl SPC2MIDI2Window for SRNWindow {
             ]
             .spacing(10)
             .width(Length::Fill)
-            .align_y(alignment::Alignment::Center)
+            .align_y(alignment::Alignment::Center),
+            combo_box(
+                &self.program_box,
+                "Program",
+                self.program.as_ref(),
+                move |program| Message::ProgramSelected(srn_no, program),
+            ),
         ]
         .spacing(10)
         .padding(10)
@@ -1087,6 +1106,7 @@ impl SRNWindow {
         srn_no: u8,
         source_info: &SourceInformation,
     ) -> Self {
+        // FIXME: すでに設定済みのパラメータから設定
         Self {
             window_id: window_id,
             title: title,
@@ -1094,6 +1114,8 @@ impl SRNWindow {
             source_info: source_info.clone().into(),
             enable_loop_play: false,
             cache: Cache::default(),
+            program: Some(Program::AcousticGrand),
+            program_box: combo_box::State::new(Program::ALL.to_vec()),
         }
     }
 }
