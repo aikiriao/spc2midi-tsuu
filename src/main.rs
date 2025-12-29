@@ -236,9 +236,9 @@ impl App {
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
                     let params = self.source_parameter.read().unwrap();
-                    let mut window =
-                        SRNWindow::new(id, format!("SRN 0x{:02X}", srn_no), srn_no, source);
-                    window.program = Some(params.get(&srn_no).unwrap().program.clone());
+                    let param = params.get(&srn_no).unwrap();
+                    let window =
+                        SRNWindow::new(id, format!("SRN 0x{:02X}", srn_no), srn_no, source, param);
                     self.windows.insert(id, Box::new(window));
                     return open.map(Message::SRNWindowOpened);
                 }
@@ -1112,6 +1112,7 @@ impl SRNWindow {
         title: String,
         srn_no: u8,
         source_info: &SourceInformation,
+        source_parameter: &SourceParameter,
     ) -> Self {
         // FIXME: すでに設定済みのパラメータから設定
         Self {
@@ -1121,7 +1122,7 @@ impl SRNWindow {
             source_info: source_info.clone().into(),
             enable_loop_play: false,
             cache: Cache::default(),
-            program: Some(Program::AcousticGrand),
+            program: Some(source_parameter.program.clone()),
             program_box: combo_box::State::new(Program::ALL.to_vec()),
         }
     }
