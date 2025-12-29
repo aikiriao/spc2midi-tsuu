@@ -84,6 +84,8 @@ enum Message {
     CenterNoteIntChanged(window::Id, u8),
     CenterNoteFractionChanged(window::Id, f32),
     CenterNoteSubmitted(window::Id),
+    NoteOnVelocityChanged(window::Id, u8),
+    NoteOnVelocitySubmitted(window::Id),
 }
 
 trait AsAny {
@@ -153,6 +155,7 @@ struct SRNWindow {
     program_box: combo_box::State<Program>,
     center_note_int: u8,
     center_note_fraction: f32,
+    noteon_velocity: u8,
 }
 
 struct App {
@@ -417,6 +420,23 @@ impl App {
                             f32::round(srn_win.center_note_fraction * 256.0).clamp(0.0, 255.0);
                         param.center_note =
                             ((srn_win.center_note_int as u16) << 8) | (fraction as u16);
+                    }
+                }
+            }
+            Message::NoteOnVelocityChanged(id, velocity) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    srn_win.noteon_velocity = velocity;
+                }
+            }
+            Message::NoteOnVelocitySubmitted(id) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        param.noteon_velocity = srn_win.noteon_velocity;
                     }
                 }
             }
@@ -1145,6 +1165,11 @@ impl SPC2MIDI2Window for SRNWindow {
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
+            number_input(&self.noteon_velocity, 0..=127, move |velocity| {
+                Message::NoteOnVelocityChanged(window_id, velocity)
+            },)
+                .on_submit(Message::NoteOnVelocitySubmitted(window_id))
+                    .step(1),
         ]
         .spacing(10)
         .padding(10)
@@ -1174,6 +1199,7 @@ impl SRNWindow {
             program_box: combo_box::State::new(Program::ALL.to_vec()),
             center_note_int: (source_parameter.center_note >> 8) as u8,
             center_note_fraction: ((source_parameter.center_note & 0xFF) as f32) / 256.0,
+            noteon_velocity: source_parameter.noteon_velocity,
         }
     }
 }
