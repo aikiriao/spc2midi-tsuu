@@ -18,7 +18,7 @@ use iced::{
 };
 use iced_aw::menu::{self, Item, Menu};
 use iced_aw::style::{menu_bar::primary, Status};
-use iced_aw::{iced_aw_font, menu_bar, menu_items, ICED_AW_FONT_BYTES};
+use iced_aw::{iced_aw_font, menu_bar, menu_items, number_input, ICED_AW_FONT_BYTES};
 use iced_aw::{quad, widgets::InnerBounds};
 use midir::{MidiOutput, MidiOutputPort};
 use rfd::AsyncFileDialog;
@@ -81,6 +81,9 @@ enum Message {
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
     ProgramSelected(window::Id, Program),
+    CenterNoteIntChanged(window::Id, u8),
+    CenterNoteFractionChanged(window::Id, f32),
+    CenterNoteSubmitted(window::Id),
 }
 
 trait AsAny {
@@ -148,6 +151,8 @@ struct SRNWindow {
     cache: Cache,
     program: Option<Program>,
     program_box: combo_box::State<Program>,
+    center_note_int: u8,
+    center_note_fraction: f32,
 }
 
 struct App {
@@ -385,6 +390,34 @@ impl App {
                         param.program = program.clone();
                     }
                     srn_win.program = Some(program);
+                }
+            }
+            Message::CenterNoteIntChanged(id, note) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    srn_win.center_note_int = note;
+                }
+            }
+            Message::CenterNoteFractionChanged(id, fraction) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    srn_win.center_note_fraction =
+                        (f32::round(fraction * 256.0) / 256.0).clamp(0.0, 1.0);
+                }
+            }
+            Message::CenterNoteSubmitted(id) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        let fraction =
+                            f32::round(srn_win.center_note_fraction * 256.0).clamp(0.0, 255.0);
+                        param.center_note =
+                            ((srn_win.center_note_int as u16) << 8) | (fraction as u16);
+                    }
                 }
             }
         }
@@ -1097,6 +1130,21 @@ impl SPC2MIDI2Window for SRNWindow {
                 self.program.as_ref(),
                 move |program| Message::ProgramSelected(window_id, program),
             ),
+            row![
+                number_input(&self.center_note_int, 0..=127, move |note| {
+                    Message::CenterNoteIntChanged(window_id, note)
+                },)
+                .on_submit(Message::CenterNoteSubmitted(window_id))
+                .step(1),
+                number_input(&self.center_note_fraction, 0.0..=1.0, move |fraction| {
+                    Message::CenterNoteFractionChanged(window_id, fraction)
+                },)
+                .on_submit(Message::CenterNoteSubmitted(window_id))
+                .step(1.0 / 256.0),
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center),
         ]
         .spacing(10)
         .padding(10)
@@ -1124,6 +1172,8 @@ impl SRNWindow {
             cache: Cache::default(),
             program: Some(source_parameter.program.clone()),
             program_box: combo_box::State::new(Program::ALL.to_vec()),
+            center_note_int: (source_parameter.center_note >> 8) as u8,
+            center_note_fraction: ((source_parameter.center_note & 0xFF) as f32) / 256.0,
         }
     }
 }
