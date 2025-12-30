@@ -587,11 +587,9 @@ impl App {
             loop {
                 let pcm = decoder.process(ram, 0x1000) as f32;
                 signal.push(pcm * PCM_NORMALIZE_CONST);
+                // 最後のブロックはデコードしない（ループを繋ぐため）
                 if decoder.end {
-                    last_block_sample += 1;
-                    if last_block_sample >= 16 {
-                        break;
-                    }
+                    break;
                 }
             }
             // データ追記
@@ -842,6 +840,8 @@ impl App {
                 output[ch as usize + num_channels * smpl] = resampled_pcm[smpl];
             }
         }
+        // ループ開始位置は出力サンプル数で上限をかける
+        let loop_start_progress = cmp::min(num_channels * loop_start_sample, output.len() - 1);
 
         // 再生ストリーム作成
         let stream = match self.stream_device.build_output_stream(
@@ -853,14 +853,14 @@ impl App {
                 // バッファにコピー
                 let num_copy_samples = cmp::min(output.len() - progress, buffer.len());
                 buffer[..num_copy_samples]
-                    .copy_from_slice(&output[progress..progress + num_copy_samples]);
+                    .copy_from_slice(&output[progress..(progress + num_copy_samples)]);
                 progress += num_copy_samples;
                 // 端点に来た時の処理
                 if progress >= output.len() {
                     if loop_flag {
                         // ループしながらバッファがいっぱいになるまでコピー
                         let mut buffer_pos = num_copy_samples;
-                        progress = loop_start_sample;
+                        progress = loop_start_progress;
                         while buffer_pos < buffer.len() {
                             let num_copy_samples =
                                 cmp::min(output.len() - progress, buffer.len() - buffer_pos);
@@ -869,7 +869,7 @@ impl App {
                             buffer_pos += num_copy_samples;
                             progress += num_copy_samples;
                             if progress >= output.len() {
-                                progress = loop_start_sample;
+                                progress = loop_start_progress;
                             }
                         }
                     } else {
