@@ -231,7 +231,10 @@ impl App {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::OpenMainWindow => {
-                let (id, open) = window::open(window::Settings::default());
+                let (id, open) = window::open(window::Settings {
+                    size: iced::Size::new(500.0, 600.0),
+                    ..Default::default()
+                });
                 let window =
                     MainWindow::new(SPC2MIDI2_TITLE_STR.to_string(), self.source_infos.clone());
                 self.main_window_id = id;
@@ -240,7 +243,10 @@ impl App {
             }
             Message::MainWindowOpened(id) => {}
             Message::OpenPreferenceWindow => {
-                let (id, open) = window::open(window::Settings::default());
+                let (id, open) = window::open(window::Settings {
+                    size: iced::Size::new(500.0, 500.0),
+                    ..Default::default()
+                });
                 self.windows.insert(
                     id,
                     Box::new(PreferenceWindow::new("Preference".to_string())),
@@ -249,7 +255,10 @@ impl App {
             }
             Message::PreferenceWindowOpened(id) => {}
             Message::OpenSRNWindow(srn_no) => {
-                let (id, open) = window::open(window::Settings::default());
+                let (id, open) = window::open(window::Settings {
+                    size: iced::Size::new(800.0, 600.0),
+                    ..Default::default()
+                });
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
                     let params = self.source_parameter.read().unwrap();
