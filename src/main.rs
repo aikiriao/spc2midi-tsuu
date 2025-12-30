@@ -89,6 +89,8 @@ enum Message {
     PitchBendWidthChanged(window::Id, u8),
     PitchBendWidthSubmitted(window::Id),
     EnablePitchBendFlagToggled(window::Id, bool),
+    UpdateVolumePanFlagToggled(window::Id, bool),
+    EnvelopeAsExpressionFlagToggled(window::Id, bool),
 }
 
 trait AsAny {
@@ -473,6 +475,28 @@ impl App {
                         param.enable_pitch_bend = flag;
                     }
                     srn_win.enable_pitch_bend = flag;
+                }
+            }
+            Message::UpdateVolumePanFlagToggled(id, flag) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        param.update_volume_pan = flag;
+                    }
+                    srn_win.update_volume_pan = flag;
+                }
+            }
+            Message::EnvelopeAsExpressionFlagToggled(id, flag) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        param.envelope_as_expression = flag;
+                    }
+                    srn_win.envelope_as_expression = flag;
                 }
             }
         }
@@ -1218,6 +1242,12 @@ impl SPC2MIDI2Window for SRNWindow {
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
+            checkbox(self.update_volume_pan)
+                .label("Update Volume & Pan")
+                .on_toggle(|flag| Message::UpdateVolumePanFlagToggled(self.window_id, flag)),
+            checkbox(self.envelope_as_expression)
+                .label("Envelope as Expression")
+                .on_toggle(|flag| Message::EnvelopeAsExpressionFlagToggled(self.window_id, flag)),
         ]
         .spacing(10)
         .padding(10)
