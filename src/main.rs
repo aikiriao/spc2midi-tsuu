@@ -31,6 +31,8 @@ use std::num::NonZero;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::thread;
+use std::time::Duration;
 use std::{cmp, io};
 
 use spc700::decoder::*;
@@ -76,18 +78,17 @@ enum Message {
     EventOccurred(iced::Event),
     ReceivedSRNPlayStartRequest(u8, bool),
     SRNPlayLoopFlagToggled(window::Id, bool),
+    SRNMIDIPreviewFlagToggled(window::Id, bool),
     ReceivedPlayStartRequest,
     ReceivedPlayStopRequest,
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
     ProgramSelected(window::Id, Program),
+    ReceivedMIDIPreviewRequest(u8),
     CenterNoteIntChanged(window::Id, u8),
     CenterNoteFractionChanged(window::Id, f32),
-    CenterNoteSubmitted(window::Id),
     NoteOnVelocityChanged(window::Id, u8),
-    NoteOnVelocitySubmitted(window::Id),
     PitchBendWidthChanged(window::Id, u8),
-    PitchBendWidthSubmitted(window::Id),
     EnablePitchBendFlagToggled(window::Id, bool),
     UpdateVolumePanFlagToggled(window::Id, bool),
     EnvelopeAsExpressionFlagToggled(window::Id, bool),
@@ -155,6 +156,7 @@ struct SRNWindow {
     srn_no: u8,
     source_info: Arc<SourceInformation>,
     enable_loop_play: bool,
+    enable_midi_preview: bool,
     cache: Cache,
     program: Option<Program>,
     program_box: combo_box::State<Program>,
@@ -352,6 +354,13 @@ impl App {
                     srn_win.enable_loop_play = flag;
                 }
             }
+            Message::SRNMIDIPreviewFlagToggled(id, flag) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    srn_win.enable_midi_preview = flag;
+                }
+            }
             Message::ReceivedPlayStartRequest => {
                 if self.stream_is_playing.load(Ordering::Relaxed) {
                     // 再生中の場合は止める
@@ -411,33 +420,41 @@ impl App {
                         param.program = program.clone();
                     }
                     srn_win.program = Some(program);
+                    if srn_win.enable_midi_preview {
+                        let srn_no = srn_win.srn_no;
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedMIDIPreviewRequest(srn_no)
+                        });
+                    }
                 }
             }
             Message::CenterNoteIntChanged(id, note) => {
                 if let Some(window) = self.windows.get_mut(&id) {
                     let srn_win: &mut SRNWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    srn_win.center_note_int = note;
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        srn_win.center_note_int = note;
+                        param.center_note = (param.center_note & 0x00FF) | ((note as u16) << 8);
+                        if srn_win.enable_midi_preview {
+                            let srn_no = srn_win.srn_no;
+                            return Task::perform(async {}, move |_| {
+                                Message::ReceivedMIDIPreviewRequest(srn_no)
+                            });
+                        }
+                    }
                 }
             }
             Message::CenterNoteFractionChanged(id, fraction) => {
                 if let Some(window) = self.windows.get_mut(&id) {
                     let srn_win: &mut SRNWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    srn_win.center_note_fraction =
-                        (f32::round(fraction * 256.0) / 256.0).clamp(0.0, 1.0);
-                }
-            }
-            Message::CenterNoteSubmitted(id) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let mut params = self.source_parameter.write().unwrap();
                     if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        let fraction =
-                            f32::round(srn_win.center_note_fraction * 256.0).clamp(0.0, 255.0);
+                        let clamped_fraction = f32::round(fraction * 256.0).clamp(0.0, 255.0);
+                        srn_win.center_note_fraction = clamped_fraction / 256.0;
                         param.center_note =
-                            ((srn_win.center_note_int as u16) << 8) | (fraction as u16);
+                            (param.center_note & 0xFF00) | (clamped_fraction as u16);
                     }
                 }
             }
@@ -445,16 +462,16 @@ impl App {
                 if let Some(window) = self.windows.get_mut(&id) {
                     let srn_win: &mut SRNWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    srn_win.noteon_velocity = velocity;
-                }
-            }
-            Message::NoteOnVelocitySubmitted(id) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let mut params = self.source_parameter.write().unwrap();
                     if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        srn_win.noteon_velocity = velocity;
                         param.noteon_velocity = srn_win.noteon_velocity;
+                        if srn_win.enable_midi_preview {
+                            let srn_no = srn_win.srn_no;
+                            return Task::perform(async {}, move |_| {
+                                Message::ReceivedMIDIPreviewRequest(srn_no)
+                            });
+                        }
                     }
                 }
             }
@@ -462,15 +479,9 @@ impl App {
                 if let Some(window) = self.windows.get_mut(&id) {
                     let srn_win: &mut SRNWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    srn_win.pitchbend_width = width;
-                }
-            }
-            Message::PitchBendWidthSubmitted(id) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let mut params = self.source_parameter.write().unwrap();
                     if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        srn_win.pitchbend_width = width;
                         param.pitchbend_width = srn_win.pitchbend_width;
                     }
                 }
@@ -507,6 +518,9 @@ impl App {
                     }
                     srn_win.envelope_as_expression = flag;
                 }
+            }
+            Message::ReceivedMIDIPreviewRequest(srn_no) => {
+                self.preview_midi_sound(srn_no);
             }
         }
         Task::none()
@@ -583,7 +597,6 @@ impl App {
             let mut signal = Vec::new();
             decoder.keyon(ram, *dir_address);
             // 原音ピッチで終端までデコード
-            let mut last_block_sample = 0;
             loop {
                 let pcm = decoder.process(ram, 0x1000) as f32;
                 signal.push(pcm * PCM_NORMALIZE_CONST);
@@ -905,6 +918,71 @@ impl App {
         }
         Ok(())
     }
+
+    // MIDI楽器音をプレビュー
+    fn preview_midi_sound(&self, srn_no: u8) {
+        // MIDIメッセージ：ノートオン
+        const MIDIMSG_NOTE_ON: u8 = 0x90;
+        // MIDIメッセージ：ノートオフ
+        const MIDIMSG_NOTE_OFF: u8 = 0x80;
+        // MIDIメッセージ：プログラムチェンジ
+        const MIDIMSG_PROGRAM_CHANGE: u8 = 0xC0;
+        // MIDIをプレビューする際に使用するチャンネル
+        const MIDI_PREVIEW_CHANNEL: u8 = 0;
+        // MIDIをプレビューする時間(msec)
+        const MIDI_PREVIEW_DURATION_MSEC: u64 = 400;
+
+        // 再生時のパラメータ設定
+        let params = self.source_parameter.read().unwrap();
+        let param = params.get(&srn_no).unwrap();
+        let program = param.program.clone() as u8;
+        let velocity = param.noteon_velocity;
+        let note = (param.center_note >> 8) as u8;
+
+        // FIXME: MIDI出力ポートの作成。出力MIDIデバイスを選べるべき
+        let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
+        let out_ports = midi_out.ports();
+        let mut conn_out = match midi_out.connect(&out_ports[0], SPC2MIDI2_TITLE_STR) {
+            Ok(conn) => conn,
+            Err(_) => {
+                eprintln!("[{}] Create MIDI connection failed", SPC2MIDI2_TITLE_STR);
+                return;
+            }
+        };
+
+        // ノートオン
+        if program < 0x80 {
+            conn_out
+                .send(&[MIDIMSG_PROGRAM_CHANGE | MIDI_PREVIEW_CHANNEL, program])
+                .unwrap();
+            conn_out
+                .send(&[MIDIMSG_NOTE_ON | MIDI_PREVIEW_CHANNEL, note, velocity])
+                .unwrap();
+        } else {
+            // ドラム音色
+            conn_out
+                .send(&[MIDIMSG_NOTE_ON | 0x9, program - 0x80, velocity])
+                .unwrap();
+        }
+
+        // プレビュー時間流す
+        thread::sleep(Duration::from_millis(MIDI_PREVIEW_DURATION_MSEC));
+
+        // ノートオフ
+        if program < 0x80 {
+            conn_out
+                .send(&[MIDIMSG_NOTE_OFF | MIDI_PREVIEW_CHANNEL, note, 0])
+                .unwrap();
+        } else {
+            // ドラム音色
+            conn_out
+                .send(&[MIDIMSG_NOTE_OFF | 0x9, program - 0x80, 0])
+                .unwrap();
+        }
+
+        // クローズ
+        conn_out.close();
+    }
 }
 
 /// 音源パラメータをDSPに適用
@@ -1208,6 +1286,9 @@ impl SPC2MIDI2Window for SRNWindow {
                 checkbox(self.enable_loop_play)
                     .label("Loop")
                     .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(self.window_id, flag)),
+                checkbox(self.enable_midi_preview)
+                    .label("MIDI Preview")
+                    .on_toggle(|flag| Message::SRNMIDIPreviewFlagToggled(self.window_id, flag)),
             ]
             .spacing(10)
             .width(Length::Fill)
@@ -1222,12 +1303,10 @@ impl SPC2MIDI2Window for SRNWindow {
                 number_input(&self.center_note_int, 0..=127, move |note| {
                     Message::CenterNoteIntChanged(window_id, note)
                 },)
-                .on_submit(Message::CenterNoteSubmitted(window_id))
                 .step(1),
                 number_input(&self.center_note_fraction, 0.0..=1.0, move |fraction| {
                     Message::CenterNoteFractionChanged(window_id, fraction)
                 },)
-                .on_submit(Message::CenterNoteSubmitted(window_id))
                 .step(1.0 / 256.0),
             ]
             .spacing(10)
@@ -1236,7 +1315,6 @@ impl SPC2MIDI2Window for SRNWindow {
             number_input(&self.noteon_velocity, 0..=127, move |velocity| {
                 Message::NoteOnVelocityChanged(window_id, velocity)
             },)
-            .on_submit(Message::NoteOnVelocitySubmitted(window_id))
             .step(1),
             row![
                 checkbox(self.enable_pitch_bend)
@@ -1245,7 +1323,6 @@ impl SPC2MIDI2Window for SRNWindow {
                 number_input(&self.pitchbend_width, 1..=48, move |width| {
                     Message::PitchBendWidthChanged(window_id, width)
                 },)
-                .on_submit(Message::PitchBendWidthSubmitted(window_id))
                 .step(1),
             ]
             .spacing(10)
@@ -1281,6 +1358,7 @@ impl SRNWindow {
             srn_no: srn_no,
             source_info: source_info.clone().into(),
             enable_loop_play: false,
+            enable_midi_preview: true,
             cache: Cache::default(),
             program: Some(source_parameter.program.clone()),
             program_box: combo_box::State::new(Program::ALL.to_vec()),
