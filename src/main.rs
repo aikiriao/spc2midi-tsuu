@@ -20,7 +20,7 @@ use iced_aw::menu::{self, Item, Menu};
 use iced_aw::style::{menu_bar::primary, Status};
 use iced_aw::{iced_aw_font, menu_bar, menu_items, number_input, ICED_AW_FONT_BYTES};
 use iced_aw::{quad, widgets::InnerBounds};
-use midir::{MidiOutput, MidiOutputPort};
+use midir::{MidiOutput, MidiOutputConnection};
 use rfd::AsyncFileDialog;
 use rimd::{Event as MidiEvent, MidiMessage, SMFFormat, SMFWriter, Track, TrackEvent, SMF};
 use samplerate::{convert, ConverterType};
@@ -51,6 +51,20 @@ const PCM_NORMALIZE_CONST: f32 = 1.0 / 32768.0;
 const CLOCK_TICK_CYCLE_64KHZ: u32 = 16;
 /// 64kHz間隔に相当するナノ秒
 const CLOCK_TICK_CYCLE_64KHZ_NANOSEC: u64 = 15625;
+/// MIDIメッセージ：ノートオン
+const MIDIMSG_NOTE_ON: u8 = 0x90;
+/// MIDIメッセージ：ノートオフ
+const MIDIMSG_NOTE_OFF: u8 = 0x80;
+/// MIDIメッセージ：プログラムチェンジ
+const MIDIMSG_PROGRAM_CHANGE: u8 = 0xC0;
+/// MIDIメッセージ：チャンネルモードメッセージ
+const MIDIMSG_MODE: u8 = 0xB0;
+/// MIDIチェンネルモードメッセージ：オールサウンドオフ
+const MIDIMSG_MODE_ALL_SOUND_OFF: u8 = 0x78;
+/// MIDIをプレビューする際に使用するチャンネル
+const MIDI_PREVIEW_CHANNEL: u8 = 0;
+/// MIDIをプレビューする時間(msec)
+const MIDI_PREVIEW_DURATION_MSEC: u64 = 500;
 
 pub fn main() -> iced::Result {
     iced::daemon(App::new, App::update, App::view)
@@ -181,6 +195,7 @@ struct App {
     stream: Option<Stream>,
     stream_played_samples: Arc<AtomicUsize>,
     stream_is_playing: Arc<AtomicBool>,
+    midi_out_conn: Option<Arc<Mutex<MidiOutputConnection>>>,
     pcm_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::sdsp::SDSP>>>>>,
     midi_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>>>>>,
     pcm_spc_mute: Arc<AtomicBool>,
@@ -194,7 +209,7 @@ impl Default for App {
             .default_output_device()
             .expect("no output device available");
         let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
-
+        let midi_out_ports = midi_out.ports();
         Self {
             theme: iced::Theme::Nord,
             main_window_id: window::Id::unique(),
@@ -207,6 +222,11 @@ impl Default for App {
             stream: None,
             stream_played_samples: Arc::new(AtomicUsize::new(0)),
             stream_is_playing: Arc::new(AtomicBool::new(false)),
+            midi_out_conn: 
+                match midi_out.connect(&midi_out_ports[0], SPC2MIDI2_TITLE_STR) {
+                    Ok(conn) => Some(Arc::new(Mutex::new(conn))),
+                    Err(_) => None,
+                },
             pcm_spc: None,
             midi_spc: None,
             pcm_spc_mute: Arc::new(AtomicBool::new(false)),
@@ -715,6 +735,14 @@ impl App {
                 return Ok(());
             };
 
+        let midi_out_conn = 
+            if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+                midi_out_conn_ref.clone()
+            } else {
+                // TODO: エラーにした方がよい
+                return Ok(());
+            };
+
         // リサンプラ初期化 32k -> デバイスの出力レート変換となるように
         let (mut prod, mut cons) = fixed_resample::resampling_channel::<f32, NUM_CHANNELS>(
             NonZero::new(NUM_CHANNELS).unwrap(),
@@ -722,13 +750,6 @@ impl App {
             self.stream_config.sample_rate,
             Default::default(),
         );
-
-        // FIXME: MIDI出力ポートの作成。出力MIDIデバイスを選べるべき
-        let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
-        let out_ports = midi_out.ports();
-        let mut conn_out = midi_out
-            .connect(&out_ports[0], SPC2MIDI2_TITLE_STR)
-            .unwrap();
 
         // 各SPCのミュートフラグ取得
         let pcm_spc_mute = self.pcm_spc_mute.clone();
@@ -750,6 +771,8 @@ impl App {
                 // SPCをロックして獲得
                 let mut spc = pcm_spc.lock().unwrap();
                 let mut midispc = midi_spc.lock().unwrap();
+                // MIDI出力のロック
+                let mut conn_out = midi_out_conn.lock().unwrap();
 
                 // レート変換比を信じ、バッファが一定量埋まるまで出力させる
                 let mut nsamples = prod.available_frames();
@@ -916,22 +939,19 @@ impl App {
             stream.pause()?;
             self.stream = None;
         }
+        // MIDIにオールサウンドオフを送信
+        if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+            let midi_out_conn = midi_out_conn_ref.clone();
+            let mut conn_out = midi_out_conn.lock().unwrap();
+            for ch in 0..15 {
+                conn_out.send(&[MIDIMSG_MODE | ch, MIDIMSG_MODE_ALL_SOUND_OFF, 0]).unwrap();
+            }
+        }
         Ok(())
     }
 
     // MIDI楽器音をプレビュー
     fn preview_midi_sound(&self, srn_no: u8) {
-        // MIDIメッセージ：ノートオン
-        const MIDIMSG_NOTE_ON: u8 = 0x90;
-        // MIDIメッセージ：ノートオフ
-        const MIDIMSG_NOTE_OFF: u8 = 0x80;
-        // MIDIメッセージ：プログラムチェンジ
-        const MIDIMSG_PROGRAM_CHANGE: u8 = 0xC0;
-        // MIDIをプレビューする際に使用するチャンネル
-        const MIDI_PREVIEW_CHANNEL: u8 = 0;
-        // MIDIをプレビューする時間(msec)
-        const MIDI_PREVIEW_DURATION_MSEC: u64 = 400;
-
         // 再生時のパラメータ設定
         let params = self.source_parameter.read().unwrap();
         let param = params.get(&srn_no).unwrap();
@@ -939,16 +959,15 @@ impl App {
         let velocity = param.noteon_velocity;
         let note = (param.center_note >> 8) as u8;
 
-        // FIXME: MIDI出力ポートの作成。出力MIDIデバイスを選べるべき
-        let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
-        let out_ports = midi_out.ports();
-        let mut conn_out = match midi_out.connect(&out_ports[0], SPC2MIDI2_TITLE_STR) {
-            Ok(conn) => conn,
-            Err(_) => {
-                eprintln!("[{}] Create MIDI connection failed", SPC2MIDI2_TITLE_STR);
-                return;
-            }
-        };
+        // MIDI出力の作成
+        let midi_out_conn = 
+            if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+                midi_out_conn_ref.clone()
+            } else {
+                // TODO: エラーにした方が良い
+                return
+            };
+        let mut conn_out = midi_out_conn.lock().unwrap();
 
         // ノートオン
         if program < 0x80 {
@@ -979,9 +998,6 @@ impl App {
                 .send(&[MIDIMSG_NOTE_OFF | 0x9, program - 0x80, 0])
                 .unwrap();
         }
-
-        // クローズ
-        conn_out.close();
     }
 }
 
@@ -1312,7 +1328,7 @@ impl SPC2MIDI2Window for SRNWindow {
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
-            number_input(&self.noteon_velocity, 0..=127, move |velocity| {
+            number_input(&self.noteon_velocity, 1..=127, move |velocity| {
                 Message::NoteOnVelocityChanged(window_id, velocity)
             },)
             .step(1),
