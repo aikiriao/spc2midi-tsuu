@@ -20,7 +20,7 @@ use iced_aw::menu::{self, Item, Menu};
 use iced_aw::style::{menu_bar::primary, Status};
 use iced_aw::{iced_aw_font, menu_bar, menu_items, number_input, ICED_AW_FONT_BYTES};
 use iced_aw::{quad, widgets::InnerBounds};
-use midir::{MidiOutput, MidiOutputConnection};
+use midir::{MidiOutput, MidiOutputConnection, MidiOutputPort};
 use rfd::AsyncFileDialog;
 use rimd::{Event as MidiEvent, MidiMessage, SMFFormat, SMFWriter, Track, TrackEvent, SMF};
 use samplerate::{convert, ConverterType};
@@ -106,6 +106,7 @@ enum Message {
     EnablePitchBendFlagToggled(window::Id, bool),
     UpdateVolumePanFlagToggled(window::Id, bool),
     EnvelopeAsExpressionFlagToggled(window::Id, bool),
+    MIDIOutputPortSelected(window::Id, String),
 }
 
 trait AsAny {
@@ -161,6 +162,9 @@ struct MainWindow {
 #[derive(Debug)]
 struct PreferenceWindow {
     title: String,
+    window_id: window::Id,
+    midi_out_port_name: Option<String>,
+    midi_ports_box: combo_box::State<String>,
 }
 
 #[derive(Debug)]
@@ -200,6 +204,7 @@ struct App {
     midi_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>>>>>,
     pcm_spc_mute: Arc<AtomicBool>,
     midi_spc_mute: Arc<AtomicBool>,
+    midi_out_port_name: Option<String>,
 }
 
 impl Default for App {
@@ -210,6 +215,11 @@ impl Default for App {
             .expect("no output device available");
         let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
         let midi_out_ports = midi_out.ports();
+        let midi_out_port_name = if midi_out_ports.len() > 0 {
+            Some(midi_out.port_name(&midi_out_ports[0]).unwrap())
+        } else {
+            None
+        };
         Self {
             theme: iced::Theme::Nord,
             main_window_id: window::Id::unique(),
@@ -222,15 +232,19 @@ impl Default for App {
             stream: None,
             stream_played_samples: Arc::new(AtomicUsize::new(0)),
             stream_is_playing: Arc::new(AtomicBool::new(false)),
-            midi_out_conn: 
+            midi_out_conn: if midi_out_ports.len() > 0 {
                 match midi_out.connect(&midi_out_ports[0], SPC2MIDI2_TITLE_STR) {
                     Ok(conn) => Some(Arc::new(Mutex::new(conn))),
                     Err(_) => None,
-                },
+                }
+            } else {
+                None
+            },
             pcm_spc: None,
             midi_spc: None,
             pcm_spc_mute: Arc::new(AtomicBool::new(false)),
             midi_spc_mute: Arc::new(AtomicBool::new(false)),
+            midi_out_port_name: midi_out_port_name,
         }
     }
 }
@@ -271,7 +285,11 @@ impl App {
                 });
                 self.windows.insert(
                     id,
-                    Box::new(PreferenceWindow::new("Preference".to_string())),
+                    Box::new(PreferenceWindow::new(
+                        id,
+                        "Preference".to_string(),
+                        self.midi_out_port_name.clone(),
+                    )),
                 );
                 return open.map(Message::PreferenceWindowOpened);
             }
@@ -542,6 +560,33 @@ impl App {
             Message::ReceivedMIDIPreviewRequest(srn_no) => {
                 self.preview_midi_sound(srn_no);
             }
+            Message::MIDIOutputPortSelected(id, port_name) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let pref_win: &mut PreferenceWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    pref_win.midi_out_port_name = Some(port_name.clone());
+                    // MIDI出力ポートを再接続
+                    let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
+                    let ports = midi_out.ports();
+                    // 選択したポート名を探す
+                    let mut i = 0;
+                    while i < ports.len() {
+                        if port_name == midi_out.port_name(&ports[i]).unwrap() {
+                            break;
+                        }
+                        i += 1;
+                    }
+                    // ポート出力作成
+                    self.midi_out_conn = if i < ports.len() {
+                        match midi_out.connect(&ports[i], SPC2MIDI2_TITLE_STR) {
+                            Ok(conn) => Some(Arc::new(Mutex::new(conn))),
+                            Err(_) => None,
+                        }
+                    } else {
+                        None
+                    };
+                }
+            }
         }
         Task::none()
     }
@@ -735,13 +780,12 @@ impl App {
                 return Ok(());
             };
 
-        let midi_out_conn = 
-            if let Some(midi_out_conn_ref) = &self.midi_out_conn {
-                midi_out_conn_ref.clone()
-            } else {
-                // TODO: エラーにした方がよい
-                return Ok(());
-            };
+        let midi_out_conn = if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+            midi_out_conn_ref.clone()
+        } else {
+            // TODO: エラーにした方がよい
+            return Ok(());
+        };
 
         // リサンプラ初期化 32k -> デバイスの出力レート変換となるように
         let (mut prod, mut cons) = fixed_resample::resampling_channel::<f32, NUM_CHANNELS>(
@@ -944,7 +988,9 @@ impl App {
             let midi_out_conn = midi_out_conn_ref.clone();
             let mut conn_out = midi_out_conn.lock().unwrap();
             for ch in 0..15 {
-                conn_out.send(&[MIDIMSG_MODE | ch, MIDIMSG_MODE_ALL_SOUND_OFF, 0]).unwrap();
+                conn_out
+                    .send(&[MIDIMSG_MODE | ch, MIDIMSG_MODE_ALL_SOUND_OFF, 0])
+                    .unwrap();
             }
         }
         Ok(())
@@ -960,13 +1006,12 @@ impl App {
         let note = (param.center_note >> 8) as u8;
 
         // MIDI出力の作成
-        let midi_out_conn = 
-            if let Some(midi_out_conn_ref) = &self.midi_out_conn {
-                midi_out_conn_ref.clone()
-            } else {
-                // TODO: エラーにした方が良い
-                return
-            };
+        let midi_out_conn = if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+            midi_out_conn_ref.clone()
+        } else {
+            // TODO: エラーにした方が良い
+            return;
+        };
         let mut conn_out = midi_out_conn.lock().unwrap();
 
         // ノートオン
@@ -1270,18 +1315,38 @@ impl SPC2MIDI2Window for PreferenceWindow {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let content = column![text("Super awesome config")]
-            .spacing(50)
-            .width(Length::Fill)
-            .align_x(alignment::Alignment::Center)
-            .width(100);
+        let window_id = self.window_id;
+        let content = column![
+            combo_box(
+                &self.midi_ports_box,
+                "Program",
+                self.midi_out_port_name.as_ref(),
+                move |port_name| Message::MIDIOutputPortSelected(window_id, port_name),
+            ),
+            text("Super awesome config")
+        ]
+        .spacing(10)
+        .padding(10)
+        .width(Length::Fill)
+        .align_x(alignment::Alignment::Center);
         content.into()
     }
 }
 
 impl PreferenceWindow {
-    fn new(title: String) -> Self {
-        Self { title: title }
+    fn new(window_id: window::Id, title: String, midi_out_port_name: Option<String>) -> Self {
+        let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
+        let port_name_list: Vec<String> = midi_out
+            .ports()
+            .iter()
+            .map(|p| midi_out.port_name(p).unwrap())
+            .collect();
+        Self {
+            title: title,
+            window_id: window_id,
+            midi_out_port_name: midi_out_port_name,
+            midi_ports_box: combo_box::State::new(port_name_list),
+        }
     }
 }
 
