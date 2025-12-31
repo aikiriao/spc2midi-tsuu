@@ -565,6 +565,7 @@ impl App {
                     let pref_win: &mut PreferenceWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     pref_win.midi_out_port_name = Some(port_name.clone());
+                    self.midi_out_port_name = Some(port_name.clone());
                     // MIDI出力ポートを再接続
                     let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
                     let ports = midi_out.ports();
