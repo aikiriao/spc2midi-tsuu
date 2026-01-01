@@ -156,6 +156,7 @@ struct SourceParameter {
 struct MainWindow {
     title: String,
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
+    source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     pcm_spc_mute: bool,
     midi_spc_mute: bool,
     playback_time_sec: f32,
@@ -273,8 +274,11 @@ impl App {
                     size: iced::Size::new(500.0, 600.0),
                     ..Default::default()
                 });
-                let window =
-                    MainWindow::new(SPC2MIDI2_TITLE_STR.to_string(), self.source_infos.clone());
+                let window = MainWindow::new(
+                    SPC2MIDI2_TITLE_STR.to_string(),
+                    self.source_infos.clone(),
+                    self.source_parameter.clone(),
+                );
                 self.main_window_id = id;
                 self.windows.insert(id, Box::new(window));
                 return open.map(Message::MainWindowOpened);
@@ -600,7 +604,8 @@ impl App {
                     let main_win: &mut MainWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let played_samples = self.stream_played_samples.load(Ordering::Relaxed);
-                    main_win.playback_time_sec = played_samples as f32 / self.stream_config.sample_rate as f32;
+                    main_win.playback_time_sec =
+                        played_samples as f32 / self.stream_config.sample_rate as f32;
                 }
             }
         }
@@ -927,7 +932,6 @@ impl App {
 
         let num_channels = self.stream_config.channels as usize;
         let is_playing = self.stream_is_playing.clone();
-        let played_samples = self.stream_played_samples.clone();
         let loop_start_sample = f64::round(
             (source.loop_start_sample * self.stream_config.sample_rate as usize) as f64
                 / SPC_SAMPLING_RATE as f64,
@@ -1285,11 +1289,17 @@ impl SPC2MIDI2Window for MainWindow {
         });
 
         let infos = self.source_infos.read().unwrap();
+        let params = self.source_params.read().unwrap();
         let srn_list: Vec<_> = infos
             .iter()
             .map(|(key, info)| {
                 row![
-                    text(format!("0x{:02X} {}", key, info.start_address)),
+                    text(format!("0x{:02X}", key)),
+                    {
+                        let param = params.get(&key).unwrap();
+                        text(format!("{} {}", param.program, param.center_note >> 8))
+                    },
+                    // TODO: ノートオン・ピッチベンドなど再生中の情報をとりたい
                     button("Configure").on_press(Message::OpenSRNWindow(*key))
                 ]
                 .spacing(10)
@@ -1330,10 +1340,15 @@ impl SPC2MIDI2Window for MainWindow {
 }
 
 impl MainWindow {
-    fn new(title: String, source_info: Arc<RwLock<BTreeMap<u8, SourceInformation>>>) -> Self {
+    fn new(
+        title: String,
+        source_info: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
+        source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
+    ) -> Self {
         Self {
             title: title,
             source_infos: source_info,
+            source_params: source_params,
             pcm_spc_mute: false,
             midi_spc_mute: false,
             playback_time_sec: 0.0f32,
