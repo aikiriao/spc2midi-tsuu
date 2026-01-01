@@ -152,11 +152,23 @@ struct SourceParameter {
     enable_pitch_bend: bool,
 }
 
+/// 再生中の状態
+#[derive(Debug, Clone)]
+struct PlaybackStatus {
+    /// ノートオン中か
+    noteon: [bool; 8],
+    /// 再生しているソース番号
+    srn_no: [u8; 8],
+    /// 再生ピッチ
+    pitch: [u16; 8],
+}
+
 #[derive(Debug)]
 struct MainWindow {
     title: String,
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
     source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
+    playback_status: Arc<RwLock<PlaybackStatus>>,
     pcm_spc_mute: bool,
     midi_spc_mute: bool,
     playback_time_sec: f32,
@@ -197,6 +209,7 @@ struct App {
     spc_file: Option<Box<SPCFile>>,
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
     source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
+    playback_status: Arc<RwLock<PlaybackStatus>>,
     stream_device: Device,
     stream_config: StreamConfig,
     stream: Option<Stream>,
@@ -230,6 +243,7 @@ impl Default for App {
             spc_file: None,
             source_infos: Arc::new(RwLock::new(BTreeMap::new())),
             source_parameter: Arc::new(RwLock::new(BTreeMap::new())),
+            playback_status: Arc::new(RwLock::new(PlaybackStatus::new())),
             stream_config: device.default_output_config().unwrap().into(),
             stream_device: device,
             stream: None,
@@ -278,6 +292,7 @@ impl App {
                     SPC2MIDI2_TITLE_STR.to_string(),
                     self.source_infos.clone(),
                     self.source_parameter.clone(),
+                    self.playback_status.clone(),
                 );
                 self.main_window_id = id;
                 self.windows.insert(id, Box::new(window));
@@ -606,6 +621,13 @@ impl App {
                     let played_samples = self.stream_played_samples.load(Ordering::Relaxed);
                     main_win.playback_time_sec =
                         played_samples as f32 / self.stream_config.sample_rate as f32;
+                }
+
+                if let Some(midi_spc_ref) = &self.midi_spc {
+                    let midi_spc = midi_spc_ref.clone();
+                    let spc = midi_spc.lock().unwrap();
+                    let mut status = self.playback_status.write().unwrap();
+                    *status = read_playback_status(&spc.dsp);
                 }
             }
         }
@@ -1299,8 +1321,23 @@ impl SPC2MIDI2Window for MainWindow {
                         let param = params.get(&key).unwrap();
                         text(format!("{} {}", param.program, param.center_note >> 8))
                     },
-                    // TODO: ノートオン・ピッチベンドなど再生中の情報をとりたい
                     button("Configure").on_press(Message::OpenSRNWindow(*key))
+                ]
+                .spacing(10)
+                .width(Length::Fill)
+                .align_y(alignment::Alignment::Center)
+                .into()
+            })
+            .collect();
+
+        let status = self.playback_status.read().unwrap();
+        let status_list: Vec<_> = (0..8)
+            .map(|ch| {
+                row![
+                    text(format!("CH {}", ch)),
+                    text(format!("{}", if status.noteon[ch] { "ON " } else { "OFF" })),
+                    text(format!("0x{:02X}", status.srn_no[ch])),
+                    text(format!("{:5X}", status.pitch[ch])),
                 ]
                 .spacing(10)
                 .width(Length::Fill)
@@ -1332,6 +1369,9 @@ impl SPC2MIDI2Window for MainWindow {
             Column::from_vec(srn_list)
                 .width(Length::Fill)
                 .height(Length::Fill),
+            Column::from_vec(status_list)
+                .width(Length::Fill)
+                .height(Length::Fill),
             preview_control,
         ];
 
@@ -1344,11 +1384,13 @@ impl MainWindow {
         title: String,
         source_info: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
         source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
+        playback_status: Arc<RwLock<PlaybackStatus>>,
     ) -> Self {
         Self {
             title: title,
             source_infos: source_info,
             source_params: source_params,
+            playback_status: playback_status,
             pcm_spc_mute: false,
             midi_spc_mute: false,
             playback_time_sec: 0.0f32,
@@ -1680,4 +1722,34 @@ fn draw_loop_point(
             ..Stroke::default()
         },
     );
+}
+
+impl PlaybackStatus {
+    fn new() -> Self {
+        Self {
+            noteon: [false; 8],
+            srn_no: [0; 8],
+            pitch: [0; 8],
+        }
+    }
+}
+
+// 再生情報の読み取り
+fn read_playback_status(midi_dsp: &spc700::mididsp::MIDIDSP) -> PlaybackStatus {
+    let dummy_ram = [0u8];
+    let mut status = PlaybackStatus::new();
+
+    let noteon_flags = midi_dsp.read_register(&dummy_ram, DSP_ADDRESS_NOTEON);
+    for ch in 0..8 {
+        status.noteon[ch] = ((noteon_flags >> ch) & 1) != 0;
+        status.srn_no[ch] =
+            midi_dsp.read_register(&dummy_ram, DSP_ADDRESS_V0SRCN | ((ch as u8) << 4));
+        let pitch_high =
+            midi_dsp.read_register(&dummy_ram, DSP_ADDRESS_V0PITCHH | ((ch as u8) << 4));
+        let pitch_low =
+            midi_dsp.read_register(&dummy_ram, DSP_ADDRESS_V0PITCHL | ((ch as u8) << 4));
+        status.pitch[ch] = ((pitch_high as u16) << 8) | (pitch_low as u16);
+    }
+
+    status
 }
