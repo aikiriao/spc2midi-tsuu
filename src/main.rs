@@ -13,8 +13,8 @@ use iced::widget::{
     Space, Stack,
 };
 use iced::{
-    alignment, event, mouse, theme, window, Border, Color, Element, Function, Length, Padding,
-    Point, Rectangle, Renderer, Size, Subscription, Task, Theme, Vector,
+    alignment, event, mouse, theme, time, window, Border, Color, Element, Function, Length,
+    Padding, Point, Rectangle, Renderer, Size, Subscription, Task, Theme, Vector,
 };
 use iced_aw::menu::{self, Item, Menu};
 use iced_aw::style::{menu_bar::primary, Status};
@@ -107,6 +107,7 @@ enum Message {
     UpdateVolumePanFlagToggled(window::Id, bool),
     EnvelopeAsExpressionFlagToggled(window::Id, bool),
     MIDIOutputPortSelected(window::Id, String),
+    Tick,
 }
 
 trait AsAny {
@@ -157,6 +158,7 @@ struct MainWindow {
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
     pcm_spc_mute: bool,
     midi_spc_mute: bool,
+    playback_time_sec: f32,
 }
 
 #[derive(Debug)]
@@ -332,6 +334,7 @@ impl App {
                             &spc_file.ram,
                             &spc_file.dsp_register,
                         );
+                        // SPCを生成
                         self.pcm_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
                             &spc_file.header.spc_register,
                             &spc_file.ram,
@@ -342,6 +345,8 @@ impl App {
                             &spc_file.ram,
                             &spc_file.dsp_register,
                         )))));
+                        // 再生サンプル数をリセット
+                        self.stream_played_samples.store(0, Ordering::Relaxed);
                         // ウィンドウタイトルに開いたファイル名を追記
                         if let Some(window) = self.windows.get_mut(&self.main_window_id) {
                             let main_window: &mut MainWindow =
@@ -428,6 +433,8 @@ impl App {
                         &spc_file.dsp_register,
                     )))));
                 }
+                // Stopの場合は再生サンプル数をリセット
+                self.stream_played_samples.store(0, Ordering::Relaxed);
             }
             Message::SPCMuteFlagToggled(flag) => {
                 if let Some(window) = self.windows.get_mut(&self.main_window_id) {
@@ -588,6 +595,14 @@ impl App {
                     };
                 }
             }
+            Message::Tick => {
+                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                    let main_win: &mut MainWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let played_samples = self.stream_played_samples.load(Ordering::Relaxed);
+                    main_win.playback_time_sec = played_samples as f32 / self.stream_config.sample_rate as f32;
+                }
+            }
         }
         Task::none()
     }
@@ -605,10 +620,18 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch(vec![
-            window::close_events().map(Message::WindowClosed),
-            event::listen().map(Message::EventOccurred),
-        ])
+        if self.stream_is_playing.load(Ordering::Relaxed) {
+            Subscription::batch(vec![
+                iced::time::every(iced::time::Duration::from_millis(10)).map(|_| Message::Tick),
+                window::close_events().map(Message::WindowClosed),
+                event::listen().map(Message::EventOccurred),
+            ])
+        } else {
+            Subscription::batch(vec![
+                window::close_events().map(Message::WindowClosed),
+                event::listen().map(Message::EventOccurred),
+            ])
+        }
     }
 
     /// 音源ソースの解析
@@ -807,12 +830,16 @@ impl App {
             apply_source_parameter(&mut midispc, &params, &self.spc_file.as_ref().unwrap().ram);
         }
 
+        // 再生済みサンプル数
+        let played_samples = self.stream_played_samples.clone();
+
         // 再生ストリーム作成
         let mut cycle_count = 0;
         let mut pcm_buffer = vec![0.0f32; BUFFER_SIZE * NUM_CHANNELS];
         let stream = match self.stream_device.build_output_stream(
             &self.stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                let mut progress = played_samples.load(Ordering::Relaxed);
                 // SPCをロックして獲得
                 let mut spc = pcm_spc.lock().unwrap();
                 let mut midispc = midi_spc.lock().unwrap();
@@ -868,6 +895,10 @@ impl App {
                         out_chunk[ch] = in_chunk[ch];
                     }
                 }
+
+                // 再生サンプル数増加
+                progress += frames;
+                played_samples.store(progress, Ordering::Relaxed);
             },
             |err| eprintln!("[{}] {err}", SPC2MIDI2_TITLE_STR),
             None,
@@ -877,7 +908,6 @@ impl App {
         };
 
         // 再生開始
-        self.stream_played_samples.store(0, Ordering::Relaxed);
         self.stream_is_playing.store(true, Ordering::Relaxed);
         stream.play()?;
         self.stream = Some(stream);
@@ -924,11 +954,13 @@ impl App {
         // ループ開始位置は出力サンプル数で上限をかける
         let loop_start_progress = cmp::min(num_channels * loop_start_sample, output.len() - 1);
 
+        // 再生サンプル数（ワンショットのプレビュー再生なので再生サンプルはselfに保持しない）
+        let mut progress = 0;
+
         // 再生ストリーム作成
         let stream = match self.stream_device.build_output_stream(
             &self.stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                let mut progress = played_samples.load(Ordering::Relaxed);
                 // 一旦バッファを無音で埋める
                 buffer.fill(0.0);
                 // バッファにコピー
@@ -958,8 +990,6 @@ impl App {
                         is_playing.store(false, Ordering::Relaxed);
                     }
                 }
-                // 再生サンプル増加
-                played_samples.store(progress, Ordering::Relaxed);
             },
             |err| eprintln!("[{}] {err}", SPC2MIDI2_TITLE_STR),
             None,
@@ -969,7 +999,6 @@ impl App {
         };
 
         // 再生開始
-        self.stream_played_samples.store(0, Ordering::Relaxed);
         self.stream_is_playing.store(true, Ordering::Relaxed);
         stream.play()?;
         self.stream = Some(stream);
@@ -1279,6 +1308,7 @@ impl SPC2MIDI2Window for MainWindow {
             checkbox(self.midi_spc_mute)
                 .label("MIDI Mute")
                 .on_toggle(|flag| Message::MIDIMuteFlagToggled(flag)),
+            text(format!("{:8.3} sec", self.playback_time_sec)),
         ]
         .spacing(10)
         .width(Length::Fill)
@@ -1306,6 +1336,7 @@ impl MainWindow {
             source_infos: source_info,
             pcm_spc_mute: false,
             midi_spc_mute: false,
+            playback_time_sec: 0.0f32,
         }
     }
 }
