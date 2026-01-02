@@ -1334,10 +1334,17 @@ impl SPC2MIDI2Window for MainWindow {
         let status_list: Vec<_> = (0..8)
             .map(|ch| {
                 row![
-                    text(format!("CH {}", ch)),
+                    text(format!("{}", ch)),
                     text(format!("{}", if status.noteon[ch] { "ON " } else { "OFF" })),
                     text(format!("0x{:02X}", status.srn_no[ch])),
-                    text(format!("{:5X}", status.pitch[ch])),
+                    text(if status.pitch[ch] > 0 {
+                        format!(
+                            "{}",
+                            12.0 * f32::log2((status.pitch[ch] as f32) / (0x1000 as f32))
+                        )
+                    } else {
+                        format!("")
+                    }),
                 ]
                 .spacing(10)
                 .width(Length::Fill)
