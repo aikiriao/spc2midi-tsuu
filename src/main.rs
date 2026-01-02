@@ -107,6 +107,10 @@ enum Message {
     UpdateVolumePanFlagToggled(window::Id, bool),
     EnvelopeAsExpressionFlagToggled(window::Id, bool),
     MIDIOutputPortSelected(window::Id, String),
+    MIDIOutputBpmChanged(window::Id, u8),
+    MIDIOutputTicksPerQuarterChanged(window::Id, u16),
+    MIDIOutputUpdatePeriodChanged(window::Id, u8),
+    MIDIOutputDurationChanged(window::Id, u64),
     Tick,
 }
 
@@ -163,6 +167,19 @@ struct PlaybackStatus {
     pitch: [u16; 8],
 }
 
+/// MIDI出力設定
+#[derive(Debug, Clone)]
+struct MIDIOutputConfigure {
+    /// 出力時間(ms)
+    output_duration_msec: u64,
+    /// MIDI再生パラメータ更新周期
+    playback_parameter_update_period: u8,
+    /// BPM
+    beats_per_minute: u8,
+    /// 四分の一音符当たりのティック数
+    ticks_per_quarter: u16,
+}
+
 #[derive(Debug)]
 struct MainWindow {
     title: String,
@@ -180,6 +197,11 @@ struct PreferenceWindow {
     window_id: window::Id,
     midi_out_port_name: Option<String>,
     midi_ports_box: combo_box::State<String>,
+    playback_parameter_update_period: u8,
+    beats_per_minute: u8,
+    ticks_per_quarter: Option<u16>,
+    ticks_per_quarter_box: combo_box::State<u16>,
+    output_duration_msec: u64,
 }
 
 #[derive(Debug)]
@@ -210,6 +232,7 @@ struct App {
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
     source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     playback_status: Arc<RwLock<PlaybackStatus>>,
+    midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
     stream_device: Device,
     stream_config: StreamConfig,
     stream: Option<Stream>,
@@ -244,6 +267,7 @@ impl Default for App {
             source_infos: Arc::new(RwLock::new(BTreeMap::new())),
             source_parameter: Arc::new(RwLock::new(BTreeMap::new())),
             playback_status: Arc::new(RwLock::new(PlaybackStatus::new())),
+            midi_output_configure: Arc::new(RwLock::new(MIDIOutputConfigure::new())),
             stream_config: device.default_output_config().unwrap().into(),
             stream_device: device,
             stream: None,
@@ -310,6 +334,7 @@ impl App {
                         id,
                         "Preference".to_string(),
                         self.midi_out_port_name.clone(),
+                        self.midi_output_configure.clone(),
                     )),
                 );
                 return open.map(Message::PreferenceWindowOpened);
@@ -614,6 +639,42 @@ impl App {
                     };
                 }
             }
+            Message::MIDIOutputBpmChanged(id, bpm) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let pref_win: &mut PreferenceWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut config = self.midi_output_configure.write().unwrap();
+                    pref_win.beats_per_minute = bpm;
+                    config.beats_per_minute = bpm;
+                }
+            }
+            Message::MIDIOutputTicksPerQuarterChanged(id, ticks) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let pref_win: &mut PreferenceWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut config = self.midi_output_configure.write().unwrap();
+                    pref_win.ticks_per_quarter = Some(ticks);
+                    config.ticks_per_quarter = ticks;
+                }
+            }
+            Message::MIDIOutputUpdatePeriodChanged(id, period) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let pref_win: &mut PreferenceWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut config = self.midi_output_configure.write().unwrap();
+                    pref_win.playback_parameter_update_period = period;
+                    config.playback_parameter_update_period = period;
+                }
+            }
+            Message::MIDIOutputDurationChanged(id, duration) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let pref_win: &mut PreferenceWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut config = self.midi_output_configure.write().unwrap();
+                    pref_win.output_duration_msec = duration;
+                    config.output_duration_msec = duration;
+                }
+            }
             Message::Tick => {
                 if let Some(window) = self.windows.get_mut(&self.main_window_id) {
                     let main_win: &mut MainWindow =
@@ -753,9 +814,8 @@ impl App {
     // SMFを作成
     fn create_smf(&self) -> Option<SMF> {
         if let Some(spc_file) = &self.spc_file {
-            const MIDI_BPM: u64 = 120; // TODO: ユーザが設定
-            const MIDI_DIVISIONS: u64 = 3200; // TODO: ユーザが設定
-
+            let config = self.midi_output_configure.read().unwrap();
+            let ticks_per_minutes = ((config.beats_per_minute as u16) * config.ticks_per_quarter) as f64;
             let mut smf = SMF {
                 format: SMFFormat::Single,
                 tracks: vec![Track {
@@ -763,7 +823,7 @@ impl App {
                     name: Some("tmp".to_string()), // TODO: SPCから出す or ユーザが設定した時間出力
                     events: Vec::new(),
                 }],
-                division: MIDI_DIVISIONS as i16,
+                division: config.ticks_per_quarter as i16,
             };
 
             // SPCの作成
@@ -774,15 +834,16 @@ impl App {
             );
 
             // パラメータ適用
+            let configure = self.midi_output_configure.read().unwrap();
             let params = self.source_parameter.read().unwrap();
-            apply_source_parameter(&mut spc, &params, &spc_file.ram);
+            apply_source_parameter(&mut spc, &configure, &params, &spc_file.ram);
 
             let mut cycle_count = 0;
             let mut total_elapsed_time_nanosec = 0;
             let mut previous_event_time = 0.0;
 
-            // 60秒出力する TODO: SPCから読み取った時間 or ユーザが設定した時間出力
-            while total_elapsed_time_nanosec < 60 * 1000_000_000 {
+            // 出力で決めた時間だけ出力
+            while total_elapsed_time_nanosec < config.output_duration_msec * 1000_000 {
                 // 64kHzタイマーティックするまで処理
                 while cycle_count < CLOCK_TICK_CYCLE_64KHZ {
                     cycle_count += spc.execute_step() as u32;
@@ -792,8 +853,7 @@ impl App {
                 if let Some(out) = spc.clock_tick_64k_hz() {
                     // 経過時間からティック数を計算
                     let delta_nano_time = total_elapsed_time_nanosec as f64 - previous_event_time;
-                    let ticks = (delta_nano_time * (MIDI_BPM * MIDI_DIVISIONS) as f64)
-                        / (60.0 * 1000_000_000.0);
+                    let ticks = (delta_nano_time * ticks_per_minutes) / (60.0 * 1000_000_000.0);
                     // ティック数は切り捨てる（切り上げると経過時間が未来になって経過時間が負になりうる）
                     for i in 0..out.num_messages {
                         let msg = out.messages[i];
@@ -805,8 +865,8 @@ impl App {
                         });
                     }
                     // 実際のtickから経過時間計算
-                    previous_event_time += (ticks.floor() * 60.0 * 1000_000_000.0)
-                        / ((MIDI_DIVISIONS * MIDI_BPM) as f64);
+                    previous_event_time +=
+                        (ticks.floor() * 60.0 * 1000_000_000.0) / ticks_per_minutes;
                 }
                 // 時間を進める
                 total_elapsed_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
@@ -852,9 +912,10 @@ impl App {
 
         // SPCにパラメータ適用
         {
+            let configure = self.midi_output_configure.read().unwrap();
             let params = self.source_parameter.read().unwrap();
             let mut midispc = midi_spc.lock().unwrap();
-            apply_source_parameter(&mut midispc, &params, &self.spc_file.as_ref().unwrap().ram);
+            apply_source_parameter(&mut midispc, &configure, &params, &self.spc_file.as_ref().unwrap().ram);
         }
 
         // 再生済みサンプル数
@@ -1105,6 +1166,7 @@ impl App {
 /// 音源パラメータをDSPに適用
 fn apply_source_parameter(
     spc: &mut spc700::spc::SPC<spc700::mididsp::MIDIDSP>,
+    config: &MIDIOutputConfigure,
     source_params: &BTreeMap<u8, SourceParameter>,
     ram: &[u8],
 ) {
@@ -1143,8 +1205,11 @@ fn apply_source_parameter(
         );
     }
     // 音源に依存しないパラメータ
-    spc.dsp
-        .write_register(ram, DSP_ADDRESS_PLAYBACK_PARAMETER_UPDATE_PERIOD, 10); // TODO: どこかで設定
+    spc.dsp.write_register(
+        ram,
+        DSP_ADDRESS_PLAYBACK_PARAMETER_UPDATE_PERIOD,
+        config.playback_parameter_update_period,
+    );
 }
 
 #[allow(dead_code)]
@@ -1419,7 +1484,28 @@ impl SPC2MIDI2Window for PreferenceWindow {
                 self.midi_out_port_name.as_ref(),
                 move |port_name| Message::MIDIOutputPortSelected(window_id, port_name),
             ),
-            text("Super awesome config")
+            number_input(&self.beats_per_minute, 32..=240, move |bpm| {
+                Message::MIDIOutputBpmChanged(window_id, bpm)
+            },)
+            .step(1),
+            combo_box(
+                &self.ticks_per_quarter_box,
+                "Ticks per quarter (resolution)",
+                self.ticks_per_quarter.as_ref(),
+                move |ticks| { Message::MIDIOutputTicksPerQuarterChanged(window_id, ticks) },
+            ),
+            number_input(
+                &self.playback_parameter_update_period,
+                1..=255,
+                move |period| { Message::MIDIOutputUpdatePeriodChanged(window_id, period) },
+            )
+            .step(1),
+            number_input(
+                &self.output_duration_msec,
+                1000..=(3600 * 1000),
+                move |duration| { Message::MIDIOutputDurationChanged(window_id, duration) },
+            )
+            .step(1),
         ]
         .spacing(10)
         .padding(10)
@@ -1430,18 +1516,29 @@ impl SPC2MIDI2Window for PreferenceWindow {
 }
 
 impl PreferenceWindow {
-    fn new(window_id: window::Id, title: String, midi_out_port_name: Option<String>) -> Self {
+    fn new(
+        window_id: window::Id,
+        title: String,
+        midi_out_port_name: Option<String>,
+        midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
+    ) -> Self {
         let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
         let port_name_list: Vec<String> = midi_out
             .ports()
             .iter()
             .map(|p| midi_out.port_name(p).unwrap())
             .collect();
+        let config = midi_output_configure.read().unwrap();
         Self {
             title: title,
             window_id: window_id,
             midi_out_port_name: midi_out_port_name,
             midi_ports_box: combo_box::State::new(port_name_list),
+            beats_per_minute: config.beats_per_minute,
+            playback_parameter_update_period: config.playback_parameter_update_period,
+            output_duration_msec: config.output_duration_msec,
+            ticks_per_quarter: Some(config.ticks_per_quarter),
+            ticks_per_quarter_box: combo_box::State::new(vec![24, 30, 48, 60, 96, 120, 192, 240, 384, 480, 960]),
         }
     }
 }
@@ -1759,4 +1856,20 @@ fn read_playback_status(midi_dsp: &spc700::mididsp::MIDIDSP) -> PlaybackStatus {
     }
 
     status
+}
+
+impl MIDIOutputConfigure {
+    const DEFAULT_OUTPUT_DURATION_MSEC: u64 = 60 * 1000;
+    const DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC: u8 = 10;
+    const MIDI_DEFAULT_BPM: u8 = 120;
+    const MIDI_DEFAULT_RESOLUSIONS: u16 = 480;
+
+    fn new() -> Self {
+        Self {
+            output_duration_msec: Self::DEFAULT_OUTPUT_DURATION_MSEC,
+            playback_parameter_update_period: Self::DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC,
+            beats_per_minute: Self::MIDI_DEFAULT_BPM,
+            ticks_per_quarter: Self::MIDI_DEFAULT_RESOLUSIONS,
+        }
+    }
 }
