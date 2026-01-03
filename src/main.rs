@@ -108,6 +108,7 @@ enum Message {
     EnablePitchBendFlagToggled(window::Id, bool),
     UpdateVolumePanFlagToggled(window::Id, bool),
     EnvelopeAsExpressionFlagToggled(window::Id, bool),
+    EchoAsEffect1FlagToggled(window::Id, bool),
     MIDIOutputPortSelected(window::Id, String),
     MIDIOutputBpmChanged(window::Id, u8),
     MIDIOutputTicksPerQuarterChanged(window::Id, u16),
@@ -156,6 +157,8 @@ struct SourceParameter {
     update_volume_pan: bool,
     /// ピッチベンドを使うか
     enable_pitch_bend: bool,
+    /// エコーをエフェクト1デプスとして出力するか
+    echo_as_effect1: bool,
 }
 
 /// 再生中の状態
@@ -224,6 +227,7 @@ struct SRNWindow {
     envelope_as_expression: bool,
     update_volume_pan: bool,
     enable_pitch_bend: bool,
+    echo_as_effect1: bool,
 }
 
 struct App {
@@ -610,6 +614,17 @@ impl App {
                     srn_win.envelope_as_expression = flag;
                 }
             }
+            Message::EchoAsEffect1FlagToggled(id, flag) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        param.echo_as_effect1 = flag;
+                    }
+                    srn_win.echo_as_effect1 = flag;
+                }
+            }
             Message::ReceivedMIDIPreviewRequest(srn_no) => {
                 self.preview_midi_sound(srn_no);
             }
@@ -810,6 +825,7 @@ impl App {
                     envelope_as_expression: true,
                     update_volume_pan: true,
                     enable_pitch_bend: true,
+                    echo_as_effect1: true,
                 },
             );
         }
@@ -820,7 +836,7 @@ impl App {
         if let Some(spc_file) = &self.spc_file {
             let config = self.midi_output_configure.read().unwrap();
             let ticks_per_minutes =
-                ((config.beats_per_minute as u16) * config.ticks_per_quarter) as f64;
+                (config.beats_per_minute as f64) * (config.ticks_per_quarter as f64);
             let mut smf = SMF {
                 format: SMFFormat::Single,
                 tracks: vec![Track {
@@ -863,7 +879,7 @@ impl App {
                     for i in 0..out.num_messages {
                         let msg = out.messages[i];
                         smf.tracks[0].events.push(TrackEvent {
-                            vtime: if i == 0 { ticks.floor() as u64 } else { 0 },
+                            vtime: if i == 0 { f64::floor(ticks) as u64 } else { 0 },
                             event: MidiEvent::Midi(MidiMessage {
                                 data: msg.data[..msg.length].to_vec(),
                             }),
@@ -1192,6 +1208,9 @@ fn apply_source_parameter(
         }
         if param.enable_pitch_bend {
             flag |= 0x20;
+        }
+        if param.echo_as_effect1 {
+            flag |= 0x10;
         }
         spc.dsp.write_register(ram, DSP_ADDRESS_SRN_FLAG, flag);
         spc.dsp
@@ -1622,6 +1641,9 @@ impl SPC2MIDI2Window for SRNWindow {
             checkbox(self.envelope_as_expression)
                 .label("Envelope as Expression")
                 .on_toggle(|flag| Message::EnvelopeAsExpressionFlagToggled(self.window_id, flag)),
+            checkbox(self.echo_as_effect1)
+                .label("Echo as Effect1")
+                .on_toggle(|flag| Message::EchoAsEffect1FlagToggled(self.window_id, flag)),
         ]
         .spacing(10)
         .padding(10)
@@ -1639,7 +1661,6 @@ impl SRNWindow {
         source_info: &SourceInformation,
         source_parameter: &SourceParameter,
     ) -> Self {
-        // FIXME: すでに設定済みのパラメータから設定
         Self {
             window_id: window_id,
             title: title,
@@ -1657,6 +1678,7 @@ impl SRNWindow {
             envelope_as_expression: source_parameter.envelope_as_expression,
             update_volume_pan: source_parameter.update_volume_pan,
             enable_pitch_bend: source_parameter.enable_pitch_bend,
+            echo_as_effect1: source_parameter.echo_as_effect1,
         }
     }
 }
