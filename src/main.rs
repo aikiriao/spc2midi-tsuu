@@ -802,7 +802,7 @@ impl App {
                     program: Program::AcousticGrand,
                     center_note: 64 << 8,
                     noteon_velocity: 100,
-                    pitchbend_width: 12,
+                    pitchbend_width: 24,
                     envelope_as_expression: true,
                     update_volume_pan: true,
                     enable_pitch_bend: true,
@@ -815,7 +815,8 @@ impl App {
     fn create_smf(&self) -> Option<SMF> {
         if let Some(spc_file) = &self.spc_file {
             let config = self.midi_output_configure.read().unwrap();
-            let ticks_per_minutes = ((config.beats_per_minute as u16) * config.ticks_per_quarter) as f64;
+            let ticks_per_minutes =
+                ((config.beats_per_minute as u16) * config.ticks_per_quarter) as f64;
             let mut smf = SMF {
                 format: SMFFormat::Single,
                 tracks: vec![Track {
@@ -915,7 +916,12 @@ impl App {
             let configure = self.midi_output_configure.read().unwrap();
             let params = self.source_parameter.read().unwrap();
             let mut midispc = midi_spc.lock().unwrap();
-            apply_source_parameter(&mut midispc, &configure, &params, &self.spc_file.as_ref().unwrap().ram);
+            apply_source_parameter(
+                &mut midispc,
+                &configure,
+                &params,
+                &self.spc_file.as_ref().unwrap().ram,
+            );
         }
 
         // 再生済みサンプル数
@@ -1400,11 +1406,11 @@ impl SPC2MIDI2Window for MainWindow {
             .map(|ch| {
                 row![
                     text(format!("{}", ch)),
-                    text(format!("{}", if status.noteon[ch] { "ON " } else { "OFF" })),
                     text(format!("0x{:02X}", status.srn_no[ch])),
+                    text(format!("{}", if status.noteon[ch] { "ON " } else { "OFF" })),
                     text(if status.pitch[ch] > 0 {
                         format!(
-                            "{}",
+                            "{:7.3}",
                             12.0 * f32::log2((status.pitch[ch] as f32) / (0x1000 as f32))
                         )
                     } else {
@@ -1427,7 +1433,7 @@ impl SPC2MIDI2Window for MainWindow {
             checkbox(self.midi_spc_mute)
                 .label("MIDI Mute")
                 .on_toggle(|flag| Message::MIDIMuteFlagToggled(flag)),
-            text(format!("{:8.3} sec", self.playback_time_sec)),
+            text(format!("{:8.2} sec", self.playback_time_sec)),
         ]
         .spacing(10)
         .width(Length::Fill)
@@ -1438,12 +1444,14 @@ impl SPC2MIDI2Window for MainWindow {
 
         let c = column![
             r,
-            Column::from_vec(srn_list)
-                .width(Length::Fill)
-                .height(Length::Fill),
-            Column::from_vec(status_list)
-                .width(Length::Fill)
-                .height(Length::Fill),
+            scrollable(
+                Column::from_vec(srn_list)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+            )
+            .width(Length::Fill)
+            .height(Length::Fill),
+            Column::from_vec(status_list).width(Length::Fill),
             preview_control,
         ];
 
@@ -1538,7 +1546,9 @@ impl PreferenceWindow {
             playback_parameter_update_period: config.playback_parameter_update_period,
             output_duration_msec: config.output_duration_msec,
             ticks_per_quarter: Some(config.ticks_per_quarter),
-            ticks_per_quarter_box: combo_box::State::new(vec![24, 30, 48, 60, 96, 120, 192, 240, 384, 480, 960]),
+            ticks_per_quarter_box: combo_box::State::new(vec![
+                24, 30, 48, 60, 96, 120, 192, 240, 384, 480, 960,
+            ]),
         }
     }
 }
@@ -1632,7 +1642,7 @@ impl SRNWindow {
             srn_no: srn_no,
             source_info: source_info.clone().into(),
             enable_loop_play: false,
-            enable_midi_preview: true,
+            enable_midi_preview: false,
             cache: Cache::default(),
             program: Some(source_parameter.program.clone()),
             program_box: combo_box::State::new(Program::ALL.to_vec()),
