@@ -1,5 +1,7 @@
+mod center_note_estimation;
 mod program;
 
+use crate::center_note_estimation::*;
 use crate::program::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, PauseStreamError, PlayStreamError, Stream, StreamConfig};
@@ -730,7 +732,7 @@ impl App {
         ram: &[u8],
         dsp_register: &[u8; 128],
     ) {
-        let analyze_duration_64khz_tick = analyze_duration_sec * 64000;
+        let analyze_duration_64khz_ticks = analyze_duration_sec * 64000;
 
         // 音源情報を作り直す
         let mut infos = self.source_infos.write().unwrap();
@@ -744,7 +746,7 @@ impl App {
         let mut cycle_count = 0;
         let mut tick64khz_count = 0;
         let mut start_address_map = BTreeMap::new();
-        while tick64khz_count < analyze_duration_64khz_tick {
+        while tick64khz_count < analyze_duration_64khz_ticks {
             cycle_count += spc.execute_step() as u32;
             if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
                 spc.clock_tick_64k_hz();
@@ -796,11 +798,13 @@ impl App {
                     loop_start_sample: ((loop_address - start_address) * 16) / 9,
                 },
             );
+            // 推定ピッチ
+            let center_note = center_note_estimation(&signal);
             params.insert(
                 *srn,
                 SourceParameter {
                     program: Program::AcousticGrand,
-                    center_note: 64 << 8,
+                    center_note: f32::round(center_note * ((1 << 8) as f32)) as u16,
                     noteon_velocity: 100,
                     pitchbend_width: 24,
                     envelope_as_expression: true,
