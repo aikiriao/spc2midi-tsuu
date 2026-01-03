@@ -1687,6 +1687,7 @@ impl canvas::Program<Message> for SRNWindow {
                 self.source_info.signal.len(),
                 self.source_info.loop_start_sample,
             );
+            // TODO: 時刻ラベル描画
         });
         vec![geometry]
     }
