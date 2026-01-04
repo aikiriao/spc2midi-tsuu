@@ -171,6 +171,8 @@ struct PlaybackStatus {
     srn_no: [u8; 8],
     /// 再生ピッチ
     pitch: [u16; 8],
+    /// エクスプレッション
+    expression: [u8; 8],
 }
 
 /// MIDI出力設定
@@ -846,12 +848,12 @@ impl App {
                 },
             );
             // 推定ピッチ
-            let center_note = center_note_estimation(&signal);
+            let center_note = center_note_estimation(&signal).round() as u16;
             params.insert(
                 *srn,
                 SourceParameter {
                     program: Program::AcousticGrand,
-                    center_note: f32::round(center_note * ((1 << 8) as f32)) as u16,
+                    center_note: center_note << 8,
                     noteon_velocity: 100,
                     pitchbend_width: 24,
                     envelope_as_expression: true,
@@ -1470,12 +1472,13 @@ impl SPC2MIDI2Window for MainWindow {
                     text(format!("{}", if status.noteon[ch] { "ON " } else { "OFF" })),
                     text(if status.pitch[ch] > 0 {
                         format!(
-                            "{:7.3}",
+                            "{:+7.2}",
                             12.0 * f32::log2((status.pitch[ch] as f32) / (0x1000 as f32))
                         )
                     } else {
                         format!("")
                     }),
+                    text(format!("{:3}", status.expression[ch])),
                 ]
                 .spacing(10)
                 .width(Length::Fill)
@@ -1908,6 +1911,7 @@ impl PlaybackStatus {
             noteon: [false; 8],
             srn_no: [0; 8],
             pitch: [0; 8],
+            expression: [0; 8],
         }
     }
 }
@@ -1927,6 +1931,8 @@ fn read_playback_status(midi_dsp: &spc700::mididsp::MIDIDSP) -> PlaybackStatus {
         let pitch_low =
             midi_dsp.read_register(&dummy_ram, DSP_ADDRESS_V0PITCHL | ((ch as u8) << 4));
         status.pitch[ch] = ((pitch_high as u16) << 8) | (pitch_low as u16);
+        status.expression[ch] =
+            midi_dsp.read_register(&dummy_ram, DSP_ADDRESS_V0ENVX | ((ch as u8) << 4));
     }
 
     status
