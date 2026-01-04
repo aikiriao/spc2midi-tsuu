@@ -18,11 +18,11 @@ fn detect_nonzero_erea(signal: &Vec<f32>) -> (usize, usize) {
     let mut start = 0;
     let mut end = signal.len() - 1;
 
-    while signal[start].abs() < 1e-8 {
+    while start < signal.len() && signal[start].abs() < 1e-8 {
         start += 1;
     }
 
-    while signal[end].abs() < 1e-8 {
+    while end > 0 && signal[end].abs() < 1e-8 {
         end -= 1;
     }
 
