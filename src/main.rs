@@ -109,6 +109,7 @@ enum Message {
     UpdateVolumePanFlagToggled(window::Id, bool),
     EnvelopeAsExpressionFlagToggled(window::Id, bool),
     EchoAsEffect1FlagToggled(window::Id, bool),
+    ReceivedSourceParameterUpdate,
     MIDIOutputPortSelected(window::Id, String),
     MIDIOutputBpmChanged(window::Id, u8),
     MIDIOutputTicksPerQuarterChanged(window::Id, u16),
@@ -515,12 +516,17 @@ impl App {
                         param.program = program.clone();
                     }
                     srn_win.program = Some(program);
+                    let mut tasks = vec![];
                     if srn_win.enable_midi_preview {
                         let srn_no = srn_win.srn_no;
-                        return Task::perform(async {}, move |_| {
+                        tasks.push(Task::perform(async {}, move |_| {
                             Message::ReceivedMIDIPreviewRequest(srn_no)
-                        });
+                        }));
                     }
+                    tasks.push(Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    }));
+                    return Task::batch(tasks);
                 }
             }
             Message::CenterNoteIntChanged(id, note) => {
@@ -531,12 +537,17 @@ impl App {
                     if let Some(param) = params.get_mut(&srn_win.srn_no) {
                         srn_win.center_note_int = note;
                         param.center_note = (param.center_note & 0x00FF) | ((note as u16) << 8);
+                        let mut tasks = vec![];
                         if srn_win.enable_midi_preview {
                             let srn_no = srn_win.srn_no;
-                            return Task::perform(async {}, move |_| {
+                            tasks.push(Task::perform(async {}, move |_| {
                                 Message::ReceivedMIDIPreviewRequest(srn_no)
-                            });
+                            }));
                         }
+                        tasks.push(Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        }));
+                        return Task::batch(tasks);
                     }
                 }
             }
@@ -550,6 +561,9 @@ impl App {
                         srn_win.center_note_fraction = clamped_fraction / 256.0;
                         param.center_note =
                             (param.center_note & 0xFF00) | (clamped_fraction as u16);
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        });
                     }
                 }
             }
@@ -578,6 +592,9 @@ impl App {
                     if let Some(param) = params.get_mut(&srn_win.srn_no) {
                         srn_win.pitchbend_width = width;
                         param.pitchbend_width = srn_win.pitchbend_width;
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        });
                     }
                 }
             }
@@ -587,9 +604,12 @@ impl App {
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let mut params = self.source_parameter.write().unwrap();
                     if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        srn_win.enable_pitch_bend = flag;
                         param.enable_pitch_bend = flag;
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        });
                     }
-                    srn_win.enable_pitch_bend = flag;
                 }
             }
             Message::UpdateVolumePanFlagToggled(id, flag) => {
@@ -598,9 +618,12 @@ impl App {
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let mut params = self.source_parameter.write().unwrap();
                     if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        srn_win.update_volume_pan = flag;
                         param.update_volume_pan = flag;
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        });
                     }
-                    srn_win.update_volume_pan = flag;
                 }
             }
             Message::EnvelopeAsExpressionFlagToggled(id, flag) => {
@@ -609,9 +632,12 @@ impl App {
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let mut params = self.source_parameter.write().unwrap();
                     if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        srn_win.envelope_as_expression = flag;
                         param.envelope_as_expression = flag;
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        });
                     }
-                    srn_win.envelope_as_expression = flag;
                 }
             }
             Message::EchoAsEffect1FlagToggled(id, flag) => {
@@ -620,10 +646,16 @@ impl App {
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let mut params = self.source_parameter.write().unwrap();
                     if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        srn_win.echo_as_effect1 = flag;
                         param.echo_as_effect1 = flag;
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        });
                     }
-                    srn_win.echo_as_effect1 = flag;
                 }
+            }
+            Message::ReceivedSourceParameterUpdate => {
+                self.apply_source_parameter();
             }
             Message::ReceivedMIDIPreviewRequest(srn_no) => {
                 self.preview_midi_sound(srn_no);
@@ -932,17 +964,7 @@ impl App {
         let midi_spc_mute = self.midi_spc_mute.clone();
 
         // SPCにパラメータ適用
-        {
-            let configure = self.midi_output_configure.read().unwrap();
-            let params = self.source_parameter.read().unwrap();
-            let mut midispc = midi_spc.lock().unwrap();
-            apply_source_parameter(
-                &mut midispc,
-                &configure,
-                &params,
-                &self.spc_file.as_ref().unwrap().ram,
-            );
-        }
+        self.apply_source_parameter();
 
         // 再生済みサンプル数
         let played_samples = self.stream_played_samples.clone();
@@ -1185,6 +1207,21 @@ impl App {
             conn_out
                 .send(&[MIDIMSG_NOTE_OFF | 0x9, program - 0x80, 0])
                 .unwrap();
+        }
+    }
+
+    fn apply_source_parameter(&mut self) {
+        if let Some(midi_spc_ref) = &self.midi_spc {
+            let midi_spc = midi_spc_ref.clone();
+            let config = self.midi_output_configure.read().unwrap();
+            let params = self.source_parameter.read().unwrap();
+            let mut midispc = midi_spc.lock().unwrap();
+            apply_source_parameter(
+                &mut midispc,
+                &config,
+                &params,
+                &self.spc_file.as_ref().unwrap().ram,
+            );
         }
     }
 }
