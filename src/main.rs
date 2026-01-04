@@ -67,6 +67,10 @@ const MIDIMSG_MODE_ALL_SOUND_OFF: u8 = 0x78;
 const MIDI_PREVIEW_CHANNEL: u8 = 0;
 /// MIDIをプレビューする時間(msec)
 const MIDI_PREVIEW_DURATION_MSEC: u64 = 500;
+/// デフォルトの音源の分析時間(sec)
+const DEFAULT_ANALYZING_TIME_SEC: u32 = 120;
+/// デフォルトのMIDIファイル出力時間(sec)
+const DEFAULT_OUTPUT_DURATION_MSEC: u64 = 60 * 1000;
 
 pub fn main() -> iced::Result {
     iced::daemon(App::new, App::update, App::view)
@@ -384,7 +388,11 @@ impl App {
                     if let Some(spc_file) = parse_spc_file(&data) {
                         self.spc_file = Some(Box::new(spc_file.clone()));
                         self.analyze_sources(
-                            60 * 2,
+                            if spc_file.header.duration > 0 {
+                                spc_file.header.duration as u32
+                            } else {
+                                DEFAULT_ANALYZING_TIME_SEC
+                            },
                             &spc_file.header.spc_register,
                             &spc_file.ram,
                             &spc_file.dsp_register,
@@ -412,6 +420,13 @@ impl App {
                                 path.file_name().unwrap().to_str().unwrap()
                             );
                         }
+                        // 出力時間をSPCの情報を元に設定
+                        let mut config = self.midi_output_configure.write().unwrap();
+                        config.output_duration_msec = if spc_file.header.duration > 0 {
+                            (spc_file.header.duration as u64) * 1000
+                        } else {
+                            DEFAULT_OUTPUT_DURATION_MSEC
+                        };
                     }
                 }
                 Err(e) => {
@@ -1946,14 +1961,13 @@ fn read_playback_status(midi_dsp: &spc700::mididsp::MIDIDSP) -> PlaybackStatus {
 }
 
 impl MIDIOutputConfigure {
-    const DEFAULT_OUTPUT_DURATION_MSEC: u64 = 60 * 1000;
     const DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC: u8 = 10;
     const MIDI_DEFAULT_BPM: u8 = 120;
     const MIDI_DEFAULT_RESOLUSIONS: u16 = 480;
 
     fn new() -> Self {
         Self {
-            output_duration_msec: Self::DEFAULT_OUTPUT_DURATION_MSEC,
+            output_duration_msec: DEFAULT_OUTPUT_DURATION_MSEC,
             playback_parameter_update_period: Self::DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC,
             beats_per_minute: Self::MIDI_DEFAULT_BPM,
             ticks_per_quarter: Self::MIDI_DEFAULT_RESOLUSIONS,
