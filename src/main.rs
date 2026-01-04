@@ -160,6 +160,8 @@ struct SourceParameter {
     enable_pitch_bend: bool,
     /// エコーをエフェクト1デプスとして出力するか
     echo_as_effect1: bool,
+    /// MIDIプレビューを行うか
+    enable_midi_preview: bool,
 }
 
 /// 再生中の状態
@@ -454,7 +456,11 @@ impl App {
                 if let Some(window) = self.windows.get_mut(&id) {
                     let srn_win: &mut SRNWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    srn_win.enable_midi_preview = flag;
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        srn_win.enable_midi_preview = flag;
+                        param.enable_midi_preview = flag;
+                    }
                 }
             }
             Message::ReceivedPlayStartRequest => {
@@ -848,18 +854,19 @@ impl App {
                 },
             );
             // 推定ピッチ
-            let center_note = center_note_estimation(&signal).round() as u16;
+            let center_note = center_note_estimation(&signal);
             params.insert(
                 *srn,
                 SourceParameter {
                     program: Program::AcousticGrand,
-                    center_note: center_note << 8,
+                    center_note: f32::round(center_note * 256.0) as u16,
                     noteon_velocity: 100,
                     pitchbend_width: 24,
                     envelope_as_expression: true,
                     update_volume_pan: true,
                     enable_pitch_bend: true,
                     echo_as_effect1: true,
+                    enable_midi_preview: true,
                 },
             );
         }
@@ -1707,7 +1714,7 @@ impl SRNWindow {
             srn_no: srn_no,
             source_info: source_info.clone().into(),
             enable_loop_play: false,
-            enable_midi_preview: false,
+            enable_midi_preview: source_parameter.enable_midi_preview,
             cache: Cache::default(),
             program: Some(source_parameter.program.clone()),
             program_box: combo_box::State::new(Program::ALL.to_vec()),
