@@ -6,7 +6,7 @@ const SPC_SAMPLING_RATE: f32 = 32000.0;
 /// センターピッチ(A4)
 const A4_PITCH_HZ: f32 = 440.0;
 /// 有効なピッチ候補と認めるスレッショルド
-const PITCH_PEAK_THRESHOLD: f32 = 0.6;
+const PITCH_PEAK_THRESHOLD: f32 = 0.8;
 
 macro_rules! chirp(
     ($m:expr) => ({
@@ -14,7 +14,31 @@ macro_rules! chirp(
     });
 );
 
+fn detect_nonzero_erea(signal: &Vec<f32>) -> (usize, usize) {
+    let mut start = 0;
+    let mut end = signal.len() - 1;
+
+    while signal[start].abs() < 1e-8 {
+        start += 1;
+    }
+
+    while signal[end].abs() < 1e-8 {
+        end -= 1;
+    }
+
+    (start, end)
+}
+
+/// センターノートの推定
 pub fn center_note_estimation(signal: &Vec<f32>) -> f32 {
+    // 分析範囲の切り出し
+    let (start, end) = detect_nonzero_erea(signal);
+    let signal = if start < end {
+        signal[start..end].to_vec()
+    } else {
+        signal.to_vec()
+    };
+
     // Chirp-z transform
     let m = signal.len();
     let spec = transform(signal.as_slice(), m, chirp!(m), c32::new(1.0, 0.0));
