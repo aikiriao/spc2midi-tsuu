@@ -110,7 +110,10 @@ enum Message {
     NoteOnVelocityChanged(window::Id, u8),
     PitchBendWidthChanged(window::Id, u8),
     EnablePitchBendFlagToggled(window::Id, bool),
-    UpdateVolumePanFlagToggled(window::Id, bool),
+    AutoPanFlagToggled(window::Id, bool),
+    FixedPanChanged(window::Id, u8),
+    AutoVolumeFlagToggled(window::Id, bool),
+    FixedVolumeChanged(window::Id, u8),
     EnvelopeAsExpressionFlagToggled(window::Id, bool),
     EchoAsEffect1FlagToggled(window::Id, bool),
     ReceivedSourceParameterUpdate,
@@ -158,8 +161,14 @@ struct SourceParameter {
     pitchbend_width: u8,
     /// エンベロープをエクスプレッションとして出力するか
     envelope_as_expression: bool,
-    /// ボリューム・パンを発音中に更新するか
-    update_volume_pan: bool,
+    /// パンを発音中に更新するか
+    auto_pan: bool,
+    /// パン値
+    fixed_pan: u8,
+    /// ボリュームを発音中に更新するか
+    auto_volume: bool,
+    /// ボリューム値
+    fixed_volume: u8,
     /// ピッチベンドを使うか
     enable_pitch_bend: bool,
     /// エコーをエフェクト1デプスとして出力するか
@@ -234,7 +243,10 @@ struct SRNWindow {
     noteon_velocity: u8,
     pitchbend_width: u8,
     envelope_as_expression: bool,
-    update_volume_pan: bool,
+    auto_pan: bool,
+    fixed_pan: u8,
+    auto_volume: bool,
+    fixed_volume: u8,
     enable_pitch_bend: bool,
     echo_as_effect1: bool,
 }
@@ -635,14 +647,56 @@ impl App {
                     }
                 }
             }
-            Message::UpdateVolumePanFlagToggled(id, flag) => {
+            Message::AutoPanFlagToggled(id, flag) => {
                 if let Some(window) = self.windows.get_mut(&id) {
                     let srn_win: &mut SRNWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let mut params = self.source_parameter.write().unwrap();
                     if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.update_volume_pan = flag;
-                        param.update_volume_pan = flag;
+                        srn_win.auto_pan = flag;
+                        param.auto_pan = flag;
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        });
+                    }
+                }
+            }
+            Message::FixedPanChanged(id, pan) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        srn_win.fixed_pan = pan;
+                        param.fixed_pan = pan;
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        });
+                    }
+                }
+            }
+            Message::AutoVolumeFlagToggled(id, flag) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        srn_win.auto_volume = flag;
+                        param.auto_volume = flag;
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        });
+                    }
+                }
+            }
+            Message::FixedVolumeChanged(id, volume) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let mut params = self.source_parameter.write().unwrap();
+                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
+                        srn_win.fixed_volume = volume;
+                        param.fixed_volume = volume;
                         return Task::perform(async {}, move |_| {
                             Message::ReceivedSourceParameterUpdate
                         });
@@ -878,7 +932,10 @@ impl App {
                     noteon_velocity: 100,
                     pitchbend_width: 24,
                     envelope_as_expression: true,
-                    update_volume_pan: true,
+                    auto_pan: true,
+                    fixed_pan: 64,
+                    auto_volume: false,
+                    fixed_volume: 100,
                     enable_pitch_bend: true,
                     echo_as_effect1: true,
                     enable_midi_preview: true,
@@ -1264,18 +1321,23 @@ fn apply_source_parameter(
         if param.envelope_as_expression {
             flag |= 0x80;
         }
-        if param.update_volume_pan {
+        if param.enable_pitch_bend {
             flag |= 0x40;
         }
-        if param.enable_pitch_bend {
+        if param.echo_as_effect1 {
             flag |= 0x20;
         }
-        if param.echo_as_effect1 {
+        if param.auto_volume {
             flag |= 0x10;
+        }
+        if param.auto_volume {
+            flag |= 0x08;
         }
         spc.dsp.write_register(ram, DSP_ADDRESS_SRN_FLAG, flag);
         spc.dsp
             .write_register(ram, DSP_ADDRESS_SRN_PROGRAM, param.program.clone() as u8);
+        spc.dsp
+            .write_register(ram, DSP_ADDRESS_SRN_NOTEON_VELOCITY, param.noteon_velocity);
         spc.dsp.write_register(
             ram,
             DSP_ADDRESS_SRN_CENTER_NOTE,
@@ -1287,7 +1349,9 @@ fn apply_source_parameter(
             (param.center_note & 0xFF) as u8,
         );
         spc.dsp
-            .write_register(ram, DSP_ADDRESS_SRN_NOTEON_VELOCITY, param.noteon_velocity);
+            .write_register(ram, DSP_ADDRESS_SRN_FIXED_VOLUME, param.fixed_volume);
+        spc.dsp
+            .write_register(ram, DSP_ADDRESS_SRN_FIXED_PAN, param.fixed_pan);
         spc.dsp.write_register(
             ram,
             DSP_ADDRESS_SRN_PITCHBEND_SENSITIVITY,
@@ -1697,9 +1761,30 @@ impl SPC2MIDI2Window for SRNWindow {
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
-            checkbox(self.update_volume_pan)
-                .label("Update Volume & Pan")
-                .on_toggle(|flag| Message::UpdateVolumePanFlagToggled(self.window_id, flag)),
+            row![
+                checkbox(self.auto_pan)
+                    .label("Auto Pan")
+                    .on_toggle(|flag| Message::AutoPanFlagToggled(self.window_id, flag)),
+                number_input(&self.fixed_pan, 0..=127, move |pan| {
+                    Message::FixedPanChanged(window_id, pan)
+                },)
+                .step(1),
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center),
+            row![
+                checkbox(self.auto_volume)
+                    .label("Auto Volume")
+                    .on_toggle(|flag| Message::AutoVolumeFlagToggled(self.window_id, flag)),
+                number_input(&self.fixed_volume, 0..=127, move |volume| {
+                    Message::FixedVolumeChanged(window_id, volume)
+                },)
+                .step(1),
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center),
             checkbox(self.envelope_as_expression)
                 .label("Envelope as Expression")
                 .on_toggle(|flag| Message::EnvelopeAsExpressionFlagToggled(self.window_id, flag)),
@@ -1738,7 +1823,10 @@ impl SRNWindow {
             noteon_velocity: source_parameter.noteon_velocity,
             pitchbend_width: source_parameter.pitchbend_width,
             envelope_as_expression: source_parameter.envelope_as_expression,
-            update_volume_pan: source_parameter.update_volume_pan,
+            auto_pan: source_parameter.auto_pan,
+            fixed_pan: source_parameter.fixed_pan,
+            auto_volume: source_parameter.auto_volume,
+            fixed_volume: source_parameter.fixed_volume,
             enable_pitch_bend: source_parameter.enable_pitch_bend,
             echo_as_effect1: source_parameter.echo_as_effect1,
         }
