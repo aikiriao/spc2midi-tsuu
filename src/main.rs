@@ -1330,7 +1330,7 @@ fn apply_source_parameter(
         if param.auto_volume {
             flag |= 0x10;
         }
-        if param.auto_volume {
+        if param.auto_pan {
             flag |= 0x08;
         }
         spc.dsp.write_register(ram, DSP_ADDRESS_SRN_FLAG, flag);
