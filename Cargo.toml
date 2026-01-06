@@ -11,6 +11,7 @@ iced = { version = "0.14.0", features = ["tokio"] }
 iced_aw = { version = "0.13.0", features = ["full"] }
 iced_widget = "0.14.2"
 midir = "0.10.3"
+num-traits = "0.2.19"
 rfd = "0.16.0"
 rimd = "0.0.1"
 samplerate = "0.2.4"

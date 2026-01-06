@@ -15,7 +15,7 @@ use iced::widget::{
     Space, Stack,
 };
 use iced::{
-    alignment, event, mouse, theme, time, window, Border, Color, Element, Function, Length,
+    alignment, event, mouse, theme, time, window, Border, Color, Element, Font, Function, Length,
     Padding, Point, Rectangle, Renderer, Size, Subscription, Task, Theme, Vector,
 };
 use iced_aw::menu::{self, Item, Menu};
@@ -23,6 +23,7 @@ use iced_aw::style::{menu_bar::primary, Status};
 use iced_aw::{iced_aw_font, menu_bar, menu_items, number_input, ICED_AW_FONT_BYTES};
 use iced_aw::{quad, widgets::InnerBounds};
 use midir::{MidiOutput, MidiOutputConnection, MidiOutputPort};
+use num_traits::pow::Pow;
 use rfd::AsyncFileDialog;
 use rimd::{Event as MidiEvent, MidiMessage, SMFFormat, SMFWriter, Track, TrackEvent, SMF};
 use samplerate::{convert, ConverterType};
@@ -1856,6 +1857,7 @@ impl canvas::Program<Message> for SRNWindow {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
+        const TIMELABEL_HEIGHT: f32 = 10.0;
         let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
             // 波形描画
             draw_waveform(
@@ -1871,7 +1873,17 @@ impl canvas::Program<Message> for SRNWindow {
                 self.source_info.signal.len(),
                 self.source_info.loop_start_sample,
             );
-            // TODO: 時刻ラベル描画
+            // 時刻ラベル描画
+            draw_timelabel(
+                frame,
+                &Rectangle::new(
+                    Point::new(0.0, bounds.height - TIMELABEL_HEIGHT),
+                    Size::new(bounds.width, TIMELABEL_HEIGHT),
+                ),
+                SPC_SAMPLING_RATE as f32,
+                self.source_info.signal.len(),
+                16,
+            );
         });
         vec![geometry]
     }
@@ -2025,6 +2037,42 @@ fn draw_loop_point(
             ..Stroke::default()
         },
     );
+}
+
+/// 時刻ラベル描画
+fn draw_timelabel(
+    frame: &mut Frame,
+    bounds: &Rectangle,
+    sampling_rate: f32,
+    num_samples: usize,
+    num_labels: usize,
+) {
+    let timelabel_left_x = bounds.center().x - bounds.width / 2.0;
+    let timelabel_y = bounds.center().y;
+    let duration = (num_samples as f32) * 1000.0 / sampling_rate;
+    // ラベル描画間隔
+    let tick = 10.0f32.pow((duration / 2.0).log10().floor());
+    let period = 1000.0 / sampling_rate;
+    let mut next_tick = tick;
+    for i in 0..num_samples {
+        let time = (i as f32) * period;
+        if time >= next_tick {
+            frame.fill_text(canvas::Text {
+                content: format!("{:.0}", time),
+                size: iced::Pixels(14.0),
+                position: Point::new(
+                    timelabel_left_x + (i as f32) * bounds.width / (num_samples as f32 - 1.0),
+                    timelabel_y,
+                ),
+                color: Color::WHITE,
+                align_x: alignment::Horizontal::Center.into(),
+                align_y: alignment::Vertical::Bottom,
+                font: Font::MONOSPACE,
+                ..canvas::Text::default()
+            });
+            next_tick += tick;
+        }
+    }
 }
 
 impl PlaybackStatus {
