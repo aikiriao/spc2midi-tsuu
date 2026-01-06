@@ -1765,9 +1765,15 @@ impl SPC2MIDI2Window for SRNWindow {
                 checkbox(self.auto_pan)
                     .label("Auto Pan")
                     .on_toggle(|flag| Message::AutoPanFlagToggled(self.window_id, flag)),
-                number_input(&self.fixed_pan, 0..=127, move |pan| {
-                    Message::FixedPanChanged(window_id, pan)
-                },)
+                number_input(
+                    &self.fixed_pan,
+                    if self.auto_pan {
+                        self.fixed_pan..=self.fixed_pan
+                    } else {
+                        0..=127
+                    },
+                    move |pan| { Message::FixedVolumeChanged(window_id, pan) }
+                )
                 .step(1),
             ]
             .spacing(10)
@@ -1777,9 +1783,15 @@ impl SPC2MIDI2Window for SRNWindow {
                 checkbox(self.auto_volume)
                     .label("Auto Volume")
                     .on_toggle(|flag| Message::AutoVolumeFlagToggled(self.window_id, flag)),
-                number_input(&self.fixed_volume, 0..=127, move |volume| {
-                    Message::FixedVolumeChanged(window_id, volume)
-                },)
+                number_input(
+                    &self.fixed_volume,
+                    if self.auto_volume {
+                        self.fixed_volume..=self.fixed_volume
+                    } else {
+                        0..=127
+                    },
+                    move |volume| { Message::FixedVolumeChanged(window_id, volume) }
+                )
                 .step(1),
             ]
             .spacing(10)
