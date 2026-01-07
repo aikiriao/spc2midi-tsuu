@@ -118,6 +118,7 @@ enum Message {
     EnvelopeAsExpressionFlagToggled(window::Id, bool),
     EchoAsEffect1FlagToggled(window::Id, bool),
     ReceivedSourceParameterUpdate,
+    AudioOutputDeviceSelected(window::Id, String),
     MIDIOutputPortSelected(window::Id, String),
     MIDIOutputBpmChanged(window::Id, u8),
     MIDIOutputTicksPerQuarterChanged(window::Id, u16),
@@ -219,6 +220,8 @@ struct MainWindow {
 struct PreferenceWindow {
     title: String,
     window_id: window::Id,
+    audio_out_device_name: Option<String>,
+    audio_out_devices_box: combo_box::State<String>,
     midi_out_port_name: Option<String>,
     midi_ports_box: combo_box::State<String>,
     playback_parameter_update_period: u8,
@@ -271,6 +274,7 @@ struct App {
     midi_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>>>>>,
     pcm_spc_mute: Arc<AtomicBool>,
     midi_spc_mute: Arc<AtomicBool>,
+    audio_out_device_name: Option<String>,
     midi_out_port_name: Option<String>,
 }
 
@@ -297,7 +301,7 @@ impl Default for App {
             playback_status: Arc::new(RwLock::new(PlaybackStatus::new())),
             midi_output_configure: Arc::new(RwLock::new(MIDIOutputConfigure::new())),
             stream_config: device.default_output_config().unwrap().into(),
-            stream_device: device,
+            stream_device: device.clone(),
             stream: None,
             stream_played_samples: Arc::new(AtomicUsize::new(0)),
             stream_is_playing: Arc::new(AtomicBool::new(false)),
@@ -313,6 +317,12 @@ impl Default for App {
             midi_spc: None,
             pcm_spc_mute: Arc::new(AtomicBool::new(false)),
             midi_spc_mute: Arc::new(AtomicBool::new(false)),
+            audio_out_device_name: Some(
+                device
+                    .description()
+                    .expect("Failed to get device name")
+                    .to_string(),
+            ),
             midi_out_port_name: midi_out_port_name,
         }
     }
@@ -361,6 +371,7 @@ impl App {
                     Box::new(PreferenceWindow::new(
                         id,
                         "Preference".to_string(),
+                        self.audio_out_device_name.clone(),
                         self.midi_out_port_name.clone(),
                         self.midi_output_configure.clone(),
                     )),
@@ -737,6 +748,28 @@ impl App {
             }
             Message::ReceivedMIDIPreviewRequest(srn_no) => {
                 self.preview_midi_sound(srn_no);
+            }
+            Message::AudioOutputDeviceSelected(id, device_name) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    let pref_win: &mut PreferenceWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    pref_win.audio_out_device_name = Some(device_name.clone());
+                    self.audio_out_device_name = Some(device_name.clone());
+                    // オーディオ出力デバイスを再構築
+                    let mut devices = cpal::default_host()
+                        .devices()
+                        .expect("Failed to get devices");
+                    self.stream_device = devices
+                        .filter(|d| d.supports_output())
+                        .find(|d| d.description().unwrap().to_string() == device_name)
+                        .expect("Failed to create output stream device");
+                    self.stream_config = self
+                        .stream_device
+                        .clone()
+                        .default_output_config()
+                        .unwrap()
+                        .into();
+                }
             }
             Message::MIDIOutputPortSelected(id, port_name) => {
                 if let Some(window) = self.windows.get_mut(&id) {
@@ -1637,8 +1670,14 @@ impl SPC2MIDI2Window for PreferenceWindow {
         let window_id = self.window_id;
         let content = column![
             combo_box(
+                &self.audio_out_devices_box,
+                "Audio Output port",
+                self.audio_out_device_name.as_ref(),
+                move |device_name| Message::AudioOutputDeviceSelected(window_id, device_name),
+            ),
+            combo_box(
                 &self.midi_ports_box,
-                "Program",
+                "MIDI Output port",
                 self.midi_out_port_name.as_ref(),
                 move |port_name| Message::MIDIOutputPortSelected(window_id, port_name),
             ),
@@ -1677,9 +1716,20 @@ impl PreferenceWindow {
     fn new(
         window_id: window::Id,
         title: String,
+        audio_out_device_name: Option<String>,
         midi_out_port_name: Option<String>,
         midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
     ) -> Self {
+        let device_name_list: Vec<String> = cpal::default_host()
+            .devices()
+            .unwrap()
+            .filter(|d| d.supports_output())
+            .map(|d| {
+                d.description()
+                    .expect("Failed to get device name")
+                    .to_string()
+            })
+            .collect();
         let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
         let port_name_list: Vec<String> = midi_out
             .ports()
@@ -1690,6 +1740,8 @@ impl PreferenceWindow {
         Self {
             title: title,
             window_id: window_id,
+            audio_out_device_name: audio_out_device_name,
+            audio_out_devices_box: combo_box::State::new(device_name_list),
             midi_out_port_name: midi_out_port_name,
             midi_ports_box: combo_box::State::new(port_name_list),
             beats_per_minute: config.beats_per_minute,
