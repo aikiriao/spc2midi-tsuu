@@ -1522,7 +1522,7 @@ async fn save_smf(smf: SMF) -> Result<(), Error> {
 
 async fn save_json(json: serde_json::Value) -> Result<(), Error> {
     let picked_file = AsyncFileDialog::new()
-        .set_file_name("output.mid")
+        .set_file_name("output.json")
         .set_title("Save to a JSON file...")
         .add_filter("JSON", &["json"])
         .save_file()
@@ -1532,7 +1532,7 @@ async fn save_json(json: serde_json::Value) -> Result<(), Error> {
     match File::create(picked_file.path()) {
         Ok(file) => {
             let writer = BufWriter::new(file);
-            serde_json::to_writer(writer, &json).expect("Faied to write json");
+            serde_json::to_writer_pretty(writer, &json).expect("Faied to write json");
             Ok(())
         }
         _ => Err(Error::DialogClosed),
