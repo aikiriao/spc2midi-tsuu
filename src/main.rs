@@ -964,7 +964,7 @@ impl App {
                     program: Program::AcousticGrand,
                     center_note: f32::round(center_note * 256.0) as u16,
                     noteon_velocity: 100,
-                    pitchbend_width: 24,
+                    pitchbend_width: 12,
                     envelope_as_expression: true,
                     auto_pan: true,
                     fixed_pan: 64,
