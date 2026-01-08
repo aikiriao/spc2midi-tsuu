@@ -27,9 +27,13 @@ use num_traits::pow::Pow;
 use rfd::AsyncFileDialog;
 use rimd::{Event as MidiEvent, MidiMessage, SMFFormat, SMFWriter, Track, TrackEvent, SMF};
 use samplerate::{convert, ConverterType};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
+use std::fs::File;
+use std::io::BufWriter;
 use std::num::NonZero;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -92,9 +96,11 @@ enum Message {
     SRNWindowOpened(window::Id),
     WindowClosed(window::Id),
     OpenFile,
-    FileOpened(Result<(PathBuf, Vec<u8>), Error>),
+    FileOpened(Result<(PathBuf, LoadedFile), Error>),
     SaveSMF,
     SMFSaved(Result<(), Error>),
+    SaveJSON,
+    JSONSaved(Result<(), Error>),
     MenuSelected,
     EventOccurred(iced::Event),
     ReceivedSRNPlayStartRequest(u8, bool),
@@ -151,7 +157,7 @@ struct SourceInformation {
 }
 
 /// 1音源のパラメータ
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SourceParameter {
     /// プログラム番号
     program: Program,
@@ -193,7 +199,7 @@ struct PlaybackStatus {
 }
 
 /// MIDI出力設定
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct MIDIOutputConfigure {
     /// 出力時間(ms)
     output_duration_msec: u64,
@@ -276,6 +282,21 @@ struct App {
     midi_spc_mute: Arc<AtomicBool>,
     audio_out_device_name: Option<String>,
     midi_out_port_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ExportInformation {
+    /// MIDI出力設定
+    midi_output_configure: MIDIOutputConfigure,
+    /// 音源パラメータ割当
+    source_parameter: BTreeMap<u8, SourceParameter>,
+}
+
+/// 読み込んだデータ
+#[derive(Clone, Debug)]
+enum LoadedFile {
+    SPCFile(Vec<u8>),
+    JSONFile(String),
 }
 
 impl Default for App {
@@ -409,52 +430,69 @@ impl App {
             }
             Message::FileOpened(result) => match result {
                 Ok((path, data)) => {
-                    if let Some(spc_file) = parse_spc_file(&data) {
-                        self.spc_file = Some(Box::new(spc_file.clone()));
-                        self.analyze_sources(
-                            if spc_file.header.duration > 0 {
-                                spc_file.header.duration as u32
-                            } else {
-                                DEFAULT_ANALYZING_TIME_SEC
-                            },
-                            &spc_file.header.spc_register,
-                            &spc_file.ram,
-                            &spc_file.dsp_register,
-                        );
-                        // SPCを生成
-                        self.pcm_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
-                            &spc_file.header.spc_register,
-                            &spc_file.ram,
-                            &spc_file.dsp_register,
-                        )))));
-                        self.midi_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
-                            &spc_file.header.spc_register,
-                            &spc_file.ram,
-                            &spc_file.dsp_register,
-                        )))));
-                        // 再生サンプル数をリセット
-                        self.stream_played_samples.store(0, Ordering::Relaxed);
-                        // ウィンドウタイトルに開いたファイル名を追記
-                        if let Some(window) = self.windows.get_mut(&self.main_window_id) {
-                            let main_window: &mut MainWindow =
-                                window.as_mut().as_any_mut().downcast_mut().unwrap();
-                            main_window.title = format!(
-                                "{} - {}",
-                                SPC2MIDI2_TITLE_STR,
-                                path.file_name().unwrap().to_str().unwrap()
-                            );
+                    match data {
+                        LoadedFile::SPCFile(data) => {
+                            if let Some(spc_file) = parse_spc_file(&data) {
+                                self.spc_file = Some(Box::new(spc_file.clone()));
+                                self.analyze_sources(
+                                    if spc_file.header.duration > 0 {
+                                        spc_file.header.duration as u32
+                                    } else {
+                                        DEFAULT_ANALYZING_TIME_SEC
+                                    },
+                                    &spc_file.header.spc_register,
+                                    &spc_file.ram,
+                                    &spc_file.dsp_register,
+                                );
+                                // SPCを生成
+                                self.pcm_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
+                                    &spc_file.header.spc_register,
+                                    &spc_file.ram,
+                                    &spc_file.dsp_register,
+                                )))));
+                                self.midi_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
+                                    &spc_file.header.spc_register,
+                                    &spc_file.ram,
+                                    &spc_file.dsp_register,
+                                )))));
+                                // 再生サンプル数をリセット
+                                self.stream_played_samples.store(0, Ordering::Relaxed);
+                                // ウィンドウタイトルに開いたファイル名を追記
+                                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                                    let main_window: &mut MainWindow =
+                                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                                    main_window.title = format!(
+                                        "{} - {}",
+                                        SPC2MIDI2_TITLE_STR,
+                                        path.file_name().unwrap().to_str().unwrap()
+                                    );
+                                }
+                                // 出力時間をSPCの情報を元に設定
+                                let mut config = self.midi_output_configure.write().unwrap();
+                                config.output_duration_msec = if spc_file.header.duration > 0 {
+                                    (spc_file.header.duration as u64) * 1000
+                                } else {
+                                    DEFAULT_OUTPUT_DURATION_MSEC
+                                };
+                            }
                         }
-                        // 出力時間をSPCの情報を元に設定
-                        let mut config = self.midi_output_configure.write().unwrap();
-                        config.output_duration_msec = if spc_file.header.duration > 0 {
-                            (spc_file.header.duration as u64) * 1000
-                        } else {
-                            DEFAULT_OUTPUT_DURATION_MSEC
-                        };
+                        LoadedFile::JSONFile(data) => {
+                            match serde_json::from_str::<ExportInformation>(&data) {
+                                Ok(json) => {
+                                    let mut config = self.midi_output_configure.write().unwrap();
+                                    let mut params = self.source_parameter.write().unwrap();
+                                    *config = json.midi_output_configure;
+                                    *params = json.source_parameter;
+                                }
+                                Err(e) => {
+                                    eprintln!("ERROR: failed to load json file: {:?}", e);
+                                }
+                            }
+                        }
                     }
                 }
                 Err(e) => {
-                    eprintln!("ERROR: failed to open wav file: {:?}", e);
+                    eprintln!("ERROR: failed to open file: {:?}", e);
                 }
             },
             Message::SaveSMF => {
@@ -463,6 +501,10 @@ impl App {
                 }
             }
             Message::SMFSaved(result) => {}
+            Message::SaveJSON => {
+                return Task::perform(save_json(self.create_json()), Message::JSONSaved);
+            }
+            Message::JSONSaved(result) => {}
             Message::MenuSelected => {}
             Message::EventOccurred(event) => match event {
                 iced::event::Event::Window(event) => {
@@ -1046,6 +1088,16 @@ impl App {
         }
     }
 
+    // JSON生成
+    fn create_json(&self) -> serde_json::Value {
+        let config = self.midi_output_configure.read().unwrap();
+        let params = self.source_parameter.read().unwrap();
+        json!(ExportInformation {
+            midi_output_configure: config.clone(),
+            source_parameter: params.clone(),
+        })
+    }
+
     // 再生開始
     fn play_start(&mut self) -> Result<(), PlayStreamError> {
         const NUM_CHANNELS: usize = 2;
@@ -1407,10 +1459,11 @@ pub enum Error {
     IoError(io::ErrorKind),
 }
 
-async fn open_file() -> Result<(PathBuf, Vec<u8>), Error> {
+async fn open_file() -> Result<(PathBuf, LoadedFile), Error> {
     let picked_file = AsyncFileDialog::new()
         .set_title("Open a file...")
         .add_filter("SPC", &["spc", "SPC"])
+        .add_filter("JSON", &["json"])
         .pick_file()
         .await
         .ok_or(Error::DialogClosed)?;
@@ -1418,14 +1471,18 @@ async fn open_file() -> Result<(PathBuf, Vec<u8>), Error> {
     load_file(picked_file).await
 }
 
-async fn load_file(path: impl Into<PathBuf>) -> Result<(PathBuf, Vec<u8>), Error> {
+async fn load_file(path: impl Into<PathBuf>) -> Result<(PathBuf, LoadedFile), Error> {
     let path = path.into();
 
     if let Some(extension) = path.extension().and_then(OsStr::to_str) {
         match extension.to_lowercase().as_str() {
             "spc" => {
                 let data = std::fs::read(&path).unwrap();
-                return Ok((path, data.to_vec()));
+                return Ok((path, LoadedFile::SPCFile(data.to_vec())));
+            }
+            "json" => {
+                let string = std::fs::read_to_string(&path).unwrap();
+                return Ok((path, LoadedFile::JSONFile(string)));
             }
             _ => {
                 return Err(Error::IoError(io::ErrorKind::Unsupported));
@@ -1448,6 +1505,25 @@ async fn save_smf(smf: SMF) -> Result<(), Error> {
     let writer = SMFWriter::from_smf(smf);
     match writer.write_to_file(picked_file.path()) {
         Ok(()) => Ok(()),
+        _ => Err(Error::DialogClosed),
+    }
+}
+
+async fn save_json(json: serde_json::Value) -> Result<(), Error> {
+    let picked_file = AsyncFileDialog::new()
+        .set_file_name("output.mid")
+        .set_title("Save to a JSON file...")
+        .add_filter("JSON", &["json"])
+        .save_file()
+        .await
+        .ok_or(Error::DialogClosed)?;
+
+    match File::create(picked_file.path()) {
+        Ok(file) => {
+            let writer = BufWriter::new(file);
+            serde_json::to_writer(writer, &json).expect("Faied to write json");
+            Ok(())
+        }
         _ => Err(Error::DialogClosed),
     }
 }
@@ -1514,6 +1590,14 @@ impl SPC2MIDI2Window for MainWindow {
                                 .height(Length::Shrink)
                                 .align_y(alignment::Vertical::Center),
                             Message::SaveSMF,
+                        )
+                        .width(Length::Fill)
+                        .height(Length::Shrink)),
+                        (menu_button(
+                            text("Save JSON...")
+                                .height(Length::Shrink)
+                                .align_y(alignment::Vertical::Center),
+                            Message::SaveJSON,
                         )
                         .width(Length::Fill)
                         .height(Length::Shrink)),
