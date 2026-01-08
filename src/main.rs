@@ -1466,8 +1466,7 @@ pub enum Error {
 async fn open_file() -> Result<(PathBuf, LoadedFile), Error> {
     let picked_file = AsyncFileDialog::new()
         .set_title("Open a file...")
-        .add_filter("SPC", &["spc", "SPC"])
-        .add_filter("JSON", &["json"])
+        .add_filter("SPC or JSON", &["spc", "SPC", "json"])
         .pick_file()
         .await
         .ok_or(Error::DialogClosed)?;
