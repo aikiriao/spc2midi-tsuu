@@ -598,6 +598,10 @@ impl App {
                     main_window.midi_spc_mute = flag;
                     // フラグ書き換え
                     self.midi_spc_mute.clone().store(flag, Ordering::Relaxed);
+                    // ミュートの時は音を止める
+                    if flag {
+                        self.stop_midi_sound();
+                    }
                 }
             }
             Message::ProgramSelected(id, program) => {
@@ -1312,14 +1316,8 @@ impl App {
         Ok(())
     }
 
-    // 再生停止
-    fn stream_play_stop(&mut self) -> Result<(), PauseStreamError> {
-        if let Some(stream) = &self.stream {
-            self.stream_is_playing.store(false, Ordering::Relaxed);
-            stream.pause()?;
-            self.stream = None;
-        }
-        // MIDIにオールサウンドオフを送信
+    // MIDIにオールサウンドオフを送信
+    fn stop_midi_sound(&mut self) {
         if let Some(midi_out_conn_ref) = &self.midi_out_conn {
             let midi_out_conn = midi_out_conn_ref.clone();
             let mut conn_out = midi_out_conn.lock().unwrap();
@@ -1329,6 +1327,16 @@ impl App {
                     .unwrap();
             }
         }
+    }
+
+    // 再生停止
+    fn stream_play_stop(&mut self) -> Result<(), PauseStreamError> {
+        if let Some(stream) = &self.stream {
+            self.stream_is_playing.store(false, Ordering::Relaxed);
+            stream.pause()?;
+            self.stream = None;
+        }
+        self.stop_midi_sound();
         Ok(())
     }
 
