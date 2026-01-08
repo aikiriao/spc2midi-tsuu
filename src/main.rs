@@ -479,10 +479,14 @@ impl App {
                         LoadedFile::JSONFile(data) => {
                             match serde_json::from_str::<ExportInformation>(&data) {
                                 Ok(json) => {
+                                    // 読み込みに成功したら内部コンフィグとパラメータを更新
                                     let mut config = self.midi_output_configure.write().unwrap();
                                     let mut params = self.source_parameter.write().unwrap();
                                     *config = json.midi_output_configure;
-                                    *params = json.source_parameter;
+                                    // 丸ごと上書きすると設定済みのkeyを消してしまうので追記
+                                    for (key, value) in json.source_parameter {
+                                        params.insert(key, value);
+                                    }
                                 }
                                 Err(e) => {
                                     eprintln!("ERROR: failed to load json file: {:?}", e);
