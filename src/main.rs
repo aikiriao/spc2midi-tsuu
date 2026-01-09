@@ -76,6 +76,12 @@ const MIDI_PREVIEW_DURATION_MSEC: u64 = 500;
 const DEFAULT_ANALYZING_TIME_SEC: u32 = 120;
 /// デフォルトのMIDIファイル出力時間(sec)
 const DEFAULT_OUTPUT_DURATION_MSEC: u64 = 60 * 1000;
+/// デフォルトのMIDI再生パラメータ更新間隔(msec)
+const DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC: u8 = 10;
+/// デフォルトの出力MIDIのBPM
+const DEFAULT_MIDI_BPM: u8 = 120;
+/// デフォルトの出力MIDIの四分音符内のティック数
+const DEFAULT_MIDI_RESOLUSIONS: u16 = 480;
 
 pub fn main() -> iced::Result {
     iced::daemon(App::new, App::update, App::view)
@@ -130,6 +136,8 @@ enum Message {
     MIDIOutputTicksPerQuarterChanged(window::Id, u16),
     MIDIOutputUpdatePeriodChanged(window::Id, u8),
     MIDIOutputDurationChanged(window::Id, u64),
+    MuteChannel(u8, bool),
+    SoloChannel(u8),
     Tick,
 }
 
@@ -219,6 +227,7 @@ struct MainWindow {
     playback_status: Arc<RwLock<PlaybackStatus>>,
     pcm_spc_mute: bool,
     midi_spc_mute: bool,
+    midi_channel_mute: [bool; 8],
     playback_time_sec: f32,
 }
 
@@ -279,7 +288,6 @@ struct App {
     pcm_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::sdsp::SDSP>>>>>,
     midi_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>>>>>,
     pcm_spc_mute: Arc<AtomicBool>,
-    midi_spc_mute: Arc<AtomicBool>,
     audio_out_device_name: Option<String>,
     midi_out_port_name: Option<String>,
 }
@@ -337,7 +345,6 @@ impl Default for App {
             pcm_spc: None,
             midi_spc: None,
             pcm_spc_mute: Arc::new(AtomicBool::new(false)),
-            midi_spc_mute: Arc::new(AtomicBool::new(false)),
             audio_out_device_name: Some(
                 device
                     .description()
@@ -592,15 +599,28 @@ impl App {
             }
             Message::MIDIMuteFlagToggled(flag) => {
                 if let Some(window) = self.windows.get_mut(&self.main_window_id) {
-                    // トグルスイッチの値を書き換え
-                    let main_window: &mut MainWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    main_window.midi_spc_mute = flag;
-                    // フラグ書き換え
-                    self.midi_spc_mute.clone().store(flag, Ordering::Relaxed);
-                    // ミュートの時は音を止める
-                    if flag {
-                        self.stop_midi_sound();
+                    if let Some(midi_spc_ref) = &self.midi_spc {
+                        let midi_spc = midi_spc_ref.clone();
+                        let mut spc = midi_spc.lock().unwrap();
+                        let main_window: &mut MainWindow =
+                            window.as_mut().as_any_mut().downcast_mut().unwrap();
+                        // 全チャンネルミュートを切り替え
+                        spc.dsp.write_register(
+                            &[0u8],
+                            DSP_ADDRESS_MIDI_MUTE,
+                            if flag { 0xFF } else { 0 },
+                        );
+                        // トグルスイッチの値を書き換え
+                        for ch in 0..8 {
+                            main_window.midi_channel_mute[ch as usize] = flag;
+                        }
+                        main_window.midi_spc_mute = flag;
+                    }
+                }
+                // ミュートの時は音を止める
+                if flag {
+                    for ch in 0..8 {
+                        self.stop_midi_channel_sound(ch);
                     }
                 }
             }
@@ -806,7 +826,7 @@ impl App {
                     pref_win.audio_out_device_name = Some(device_name.clone());
                     self.audio_out_device_name = Some(device_name.clone());
                     // オーディオ出力デバイスを再構築
-                    let mut devices = cpal::default_host()
+                    let devices = cpal::default_host()
                         .devices()
                         .expect("Failed to get devices");
                     self.stream_device = devices
@@ -883,6 +903,51 @@ impl App {
                     let mut config = self.midi_output_configure.write().unwrap();
                     pref_win.output_duration_msec = duration;
                     config.output_duration_msec = duration;
+                }
+            }
+            Message::MuteChannel(ch, flag) => {
+                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                    if let Some(midi_spc_ref) = &self.midi_spc {
+                        let midi_spc = midi_spc_ref.clone();
+                        let mut spc = midi_spc.lock().unwrap();
+                        let main_win: &mut MainWindow =
+                            window.as_mut().as_any_mut().downcast_mut().unwrap();
+                        // 指定チャンネルをミュート
+                        let mut flags = spc.dsp.read_register(&[0u8], DSP_ADDRESS_MIDI_MUTE);
+                        flags = if flag {
+                            flags | (1 << ch)
+                        } else {
+                            flags & !(1 << ch)
+                        };
+                        spc.dsp.write_register(&[0u8], DSP_ADDRESS_MIDI_MUTE, flags);
+                        main_win.midi_channel_mute[ch as usize] = flag;
+                    }
+                }
+                // ミュートの場合は音を止める
+                if flag {
+                    self.stop_midi_channel_sound(ch);
+                }
+            }
+            Message::SoloChannel(ch) => {
+                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                    if let Some(midi_spc_ref) = &self.midi_spc {
+                        let midi_spc = midi_spc_ref.clone();
+                        let mut spc = midi_spc.lock().unwrap();
+                        let main_win: &mut MainWindow =
+                            window.as_mut().as_any_mut().downcast_mut().unwrap();
+                        // 指定チャンネル以外をミュート
+                        spc.dsp
+                            .write_register(&[0u8], DSP_ADDRESS_MIDI_MUTE, !(1 << ch));
+                        for mute_ch in 0..8 {
+                            main_win.midi_channel_mute[mute_ch as usize] = mute_ch != ch;
+                        }
+                    }
+                }
+                // ミュートの場合は音を止める
+                for mute_ch in 0..8 {
+                    if mute_ch != ch {
+                        self.stop_midi_channel_sound(mute_ch);
+                    }
                 }
             }
             Message::Tick => {
@@ -1136,7 +1201,6 @@ impl App {
 
         // 各SPCのミュートフラグ取得
         let pcm_spc_mute = self.pcm_spc_mute.clone();
-        let midi_spc_mute = self.midi_spc_mute.clone();
 
         // SPCにパラメータ適用
         self.apply_source_parameter();
@@ -1180,11 +1244,9 @@ impl App {
                         }
                         // MIDI出力
                         if let Some(msgs) = midispc.clock_tick_64k_hz() {
-                            if !midi_spc_mute.load(Ordering::Relaxed) {
-                                for i in 0..msgs.num_messages {
-                                    let msg = msgs.messages[i];
-                                    conn_out.send(&msg.data[..msg.length]).unwrap();
-                                }
+                            for i in 0..msgs.num_messages {
+                                let msg = msgs.messages[i];
+                                conn_out.send(&msg.data[..msg.length]).unwrap();
                             }
                         }
                     }
@@ -1317,15 +1379,13 @@ impl App {
     }
 
     // MIDIにオールサウンドオフを送信
-    fn stop_midi_sound(&mut self) {
+    fn stop_midi_channel_sound(&mut self, ch: u8) {
         if let Some(midi_out_conn_ref) = &self.midi_out_conn {
             let midi_out_conn = midi_out_conn_ref.clone();
             let mut conn_out = midi_out_conn.lock().unwrap();
-            for ch in 0..15 {
-                conn_out
-                    .send(&[MIDIMSG_MODE | ch, MIDIMSG_MODE_ALL_SOUND_OFF, 0])
-                    .unwrap();
-            }
+            conn_out
+                .send(&[MIDIMSG_MODE | ch, MIDIMSG_MODE_ALL_SOUND_OFF, 0])
+                .unwrap();
         }
     }
 
@@ -1336,7 +1396,9 @@ impl App {
             stream.pause()?;
             self.stream = None;
         }
-        self.stop_midi_sound();
+        for ch in 0..8 {
+            self.stop_midi_channel_sound(ch);
+        }
         Ok(())
     }
 
@@ -1389,6 +1451,7 @@ impl App {
         }
     }
 
+    // 音源パラメータをDSPに適用
     fn apply_source_parameter(&mut self) {
         if let Some(midi_spc_ref) = &self.midi_spc {
             let midi_spc = midi_spc_ref.clone();
@@ -1506,7 +1569,7 @@ async fn load_file(path: impl Into<PathBuf>) -> Result<(PathBuf, LoadedFile), Er
 
 async fn save_smf(smf: SMF) -> Result<(), Error> {
     let picked_file = AsyncFileDialog::new()
-        .set_file_name("output.mid")
+        .set_file_name("output.mid") // TODO: 曲名をデフォルトにできるとよい
         .set_title("Save to a MIDI file...")
         .add_filter("SMF", &["mid", "midi", "MID"])
         .save_file()
@@ -1522,7 +1585,7 @@ async fn save_smf(smf: SMF) -> Result<(), Error> {
 
 async fn save_json(json: serde_json::Value) -> Result<(), Error> {
     let picked_file = AsyncFileDialog::new()
-        .set_file_name("output.json")
+        .set_file_name("output.json") // TODO: 曲名をデフォルトにできるとよい
         .set_title("Save to a JSON file...")
         .add_filter("JSON", &["json"])
         .save_file()
@@ -1683,6 +1746,9 @@ impl SPC2MIDI2Window for MainWindow {
             .map(|ch| {
                 row![
                     text(format!("{}", ch)),
+                    checkbox(self.midi_channel_mute[ch])
+                        .on_toggle(move |flag| Message::MuteChannel(ch as u8, flag)),
+                    button("S").on_press(Message::SoloChannel(ch as u8)),
                     text(format!("0x{:02X}", status.srn_no[ch])),
                     text(format!("{}", if status.noteon[ch] { "ON " } else { "OFF" })),
                     text(if status.pitch[ch] > 0 {
@@ -1751,6 +1817,7 @@ impl MainWindow {
             playback_status: playback_status,
             pcm_spc_mute: false,
             midi_spc_mute: false,
+            midi_channel_mute: [false; 8],
             playback_time_sec: 0.0f32,
         }
     }
@@ -2235,37 +2302,29 @@ impl PlaybackStatus {
 
 // 再生情報の読み取り
 fn read_playback_status(midi_dsp: &spc700::mididsp::MIDIDSP) -> PlaybackStatus {
-    let dummy_ram = [0u8];
     let mut status = PlaybackStatus::new();
 
-    let noteon_flags = midi_dsp.read_register(&dummy_ram, DSP_ADDRESS_NOTEON);
+    let noteon_flags = midi_dsp.read_register(&[0u8], DSP_ADDRESS_NOTEON);
     for ch in 0..8 {
         status.noteon[ch] = ((noteon_flags >> ch) & 1) != 0;
-        status.srn_no[ch] =
-            midi_dsp.read_register(&dummy_ram, DSP_ADDRESS_V0SRCN | ((ch as u8) << 4));
-        let pitch_high =
-            midi_dsp.read_register(&dummy_ram, DSP_ADDRESS_V0PITCHH | ((ch as u8) << 4));
-        let pitch_low =
-            midi_dsp.read_register(&dummy_ram, DSP_ADDRESS_V0PITCHL | ((ch as u8) << 4));
+        status.srn_no[ch] = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0SRCN | ((ch as u8) << 4));
+        let pitch_high = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0PITCHH | ((ch as u8) << 4));
+        let pitch_low = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0PITCHL | ((ch as u8) << 4));
         status.pitch[ch] = ((pitch_high as u16) << 8) | (pitch_low as u16);
         status.expression[ch] =
-            midi_dsp.read_register(&dummy_ram, DSP_ADDRESS_V0ENVX | ((ch as u8) << 4));
+            midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0ENVX | ((ch as u8) << 4));
     }
 
     status
 }
 
 impl MIDIOutputConfigure {
-    const DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC: u8 = 10;
-    const MIDI_DEFAULT_BPM: u8 = 120;
-    const MIDI_DEFAULT_RESOLUSIONS: u16 = 480;
-
     fn new() -> Self {
         Self {
             output_duration_msec: DEFAULT_OUTPUT_DURATION_MSEC,
-            playback_parameter_update_period: Self::DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC,
-            beats_per_minute: Self::MIDI_DEFAULT_BPM,
-            ticks_per_quarter: Self::MIDI_DEFAULT_RESOLUSIONS,
+            playback_parameter_update_period: DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC,
+            beats_per_minute: DEFAULT_MIDI_BPM,
+            ticks_per_quarter: DEFAULT_MIDI_RESOLUSIONS,
         }
     }
 }
