@@ -633,10 +633,7 @@ impl App {
                 }
                 // ミュートの時は音を止める
                 if flag {
-                    // 念のため全チャンネルの音を止める
-                    for ch in 0..16 {
-                        self.stop_midi_channel_sound(ch);
-                    }
+                    self.stop_midi_all_sound();
                 }
             }
             Message::ProgramSelected(srn_no, program) => {
@@ -879,7 +876,7 @@ impl App {
                     }
                 }
                 // ミュートの場合は音を止める
-                for mute_ch in 0..16 {
+                for mute_ch in 0..8 {
                     if mute_ch != ch {
                         self.stop_midi_channel_sound(mute_ch);
                     }
@@ -1338,7 +1335,20 @@ impl App {
         Ok(())
     }
 
-    // MIDIにオールサウンドオフを送信
+    // MIDIの全ての音を止める
+    fn stop_midi_all_sound(&mut self) {
+        if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+            let midi_out_conn = midi_out_conn_ref.clone();
+            let mut conn_out = midi_out_conn.lock().unwrap();
+            for ch in 0..16 {
+                conn_out
+                    .send(&[MIDIMSG_MODE | ch, MIDIMSG_MODE_ALL_SOUND_OFF, 0])
+                    .unwrap();
+            }
+        }
+    }
+
+    // MIDIの特定チャンネルの音を止める
     fn stop_midi_channel_sound(&mut self, ch: u8) {
         if let Some(midi_out_conn_ref) = &self.midi_out_conn {
             let midi_out_conn = midi_out_conn_ref.clone();
@@ -1358,10 +1368,7 @@ impl App {
             stream.pause()?;
             self.stream = None;
         }
-        // 念のため全チャンネルの音を止める
-        for ch in 0..16 {
-            self.stop_midi_channel_sound(ch);
-        }
+        self.stop_midi_all_sound();
         Ok(())
     }
 
