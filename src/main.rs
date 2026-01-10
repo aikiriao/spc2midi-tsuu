@@ -174,7 +174,7 @@ struct SourceParameter {
     /// ノートオンベロシティ
     noteon_velocity: u8,
     /// ピッチベンド幅（半音単位）
-    pitchbend_width: u8,
+    pitch_bend_width: u8,
     /// エンベロープをエクスプレッションとして出力するか
     envelope_as_expression: bool,
     /// パンを発音中に更新するか
@@ -692,7 +692,7 @@ impl App {
             Message::PitchBendWidthChanged(srn_no, width) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
-                    param.pitchbend_width = width;
+                    param.pitch_bend_width = width;
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
                     });
@@ -1026,7 +1026,7 @@ impl App {
                     program: Program::AcousticGrand,
                     center_note: f32::round(center_note * 256.0) as u16,
                     noteon_velocity: 100,
-                    pitchbend_width: 12,
+                    pitch_bend_width: 6,
                     envelope_as_expression: true,
                     auto_pan: true,
                     fixed_pan: 64,
@@ -1486,7 +1486,7 @@ fn apply_source_parameter(
         spc.dsp.write_register(
             ram,
             DSP_ADDRESS_SRN_PITCHBEND_SENSITIVITY,
-            param.pitchbend_width,
+            param.pitch_bend_width,
         );
     }
     // 音源に依存しないパラメータ
@@ -1975,7 +1975,7 @@ impl SPC2MIDI2Window for SRNWindow {
                 checkbox(param.enable_pitch_bend)
                     .label("Pitch Bend")
                     .on_toggle(move |flag| Message::EnablePitchBendFlagToggled(srn_no, flag)),
-                number_input(&param.pitchbend_width, 1..=48, move |width| {
+                number_input(&param.pitch_bend_width, 1..=48, move |width| {
                     Message::PitchBendWidthChanged(srn_no, width)
                 },)
                 .step(1),
