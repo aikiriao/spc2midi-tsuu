@@ -202,8 +202,10 @@ struct PlaybackStatus {
     srn_no: [u8; 8],
     /// 再生ピッチ
     pitch: [u16; 8],
-    /// エクスプレッション
-    expression: [u8; 8],
+    /// エンベロープ上位8bit
+    envelope: [u8; 8],
+    /// 左右ボリューム
+    volume: [[i8; 2]; 8],
 }
 
 /// MIDI出力設定
@@ -229,6 +231,9 @@ struct MainWindow {
     midi_spc_mute: Arc<AtomicBool>,
     midi_channel_mute: Arc<RwLock<[bool; 8]>>,
     playback_time_sec: f32,
+    pitch_indicator: [Indicator; 8],
+    expression_indicator: [Indicator; 8],
+    volume_indicator: [[Indicator; 2]; 8],
 }
 
 #[derive(Debug)]
@@ -307,6 +312,15 @@ enum LoadedFile {
     JSONFile(String),
 }
 
+// インジケータ
+#[derive(Debug, Clone, Copy)]
+struct Indicator {
+    pub value: f32,
+    min: f32,
+    max: f32,
+    formatter: fn(f32) -> String,
+}
+
 impl Default for App {
     fn default() -> Self {
         let host = cpal::default_host();
@@ -321,7 +335,7 @@ impl Default for App {
             None
         };
         Self {
-            theme: iced::Theme::Nord,
+            theme: iced::Theme::Dark,
             main_window_id: window::Id::unique(),
             windows: BTreeMap::new(),
             spc_file: None,
@@ -909,9 +923,24 @@ impl App {
                     let mut ch_flag = self.midi_channel_mute.write().unwrap();
                     ch_flag[ch as usize] = flag;
                 }
-                // ミュートの場合は音を止める
                 if flag {
+                    // ミュートの場合は音を止める
                     self.stop_midi_channel_sound(ch);
+                    // 全チャンネルミュートになった場合はミュートフラグを立てる
+                    let ch_flag = self.midi_channel_mute.read().unwrap();
+                    let mut all_ch_mute = true;
+                    for ch in 0..8 {
+                        if !ch_flag[ch] {
+                            all_ch_mute = false;
+                            break;
+                        }
+                    }
+                    if all_ch_mute {
+                        self.midi_spc_mute.clone().store(true, Ordering::Relaxed);
+                    }
+                } else {
+                    // もはや全チャンネルミュートではないのでフラグを落とす
+                    self.midi_spc_mute.clone().store(false, Ordering::Relaxed);
                 }
             }
             Message::SoloChannel(ch) => {
@@ -933,21 +962,36 @@ impl App {
                         self.stop_midi_channel_sound(mute_ch);
                     }
                 }
+                // もはや全チャンネルミュートではないのでフラグを落とす
+                self.midi_spc_mute.clone().store(false, Ordering::Relaxed);
             }
             Message::Tick => {
-                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
-                    let main_win: &mut MainWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let played_samples = self.stream_played_samples.load(Ordering::Relaxed);
-                    main_win.playback_time_sec =
-                        played_samples as f32 / self.stream_config.sample_rate as f32;
-                }
-
+                // 再生情報取得
                 if let Some(midi_spc_ref) = &self.midi_spc {
                     let midi_spc = midi_spc_ref.clone();
                     let spc = midi_spc.lock().unwrap();
                     let mut status = self.playback_status.write().unwrap();
                     *status = read_playback_status(&spc.dsp);
+                }
+
+                // 再生情報更新
+                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                    let status = self.playback_status.read().unwrap();
+                    let main_win: &mut MainWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    let played_samples = self.stream_played_samples.load(Ordering::Relaxed);
+                    main_win.playback_time_sec =
+                        played_samples as f32 / self.stream_config.sample_rate as f32;
+                    for ch in 0..8 {
+                        main_win.expression_indicator[ch].value = status.envelope[ch] as f32;
+                        main_win.pitch_indicator[ch].value = if status.pitch[ch] > 0 {
+                            12.0 * f32::log2((status.pitch[ch] as f32) / (0x1000 as f32))
+                        } else {
+                            0.0
+                        };
+                        main_win.volume_indicator[ch][0].value = status.volume[ch][0] as f32;
+                        main_win.volume_indicator[ch][1].value = status.volume[ch][1] as f32;
+                    }
                 }
             }
         }
@@ -1737,6 +1781,9 @@ impl SPC2MIDI2Window for MainWindow {
 
         let status = self.playback_status.read().unwrap();
         let midi_channel_mute = self.midi_channel_mute.read().unwrap();
+        let expression_indicator = self.expression_indicator;
+        let pitch_indicator = self.pitch_indicator;
+        let volume_indicator = self.volume_indicator;
         let status_list: Vec<_> = (0..8)
             .map(|ch| {
                 row![
@@ -1744,17 +1791,24 @@ impl SPC2MIDI2Window for MainWindow {
                     checkbox(midi_channel_mute[ch])
                         .on_toggle(move |flag| Message::MuteChannel(ch as u8, flag)),
                     button("S").on_press(Message::SoloChannel(ch as u8)),
-                    text(format!("0x{:02X}", status.srn_no[ch])),
-                    text(format!("{}", if status.noteon[ch] { "ON " } else { "OFF" })),
-                    text(if status.pitch[ch] > 0 {
-                        format!(
-                            "{:+7.2}",
-                            12.0 * f32::log2((status.pitch[ch] as f32) / (0x1000 as f32))
-                        )
-                    } else {
-                        format!("")
-                    }),
-                    text(format!("{:3}", status.expression[ch])),
+                    text(format!("0x{:02X}", status.srn_no[ch]))
+                        .height(Length::Fill)
+                        .width(30),
+                    text(format!("{}", if status.noteon[ch] { "♪" } else { "" }))
+                        .height(Length::Fill)
+                        .width(10),
+                    Canvas::new(pitch_indicator[ch])
+                        .height(Length::Fill)
+                        .width(70),
+                    Canvas::new(expression_indicator[ch])
+                        .height(Length::Fill)
+                        .width(60),
+                    Canvas::new(volume_indicator[ch][0])
+                        .height(Length::Fill)
+                        .width(40),
+                    Canvas::new(volume_indicator[ch][1])
+                        .height(Length::Fill)
+                        .width(40),
                 ]
                 .spacing(10)
                 .width(Length::Fill)
@@ -1817,6 +1871,12 @@ impl MainWindow {
             midi_spc_mute: midi_spc_mute,
             midi_channel_mute: midi_channel_mute,
             playback_time_sec: 0.0f32,
+            expression_indicator: [Indicator::new(0.0, 0.0, 127.0, |value| format!("{:3}", value));
+                8],
+            pitch_indicator: [Indicator::new(0.0, -48.0, 48.0, |value| format!("{:+4.1}", value));
+                8],
+            volume_indicator: [[Indicator::new(0.0, -128.0, 127.0, |value| format!("{}", value));
+                2]; 8],
         }
     }
 }
@@ -2265,7 +2325,7 @@ fn draw_timelabel(frame: &mut Frame, bounds: &Rectangle, sampling_rate: f32, num
         if time >= next_tick {
             frame.fill_text(canvas::Text {
                 content: format!("{:.0}", time),
-                size: iced::Pixels(14.0),
+                size: iced::Pixels(16.0),
                 position: Point::new(
                     timelabel_left_x + (i as f32) * bounds.width / (num_samples as f32 - 1.0),
                     timelabel_y,
@@ -2281,13 +2341,100 @@ fn draw_timelabel(frame: &mut Frame, bounds: &Rectangle, sampling_rate: f32, num
     }
 }
 
+impl Indicator {
+    fn new(init_value: f32, min_value: f32, max_value: f32, formatter: fn(f32) -> String) -> Self {
+        Self {
+            value: init_value,
+            min: min_value,
+            max: max_value,
+            formatter: formatter,
+        }
+    }
+}
+
+impl canvas::Program<Message> for Indicator {
+    type State = Option<()>;
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &Renderer,
+        _theme: &Theme,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Vec<Geometry> {
+        // インジケータ描画
+        let mut frame = Frame::new(renderer, bounds.size());
+        draw_indicator(
+            &mut frame,
+            &Rectangle::new(Point::new(0.0, 0.0), Size::new(bounds.width, bounds.height)),
+            self.value,
+            self.min,
+            self.max,
+            self.formatter,
+        );
+        vec![frame.into_geometry()]
+    }
+
+    fn update(
+        &self,
+        _state: &mut Self::State,
+        _event: &Event,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Option<iced_widget::Action<Message>> {
+        None
+    }
+}
+
+/// インジケータ描画
+fn draw_indicator(
+    frame: &mut Frame,
+    bounds: &Rectangle,
+    value: f32,
+    min: f32,
+    max: f32,
+    formatter: fn(f32) -> String,
+) {
+    let center = bounds.center();
+    let half_height = bounds.height / 2.0;
+    let center_left = Point::new(center.x - bounds.width / 2.0, center.y);
+
+    // 背景を塗りつぶす
+    frame.fill_rectangle(
+        Point::new(bounds.x, bounds.y),
+        Size::new(bounds.width, bounds.height),
+        Color::from_rgb8(0, 0, 0),
+    );
+
+    assert!(min < max);
+    let ratio = ((value - min) / (max - min)).clamp(0.0, 1.0);
+    frame.fill_rectangle(
+        Point::new(bounds.x, bounds.y),
+        Size::new(ratio * bounds.width, bounds.height),
+        Color::from_rgb8(0, 196, 0),
+    );
+
+    frame.fill_text(canvas::Text {
+        content: formatter(value),
+        size: iced::Pixels(16.0),
+        position: center,
+        color: Color::WHITE,
+        align_x: alignment::Horizontal::Center.into(),
+        align_y: alignment::Vertical::Center,
+        font: Font::MONOSPACE,
+        ..canvas::Text::default()
+    });
+}
+
 impl PlaybackStatus {
     fn new() -> Self {
         Self {
             noteon: [false; 8],
             srn_no: [0; 8],
             pitch: [0; 8],
-            expression: [0; 8],
+            envelope: [0; 8],
+            volume: [[0, 0]; 8],
         }
     }
 }
@@ -2298,13 +2445,15 @@ fn read_playback_status(midi_dsp: &spc700::mididsp::MIDIDSP) -> PlaybackStatus {
 
     let noteon_flags = midi_dsp.read_register(&[0u8], DSP_ADDRESS_NOTEON);
     for ch in 0..8 {
+        let ch_nibble = (ch as u8) << 4;
         status.noteon[ch] = ((noteon_flags >> ch) & 1) != 0;
-        status.srn_no[ch] = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0SRCN | ((ch as u8) << 4));
-        let pitch_high = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0PITCHH | ((ch as u8) << 4));
-        let pitch_low = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0PITCHL | ((ch as u8) << 4));
+        status.srn_no[ch] = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0SRCN | ch_nibble);
+        let pitch_high = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0PITCHH | ch_nibble);
+        let pitch_low = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0PITCHL | ch_nibble);
         status.pitch[ch] = ((pitch_high as u16) << 8) | (pitch_low as u16);
-        status.expression[ch] =
-            midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0ENVX | ((ch as u8) << 4));
+        status.envelope[ch] = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0ENVX | ch_nibble);
+        status.volume[ch][0] = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0VOLL | ch_nibble) as i8;
+        status.volume[ch][1] = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0VOLR | ch_nibble) as i8;
     }
 
     status
