@@ -1871,7 +1871,7 @@ impl MainWindow {
             midi_spc_mute: midi_spc_mute,
             midi_channel_mute: midi_channel_mute,
             playback_time_sec: 0.0f32,
-            expression_indicator: [Indicator::new(0.0, 0.0, 127.0, |value| format!("{:3}", value));
+            expression_indicator: [Indicator::new(0.0, 0.0, 127.0, |value| format!("{:<3}", value));
                 8],
             pitch_indicator: [Indicator::new(0.0, -48.0, 48.0, |value| format!("{:+4.1}", value));
                 8],
@@ -2359,13 +2359,14 @@ impl canvas::Program<Message> for Indicator {
         &self,
         _state: &Self::State,
         renderer: &Renderer,
-        _theme: &Theme,
+        theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         // インジケータ描画
         let mut frame = Frame::new(renderer, bounds.size());
         draw_indicator(
+            theme,
             &mut frame,
             &Rectangle::new(Point::new(0.0, 0.0), Size::new(bounds.width, bounds.height)),
             self.value,
@@ -2389,6 +2390,7 @@ impl canvas::Program<Message> for Indicator {
 
 /// インジケータ描画
 fn draw_indicator(
+    theme: &Theme,
     frame: &mut Frame,
     bounds: &Rectangle,
     value: f32,
@@ -2404,7 +2406,7 @@ fn draw_indicator(
     frame.fill_rectangle(
         Point::new(bounds.x, bounds.y),
         Size::new(bounds.width, bounds.height),
-        Color::from_rgb8(0, 0, 0),
+        theme.palette().background,
     );
 
     assert!(min < max);
@@ -2412,14 +2414,14 @@ fn draw_indicator(
     frame.fill_rectangle(
         Point::new(bounds.x, bounds.y),
         Size::new(ratio * bounds.width, bounds.height),
-        Color::from_rgb8(0, 196, 0),
+        theme.palette().primary,
     );
 
     frame.fill_text(canvas::Text {
         content: formatter(value),
         size: iced::Pixels(16.0),
         position: center,
-        color: Color::WHITE,
+        color: theme.palette().text,
         align_x: alignment::Horizontal::Center.into(),
         align_y: alignment::Vertical::Center,
         font: Font::MONOSPACE,
