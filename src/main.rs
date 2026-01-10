@@ -1343,8 +1343,10 @@ impl App {
         if let Some(midi_out_conn_ref) = &self.midi_out_conn {
             let midi_out_conn = midi_out_conn_ref.clone();
             let mut conn_out = midi_out_conn.lock().unwrap();
+            // FIXME:
+            // MIDIVoiceは1..9chに出力しているので1chずらしている。DSPからMIDI出力チャンネルをとるべき？
             conn_out
-                .send(&[MIDIMSG_MODE | ch, MIDIMSG_MODE_ALL_SOUND_OFF, 0])
+                .send(&[MIDIMSG_MODE | (ch + 1), MIDIMSG_MODE_ALL_SOUND_OFF, 0])
                 .unwrap();
         }
     }
