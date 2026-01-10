@@ -225,9 +225,9 @@ struct MainWindow {
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
     source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     playback_status: Arc<RwLock<PlaybackStatus>>,
-    pcm_spc_mute: bool,
-    midi_spc_mute: bool,
-    midi_channel_mute: [bool; 8],
+    pcm_spc_mute: Arc<AtomicBool>,
+    midi_spc_mute: Arc<AtomicBool>,
+    midi_channel_mute: Arc<RwLock<[bool; 8]>>,
     playback_time_sec: f32,
 }
 
@@ -235,15 +235,12 @@ struct MainWindow {
 struct PreferenceWindow {
     title: String,
     window_id: window::Id,
-    audio_out_device_name: Option<String>,
+    audio_out_device_name: Arc<RwLock<Option<String>>>,
     audio_out_devices_box: combo_box::State<String>,
-    midi_out_port_name: Option<String>,
+    midi_out_port_name: Arc<RwLock<Option<String>>>,
     midi_ports_box: combo_box::State<String>,
-    playback_parameter_update_period: u8,
-    beats_per_minute: u8,
-    ticks_per_quarter: Option<u16>,
     ticks_per_quarter_box: combo_box::State<u16>,
-    output_duration_msec: u64,
+    midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
 }
 
 #[derive(Debug)]
@@ -275,6 +272,7 @@ struct App {
     main_window_id: window::Id,
     windows: BTreeMap<window::Id, Box<dyn SPC2MIDI2Window>>,
     spc_file: Option<Box<SPCFile>>,
+    spc_file_path: Option<PathBuf>,
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
     source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -288,8 +286,10 @@ struct App {
     pcm_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::sdsp::SDSP>>>>>,
     midi_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>>>>>,
     pcm_spc_mute: Arc<AtomicBool>,
-    audio_out_device_name: Option<String>,
-    midi_out_port_name: Option<String>,
+    midi_spc_mute: Arc<AtomicBool>,
+    midi_channel_mute: Arc<RwLock<[bool; 8]>>,
+    audio_out_device_name: Arc<RwLock<Option<String>>>,
+    midi_out_port_name: Arc<RwLock<Option<String>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -325,6 +325,7 @@ impl Default for App {
             main_window_id: window::Id::unique(),
             windows: BTreeMap::new(),
             spc_file: None,
+            spc_file_path: None,
             source_infos: Arc::new(RwLock::new(BTreeMap::new())),
             source_parameter: Arc::new(RwLock::new(BTreeMap::new())),
             playback_status: Arc::new(RwLock::new(PlaybackStatus::new())),
@@ -345,13 +346,15 @@ impl Default for App {
             pcm_spc: None,
             midi_spc: None,
             pcm_spc_mute: Arc::new(AtomicBool::new(false)),
-            audio_out_device_name: Some(
+            midi_spc_mute: Arc::new(AtomicBool::new(false)),
+            midi_channel_mute: Arc::new(RwLock::new([false; 8])),
+            audio_out_device_name: Arc::new(RwLock::new(Some(
                 device
                     .description()
                     .expect("Failed to get device name")
                     .to_string(),
-            ),
-            midi_out_port_name: midi_out_port_name,
+            ))),
+            midi_out_port_name: Arc::new(RwLock::new(midi_out_port_name)),
         }
     }
 }
@@ -383,12 +386,15 @@ impl App {
                     self.source_infos.clone(),
                     self.source_parameter.clone(),
                     self.playback_status.clone(),
+                    self.pcm_spc_mute.clone(),
+                    self.midi_spc_mute.clone(),
+                    self.midi_channel_mute.clone(),
                 );
                 self.main_window_id = id;
                 self.windows.insert(id, Box::new(window));
                 return open.map(Message::MainWindowOpened);
             }
-            Message::MainWindowOpened(id) => {}
+            Message::MainWindowOpened(_id) => {}
             Message::OpenPreferenceWindow => {
                 let (id, open) = window::open(window::Settings {
                     size: iced::Size::new(500.0, 500.0),
@@ -406,7 +412,7 @@ impl App {
                 );
                 return open.map(Message::PreferenceWindowOpened);
             }
-            Message::PreferenceWindowOpened(id) => {}
+            Message::PreferenceWindowOpened(_id) => {}
             Message::OpenSRNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
                     size: iced::Size::new(800.0, 600.0),
@@ -422,7 +428,7 @@ impl App {
                     return open.map(Message::SRNWindowOpened);
                 }
             }
-            Message::SRNWindowOpened(id) => {}
+            Message::SRNWindowOpened(_id) => {}
             Message::WindowClosed(id) => {
                 if id == self.main_window_id {
                     return iced::exit();
@@ -481,6 +487,7 @@ impl App {
                                 } else {
                                     DEFAULT_OUTPUT_DURATION_MSEC
                                 };
+                                self.spc_file_path = Some(path);
                             }
                         }
                         LoadedFile::JSONFile(data) => {
@@ -507,15 +514,31 @@ impl App {
                 }
             },
             Message::SaveSMF => {
-                if let Some(smf) = self.create_smf() {
-                    return Task::perform(save_smf(smf), Message::SMFSaved);
+                if let Some(path) = &self.spc_file_path {
+                    if let Some(smf) = self.create_smf() {
+                        return Task::perform(
+                            save_smf(
+                                path.file_stem().unwrap().to_str().unwrap().to_owned() + ".mid",
+                                smf,
+                            ),
+                            Message::SMFSaved,
+                        );
+                    }
                 }
             }
-            Message::SMFSaved(result) => {}
+            Message::SMFSaved(_result) => {}
             Message::SaveJSON => {
-                return Task::perform(save_json(self.create_json()), Message::JSONSaved);
+                if let Some(path) = &self.spc_file_path {
+                    return Task::perform(
+                        save_json(
+                            path.file_stem().unwrap().to_str().unwrap().to_owned() + ".json",
+                            self.create_json(),
+                        ),
+                        Message::JSONSaved,
+                    );
+                }
             }
-            Message::JSONSaved(result) => {}
+            Message::JSONSaved(_result) => {}
             Message::MenuSelected => {}
             Message::EventOccurred(event) => match event {
                 iced::event::Event::Window(event) => {
@@ -588,34 +611,26 @@ impl App {
                 self.stream_played_samples.store(0, Ordering::Relaxed);
             }
             Message::SPCMuteFlagToggled(flag) => {
-                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
-                    // トグルスイッチの値を書き換え
-                    let main_window: &mut MainWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    main_window.pcm_spc_mute = flag;
-                    // フラグ書き換え
-                    self.pcm_spc_mute.clone().store(flag, Ordering::Relaxed);
-                }
+                // フラグ書き換え
+                self.pcm_spc_mute.clone().store(flag, Ordering::Relaxed);
             }
             Message::MIDIMuteFlagToggled(flag) => {
-                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
-                    if let Some(midi_spc_ref) = &self.midi_spc {
-                        let midi_spc = midi_spc_ref.clone();
-                        let mut spc = midi_spc.lock().unwrap();
-                        let main_window: &mut MainWindow =
-                            window.as_mut().as_any_mut().downcast_mut().unwrap();
-                        // 全チャンネルミュートを切り替え
-                        spc.dsp.write_register(
-                            &[0u8],
-                            DSP_ADDRESS_MIDI_MUTE,
-                            if flag { 0xFF } else { 0 },
-                        );
-                        // トグルスイッチの値を書き換え
+                if let Some(midi_spc_ref) = &self.midi_spc {
+                    let midi_spc = midi_spc_ref.clone();
+                    let mut spc = midi_spc.lock().unwrap();
+                    // 全チャンネルミュートを切り替え
+                    spc.dsp.write_register(
+                        &[0u8],
+                        DSP_ADDRESS_MIDI_MUTE,
+                        if flag { 0xFF } else { 0 },
+                    );
+                    // トグルスイッチの値を書き換え
+                    if let Ok(mut ch_mute) = self.midi_channel_mute.write() {
                         for ch in 0..8 {
-                            main_window.midi_channel_mute[ch as usize] = flag;
+                            ch_mute[ch as usize] = flag;
                         }
-                        main_window.midi_spc_mute = flag;
                     }
+                    self.midi_spc_mute.clone().store(flag, Ordering::Relaxed);
                 }
                 // ミュートの時は音を止める
                 if flag {
@@ -819,109 +834,80 @@ impl App {
             Message::ReceivedMIDIPreviewRequest(srn_no) => {
                 self.preview_midi_sound(srn_no);
             }
-            Message::AudioOutputDeviceSelected(id, device_name) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let pref_win: &mut PreferenceWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    pref_win.audio_out_device_name = Some(device_name.clone());
-                    self.audio_out_device_name = Some(device_name.clone());
-                    // オーディオ出力デバイスを再構築
-                    let devices = cpal::default_host()
-                        .devices()
-                        .expect("Failed to get devices");
-                    self.stream_device = devices
-                        .filter(|d| d.supports_output())
-                        .find(|d| d.description().unwrap().to_string() == device_name)
-                        .expect("Failed to create output stream device");
-                    self.stream_config = self
-                        .stream_device
-                        .clone()
-                        .default_output_config()
-                        .unwrap()
-                        .into();
-                }
+            Message::AudioOutputDeviceSelected(_id, device_name) => {
+                let mut audio_out_device_name = self.audio_out_device_name.write().unwrap();
+                *audio_out_device_name = Some(device_name.clone());
+                // オーディオ出力デバイスを再構築
+                let devices = cpal::default_host()
+                    .devices()
+                    .expect("Failed to get devices");
+                self.stream_device = devices
+                    .filter(|d| d.supports_output())
+                    .find(|d| d.description().unwrap().to_string() == device_name)
+                    .expect("Failed to create output stream device");
+                self.stream_config = self
+                    .stream_device
+                    .clone()
+                    .default_output_config()
+                    .unwrap()
+                    .into();
             }
-            Message::MIDIOutputPortSelected(id, port_name) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let pref_win: &mut PreferenceWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    pref_win.midi_out_port_name = Some(port_name.clone());
-                    self.midi_out_port_name = Some(port_name.clone());
-                    // MIDI出力ポートを再接続
-                    let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
-                    let ports = midi_out.ports();
-                    // 選択したポート名を探す
-                    let mut i = 0;
-                    while i < ports.len() {
-                        if port_name == midi_out.port_name(&ports[i]).unwrap() {
-                            break;
-                        }
-                        i += 1;
+            Message::MIDIOutputPortSelected(_id, port_name) => {
+                let mut midi_out_port_name = self.midi_out_port_name.write().unwrap();
+                *midi_out_port_name = Some(port_name.clone());
+                // MIDI出力ポートを再接続
+                let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
+                let ports = midi_out.ports();
+                // 選択したポート名を探す
+                let mut i = 0;
+                while i < ports.len() {
+                    if port_name.clone() == midi_out.port_name(&ports[i]).unwrap() {
+                        break;
                     }
-                    // ポート出力作成
-                    self.midi_out_conn = if i < ports.len() {
-                        match midi_out.connect(&ports[i], SPC2MIDI2_TITLE_STR) {
-                            Ok(conn) => Some(Arc::new(Mutex::new(conn))),
-                            Err(_) => None,
-                        }
-                    } else {
-                        None
-                    };
+                    i += 1;
                 }
+                // ポート出力作成
+                self.midi_out_conn = if i < ports.len() {
+                    match midi_out.connect(&ports[i], SPC2MIDI2_TITLE_STR) {
+                        Ok(conn) => Some(Arc::new(Mutex::new(conn))),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
             }
-            Message::MIDIOutputBpmChanged(id, bpm) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let pref_win: &mut PreferenceWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut config = self.midi_output_configure.write().unwrap();
-                    pref_win.beats_per_minute = bpm;
-                    config.beats_per_minute = bpm;
-                }
+            Message::MIDIOutputBpmChanged(_id, bpm) => {
+                let mut config = self.midi_output_configure.write().unwrap();
+                config.beats_per_minute = bpm;
             }
             Message::MIDIOutputTicksPerQuarterChanged(id, ticks) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let pref_win: &mut PreferenceWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut config = self.midi_output_configure.write().unwrap();
-                    pref_win.ticks_per_quarter = Some(ticks);
-                    config.ticks_per_quarter = ticks;
-                }
+                let mut config = self.midi_output_configure.write().unwrap();
+                config.ticks_per_quarter = ticks;
             }
-            Message::MIDIOutputUpdatePeriodChanged(id, period) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let pref_win: &mut PreferenceWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut config = self.midi_output_configure.write().unwrap();
-                    pref_win.playback_parameter_update_period = period;
-                    config.playback_parameter_update_period = period;
-                }
+            Message::MIDIOutputUpdatePeriodChanged(_id, period) => {
+                let mut config = self.midi_output_configure.write().unwrap();
+                config.playback_parameter_update_period = period;
+                // 再生にかかわることなのでパラメータ反映
+                return Task::perform(async {}, move |_| Message::ReceivedSourceParameterUpdate);
             }
-            Message::MIDIOutputDurationChanged(id, duration) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let pref_win: &mut PreferenceWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut config = self.midi_output_configure.write().unwrap();
-                    pref_win.output_duration_msec = duration;
-                    config.output_duration_msec = duration;
-                }
+            Message::MIDIOutputDurationChanged(_id, duration) => {
+                let mut config = self.midi_output_configure.write().unwrap();
+                config.output_duration_msec = duration;
             }
             Message::MuteChannel(ch, flag) => {
-                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
-                    if let Some(midi_spc_ref) = &self.midi_spc {
-                        let midi_spc = midi_spc_ref.clone();
-                        let mut spc = midi_spc.lock().unwrap();
-                        let main_win: &mut MainWindow =
-                            window.as_mut().as_any_mut().downcast_mut().unwrap();
-                        // 指定チャンネルをミュート
-                        let mut flags = spc.dsp.read_register(&[0u8], DSP_ADDRESS_MIDI_MUTE);
-                        flags = if flag {
-                            flags | (1 << ch)
-                        } else {
-                            flags & !(1 << ch)
-                        };
-                        spc.dsp.write_register(&[0u8], DSP_ADDRESS_MIDI_MUTE, flags);
-                        main_win.midi_channel_mute[ch as usize] = flag;
-                    }
+                if let Some(midi_spc_ref) = &self.midi_spc {
+                    let midi_spc = midi_spc_ref.clone();
+                    let mut spc = midi_spc.lock().unwrap();
+                    // 指定チャンネルをミュート
+                    let mut flags = spc.dsp.read_register(&[0u8], DSP_ADDRESS_MIDI_MUTE);
+                    flags = if flag {
+                        flags | (1 << ch)
+                    } else {
+                        flags & !(1 << ch)
+                    };
+                    spc.dsp.write_register(&[0u8], DSP_ADDRESS_MIDI_MUTE, flags);
+                    let mut ch_flag = self.midi_channel_mute.write().unwrap();
+                    ch_flag[ch as usize] = flag;
                 }
                 // ミュートの場合は音を止める
                 if flag {
@@ -929,17 +915,15 @@ impl App {
                 }
             }
             Message::SoloChannel(ch) => {
-                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
-                    if let Some(midi_spc_ref) = &self.midi_spc {
-                        let midi_spc = midi_spc_ref.clone();
-                        let mut spc = midi_spc.lock().unwrap();
-                        let main_win: &mut MainWindow =
-                            window.as_mut().as_any_mut().downcast_mut().unwrap();
-                        // 指定チャンネル以外をミュート
-                        spc.dsp
-                            .write_register(&[0u8], DSP_ADDRESS_MIDI_MUTE, !(1 << ch));
+                if let Some(midi_spc_ref) = &self.midi_spc {
+                    let midi_spc = midi_spc_ref.clone();
+                    let mut spc = midi_spc.lock().unwrap();
+                    // 指定チャンネル以外をミュート
+                    spc.dsp
+                        .write_register(&[0u8], DSP_ADDRESS_MIDI_MUTE, !(1 << ch));
+                    if let Ok(mut ch_mute) = self.midi_channel_mute.write() {
                         for mute_ch in 0..8 {
-                            main_win.midi_channel_mute[mute_ch as usize] = mute_ch != ch;
+                            ch_mute[mute_ch as usize] = mute_ch != ch;
                         }
                     }
                 }
@@ -1103,7 +1087,7 @@ impl App {
                 format: SMFFormat::Single,
                 tracks: vec![Track {
                     copyright: Some("".to_string()),
-                    name: Some(String::from_utf8_lossy(&spc_file.header.music_title).to_string()), 
+                    name: Some(String::from_utf8_lossy(&spc_file.header.music_title).to_string()),
                     events: Vec::new(),
                 }],
                 division: config.ticks_per_quarter as i16,
@@ -1199,8 +1183,18 @@ impl App {
             Default::default(),
         );
 
-        // 各SPCのミュートフラグ取得
+        // SPCのミュートフラグ取得・設定
         let pcm_spc_mute = self.pcm_spc_mute.clone();
+        if let Ok(ch_mute) = self.midi_channel_mute.read() {
+            let mut flags = 0;
+            for ch in 0..8 {
+                if ch_mute[ch] {
+                    flags |= 1 << ch;
+                }
+            }
+            let mut spc = midi_spc.lock().unwrap();
+            spc.dsp.write_register(&[0u8], DSP_ADDRESS_MIDI_MUTE, flags);
+        }
 
         // SPCにパラメータ適用
         self.apply_source_parameter();
@@ -1288,7 +1282,7 @@ impl App {
         Ok(())
     }
 
-    // 再生開始
+    // プレビュー再生開始
     fn srn_play_start(&mut self, srn_no: u8, loop_flag: bool) -> Result<(), PlayStreamError> {
         // 再生対象の音源をコピー
         let infos = self.source_infos.read().unwrap();
@@ -1567,9 +1561,9 @@ async fn load_file(path: impl Into<PathBuf>) -> Result<(PathBuf, LoadedFile), Er
     return Err(Error::IoError(io::ErrorKind::Unsupported));
 }
 
-async fn save_smf(smf: SMF) -> Result<(), Error> {
+async fn save_smf(default_file_name: String, smf: SMF) -> Result<(), Error> {
     let picked_file = AsyncFileDialog::new()
-        .set_file_name("output.mid") // TODO: 曲名をデフォルトにできるとよい
+        .set_file_name(default_file_name)
         .set_title("Save to a MIDI file...")
         .add_filter("SMF", &["mid", "midi", "MID"])
         .save_file()
@@ -1583,9 +1577,9 @@ async fn save_smf(smf: SMF) -> Result<(), Error> {
     }
 }
 
-async fn save_json(json: serde_json::Value) -> Result<(), Error> {
+async fn save_json(default_file_name: String, json: serde_json::Value) -> Result<(), Error> {
     let picked_file = AsyncFileDialog::new()
-        .set_file_name("output.json") // TODO: 曲名をデフォルトにできるとよい
+        .set_file_name(default_file_name)
         .set_title("Save to a JSON file...")
         .add_filter("JSON", &["json"])
         .save_file()
@@ -1725,7 +1719,7 @@ impl SPC2MIDI2Window for MainWindow {
         let params = self.source_params.read().unwrap();
         let srn_list: Vec<_> = infos
             .iter()
-            .map(|(key, info)| {
+            .map(|(key, _info)| {
                 row![
                     text(format!("0x{:02X}", key)),
                     {
@@ -1742,11 +1736,12 @@ impl SPC2MIDI2Window for MainWindow {
             .collect();
 
         let status = self.playback_status.read().unwrap();
+        let midi_channel_mute = self.midi_channel_mute.read().unwrap();
         let status_list: Vec<_> = (0..8)
             .map(|ch| {
                 row![
                     text(format!("{}", ch)),
-                    checkbox(self.midi_channel_mute[ch])
+                    checkbox(midi_channel_mute[ch])
                         .on_toggle(move |flag| Message::MuteChannel(ch as u8, flag)),
                     button("S").on_press(Message::SoloChannel(ch as u8)),
                     text(format!("0x{:02X}", status.srn_no[ch])),
@@ -1771,10 +1766,10 @@ impl SPC2MIDI2Window for MainWindow {
         let preview_control = row![
             button("Play / Pause").on_press(Message::ReceivedPlayStartRequest),
             button("Stop").on_press(Message::ReceivedPlayStopRequest),
-            checkbox(self.pcm_spc_mute)
+            checkbox(self.pcm_spc_mute.clone().load(Ordering::Relaxed))
                 .label("SPC Mute")
                 .on_toggle(|flag| Message::SPCMuteFlagToggled(flag)),
-            checkbox(self.midi_spc_mute)
+            checkbox(self.midi_spc_mute.clone().load(Ordering::Relaxed))
                 .label("MIDI Mute")
                 .on_toggle(|flag| Message::MIDIMuteFlagToggled(flag)),
             text(format!("{:8.2} sec", self.playback_time_sec)),
@@ -1809,15 +1804,18 @@ impl MainWindow {
         source_info: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
         source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
+        pcm_spc_mute: Arc<AtomicBool>,
+        midi_spc_mute: Arc<AtomicBool>,
+        midi_channel_mute: Arc<RwLock<[bool; 8]>>,
     ) -> Self {
         Self {
             title: title,
             source_infos: source_info,
             source_params: source_params,
             playback_status: playback_status,
-            pcm_spc_mute: false,
-            midi_spc_mute: false,
-            midi_channel_mute: [false; 8],
+            pcm_spc_mute: pcm_spc_mute,
+            midi_spc_mute: midi_spc_mute,
+            midi_channel_mute: midi_channel_mute,
             playback_time_sec: 0.0f32,
         }
     }
@@ -1830,37 +1828,42 @@ impl SPC2MIDI2Window for PreferenceWindow {
 
     fn view(&self) -> Element<'_, Message> {
         let window_id = self.window_id;
+        let audio_device_name = self.audio_out_device_name.read().unwrap();
+        let midi_port_name = self.midi_out_port_name.read().unwrap();
+        let midi_output_configure = self.midi_output_configure.read().unwrap();
         let content = column![
             combo_box(
                 &self.audio_out_devices_box,
                 "Audio Output port",
-                self.audio_out_device_name.as_ref(),
+                audio_device_name.as_ref(),
                 move |device_name| Message::AudioOutputDeviceSelected(window_id, device_name),
             ),
             combo_box(
                 &self.midi_ports_box,
                 "MIDI Output port",
-                self.midi_out_port_name.as_ref(),
+                midi_port_name.as_ref(),
                 move |port_name| Message::MIDIOutputPortSelected(window_id, port_name),
             ),
-            number_input(&self.beats_per_minute, 32..=240, move |bpm| {
-                Message::MIDIOutputBpmChanged(window_id, bpm)
-            },)
+            number_input(
+                &midi_output_configure.beats_per_minute,
+                32..=240,
+                move |bpm| { Message::MIDIOutputBpmChanged(window_id, bpm) },
+            )
             .step(1),
             combo_box(
                 &self.ticks_per_quarter_box,
                 "Ticks per quarter (resolution)",
-                self.ticks_per_quarter.as_ref(),
+                Some(&midi_output_configure.ticks_per_quarter),
                 move |ticks| { Message::MIDIOutputTicksPerQuarterChanged(window_id, ticks) },
             ),
             number_input(
-                &self.playback_parameter_update_period,
+                &midi_output_configure.playback_parameter_update_period,
                 1..=255,
                 move |period| { Message::MIDIOutputUpdatePeriodChanged(window_id, period) },
             )
             .step(1),
             number_input(
-                &self.output_duration_msec,
+                &midi_output_configure.output_duration_msec,
                 1000..=(3600 * 1000),
                 move |duration| { Message::MIDIOutputDurationChanged(window_id, duration) },
             )
@@ -1878,8 +1881,8 @@ impl PreferenceWindow {
     fn new(
         window_id: window::Id,
         title: String,
-        audio_out_device_name: Option<String>,
-        midi_out_port_name: Option<String>,
+        audio_out_device_name: Arc<RwLock<Option<String>>>,
+        midi_out_port_name: Arc<RwLock<Option<String>>>,
         midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
     ) -> Self {
         let device_name_list: Vec<String> = cpal::default_host()
@@ -1898,7 +1901,6 @@ impl PreferenceWindow {
             .iter()
             .map(|p| midi_out.port_name(p).unwrap())
             .collect();
-        let config = midi_output_configure.read().unwrap();
         Self {
             title: title,
             window_id: window_id,
@@ -1906,10 +1908,7 @@ impl PreferenceWindow {
             audio_out_devices_box: combo_box::State::new(device_name_list),
             midi_out_port_name: midi_out_port_name,
             midi_ports_box: combo_box::State::new(port_name_list),
-            beats_per_minute: config.beats_per_minute,
-            playback_parameter_update_period: config.playback_parameter_update_period,
-            output_duration_msec: config.output_duration_msec,
-            ticks_per_quarter: Some(config.ticks_per_quarter),
+            midi_output_configure: midi_output_configure,
             ticks_per_quarter_box: combo_box::State::new(vec![
                 24, 30, 48, 60, 96, 120, 192, 240, 384, 480, 960,
             ]),
@@ -2096,7 +2095,6 @@ impl canvas::Program<Message> for SRNWindow {
                 ),
                 SPC_SAMPLING_RATE as f32,
                 self.source_info.signal.len(),
-                16,
             );
         });
         vec![geometry]
@@ -2254,13 +2252,7 @@ fn draw_loop_point(
 }
 
 /// 時刻ラベル描画
-fn draw_timelabel(
-    frame: &mut Frame,
-    bounds: &Rectangle,
-    sampling_rate: f32,
-    num_samples: usize,
-    num_labels: usize,
-) {
+fn draw_timelabel(frame: &mut Frame, bounds: &Rectangle, sampling_rate: f32, num_samples: usize) {
     let timelabel_left_x = bounds.center().x - bounds.width / 2.0;
     let timelabel_y = bounds.center().y;
     let duration = (num_samples as f32) * 1000.0 / sampling_rate;
