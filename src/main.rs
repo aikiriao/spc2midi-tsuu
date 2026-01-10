@@ -1102,8 +1102,8 @@ impl App {
             let mut smf = SMF {
                 format: SMFFormat::Single,
                 tracks: vec![Track {
-                    copyright: Some("tmp".to_string()), // TODO: SPCから出す or ユーザが設定した時間出力
-                    name: Some("tmp".to_string()), // TODO: SPCから出す or ユーザが設定した時間出力
+                    copyright: Some("".to_string()),
+                    name: Some(String::from_utf8_lossy(&spc_file.header.music_title).to_string()), 
                     events: Vec::new(),
                 }],
                 division: config.ticks_per_quarter as i16,
