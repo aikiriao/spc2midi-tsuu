@@ -633,7 +633,8 @@ impl App {
                 }
                 // ミュートの時は音を止める
                 if flag {
-                    for ch in 0..8 {
+                    // 念のため全チャンネルの音を止める
+                    for ch in 0..16 {
                         self.stop_midi_channel_sound(ch);
                     }
                 }
@@ -878,7 +879,7 @@ impl App {
                     }
                 }
                 // ミュートの場合は音を止める
-                for mute_ch in 0..8 {
+                for mute_ch in 0..16 {
                     if mute_ch != ch {
                         self.stop_midi_channel_sound(mute_ch);
                     }
@@ -1355,7 +1356,8 @@ impl App {
             stream.pause()?;
             self.stream = None;
         }
-        for ch in 0..8 {
+        // 念のため全チャンネルの音を止める
+        for ch in 0..16 {
             self.stop_midi_channel_sound(ch);
         }
         Ok(())
