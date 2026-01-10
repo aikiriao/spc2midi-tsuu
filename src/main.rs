@@ -421,8 +421,13 @@ impl App {
                 });
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
-                    let window =
-                        SRNWindow::new(id, format!("SRN 0x{:02X}", srn_no), srn_no, source, self.source_parameter.clone());
+                    let window = SRNWindow::new(
+                        id,
+                        format!("SRN 0x{:02X}", srn_no),
+                        srn_no,
+                        source,
+                        self.source_parameter.clone(),
+                    );
                     self.windows.insert(id, Box::new(window));
                     return open.map(Message::SRNWindowOpened);
                 }
@@ -669,8 +674,7 @@ impl App {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
                     let clamped_fraction = f32::round(fraction * 256.0).clamp(0.0, 255.0);
-                    param.center_note =
-                        (param.center_note & 0xFF00) | (clamped_fraction as u16);
+                    param.center_note = (param.center_note & 0xFF00) | (clamped_fraction as u16);
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
                     });
@@ -1708,18 +1712,32 @@ impl SPC2MIDI2Window for MainWindow {
                     checkbox(midi_channel_mute[ch])
                         .on_toggle(move |flag| Message::MuteChannel(ch as u8, flag)),
                     button("S").on_press(Message::SoloChannel(ch as u8)),
-                    text(format!("0x{:02X}", status.srn_no[ch]))
-                        .height(Length::Fill)
-                        .width(30),
                     text(format!("{}", if status.noteon[ch] { "♪" } else { "" }))
+                        .align_y(alignment::Alignment::Center)
                         .height(Length::Fill)
                         .width(10),
+                    text(format!("0x{:02X}", status.srn_no[ch]))
+                        .align_y(alignment::Alignment::Center)
+                        .height(Length::Fill)
+                        .width(30),
+                    text(format!(
+                        "{}",
+                        if let Some(param) = params.get(&status.srn_no[ch]) {
+                            param.program.to_string()
+                        } else {
+                            "".to_string()
+                        }
+                    ))
+                    .align_y(alignment::Alignment::Center)
+                    .size(14.0)
+                    .height(Length::Fill)
+                    .width(120),
                     Canvas::new(pitch_indicator[ch])
                         .height(Length::Fill)
-                        .width(70),
+                        .width(60),
                     Canvas::new(expression_indicator[ch])
                         .height(Length::Fill)
-                        .width(60),
+                        .width(50),
                     Canvas::new(volume_indicator[ch][0])
                         .height(Length::Fill)
                         .width(40),
