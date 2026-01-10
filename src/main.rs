@@ -77,7 +77,7 @@ const DEFAULT_ANALYZING_TIME_SEC: u32 = 120;
 /// デフォルトのMIDIファイル出力時間(sec)
 const DEFAULT_OUTPUT_DURATION_MSEC: u64 = 60 * 1000;
 /// デフォルトのMIDI再生パラメータ更新間隔(msec)
-const DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC: u8 = 10;
+const DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC: u8 = 5;
 /// デフォルトの出力MIDIのBPM
 const DEFAULT_MIDI_BPM: u8 = 120;
 /// デフォルトの出力MIDIの四分音符内のティック数
@@ -111,31 +111,31 @@ enum Message {
     EventOccurred(iced::Event),
     ReceivedSRNPlayStartRequest(u8, bool),
     SRNPlayLoopFlagToggled(window::Id, bool),
-    SRNMIDIPreviewFlagToggled(window::Id, bool),
     ReceivedPlayStartRequest,
     ReceivedPlayStopRequest,
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
-    ProgramSelected(window::Id, Program),
+    ProgramSelected(u8, Program),
+    SRNMIDIPreviewFlagToggled(u8, bool),
     ReceivedMIDIPreviewRequest(u8),
-    CenterNoteIntChanged(window::Id, u8),
-    CenterNoteFractionChanged(window::Id, f32),
-    NoteOnVelocityChanged(window::Id, u8),
-    PitchBendWidthChanged(window::Id, u8),
-    EnablePitchBendFlagToggled(window::Id, bool),
-    AutoPanFlagToggled(window::Id, bool),
-    FixedPanChanged(window::Id, u8),
-    AutoVolumeFlagToggled(window::Id, bool),
-    FixedVolumeChanged(window::Id, u8),
-    EnvelopeAsExpressionFlagToggled(window::Id, bool),
-    EchoAsEffect1FlagToggled(window::Id, bool),
+    CenterNoteIntChanged(u8, u8),
+    CenterNoteFractionChanged(u8, f32),
+    NoteOnVelocityChanged(u8, u8),
+    PitchBendWidthChanged(u8, u8),
+    EnablePitchBendFlagToggled(u8, bool),
+    AutoPanFlagToggled(u8, bool),
+    FixedPanChanged(u8, u8),
+    AutoVolumeFlagToggled(u8, bool),
+    FixedVolumeChanged(u8, u8),
+    EnvelopeAsExpressionFlagToggled(u8, bool),
+    EchoAsEffect1FlagToggled(u8, bool),
     ReceivedSourceParameterUpdate,
-    AudioOutputDeviceSelected(window::Id, String),
-    MIDIOutputPortSelected(window::Id, String),
-    MIDIOutputBpmChanged(window::Id, u8),
-    MIDIOutputTicksPerQuarterChanged(window::Id, u16),
-    MIDIOutputUpdatePeriodChanged(window::Id, u8),
-    MIDIOutputDurationChanged(window::Id, u64),
+    AudioOutputDeviceSelected(String),
+    MIDIOutputPortSelected(String),
+    MIDIOutputBpmChanged(u8),
+    MIDIOutputTicksPerQuarterChanged(u16),
+    MIDIOutputUpdatePeriodChanged(u8),
+    MIDIOutputDurationChanged(u64),
     MuteChannel(u8, bool),
     SoloChannel(u8),
     Tick,
@@ -239,7 +239,6 @@ struct MainWindow {
 #[derive(Debug)]
 struct PreferenceWindow {
     title: String,
-    window_id: window::Id,
     audio_out_device_name: Arc<RwLock<Option<String>>>,
     audio_out_devices_box: combo_box::State<String>,
     midi_out_port_name: Arc<RwLock<Option<String>>>,
@@ -254,22 +253,10 @@ struct SRNWindow {
     window_id: window::Id,
     srn_no: u8,
     source_info: Arc<SourceInformation>,
+    source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     enable_loop_play: bool,
-    enable_midi_preview: bool,
-    cache: Cache,
-    program: Option<Program>,
     program_box: combo_box::State<Program>,
-    center_note_int: u8,
-    center_note_fraction: f32,
-    noteon_velocity: u8,
-    pitchbend_width: u8,
-    envelope_as_expression: bool,
-    auto_pan: bool,
-    fixed_pan: u8,
-    auto_volume: bool,
-    fixed_volume: u8,
-    enable_pitch_bend: bool,
-    echo_as_effect1: bool,
+    cache: Cache,
 }
 
 struct App {
@@ -434,10 +421,8 @@ impl App {
                 });
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
-                    let params = self.source_parameter.read().unwrap();
-                    let param = params.get(&srn_no).unwrap();
                     let window =
-                        SRNWindow::new(id, format!("SRN 0x{:02X}", srn_no), srn_no, source, param);
+                        SRNWindow::new(id, format!("SRN 0x{:02X}", srn_no), srn_no, source, self.source_parameter.clone());
                     self.windows.insert(id, Box::new(window));
                     return open.map(Message::SRNWindowOpened);
                 }
@@ -581,15 +566,10 @@ impl App {
                     srn_win.enable_loop_play = flag;
                 }
             }
-            Message::SRNMIDIPreviewFlagToggled(id, flag) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.enable_midi_preview = flag;
-                        param.enable_midi_preview = flag;
-                    }
+            Message::SRNMIDIPreviewFlagToggled(srn_no, flag) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.enable_midi_preview = flag;
                 }
             }
             Message::ReceivedPlayStartRequest => {
@@ -653,18 +633,28 @@ impl App {
                     }
                 }
             }
-            Message::ProgramSelected(id, program) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        param.program = program.clone();
+            Message::ProgramSelected(srn_no, program) => {
+                let mut params = self.source_parameter.write().unwrap();
+                let mut tasks = vec![];
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.program = program.clone();
+                    if param.enable_midi_preview {
+                        tasks.push(Task::perform(async {}, move |_| {
+                            Message::ReceivedMIDIPreviewRequest(srn_no)
+                        }));
                     }
-                    srn_win.program = Some(program);
+                }
+                tasks.push(Task::perform(async {}, move |_| {
+                    Message::ReceivedSourceParameterUpdate
+                }));
+                return Task::batch(tasks);
+            }
+            Message::CenterNoteIntChanged(srn_no, note) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.center_note = (param.center_note & 0x00FF) | ((note as u16) << 8);
                     let mut tasks = vec![];
-                    if srn_win.enable_midi_preview {
-                        let srn_no = srn_win.srn_no;
+                    if param.enable_midi_preview {
                         tasks.push(Task::perform(async {}, move |_| {
                             Message::ReceivedMIDIPreviewRequest(srn_no)
                         }));
@@ -675,171 +665,98 @@ impl App {
                     return Task::batch(tasks);
                 }
             }
-            Message::CenterNoteIntChanged(id, note) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.center_note_int = note;
-                        param.center_note = (param.center_note & 0x00FF) | ((note as u16) << 8);
-                        let mut tasks = vec![];
-                        if srn_win.enable_midi_preview {
-                            let srn_no = srn_win.srn_no;
-                            tasks.push(Task::perform(async {}, move |_| {
-                                Message::ReceivedMIDIPreviewRequest(srn_no)
-                            }));
-                        }
-                        tasks.push(Task::perform(async {}, move |_| {
-                            Message::ReceivedSourceParameterUpdate
-                        }));
-                        return Task::batch(tasks);
-                    }
+            Message::CenterNoteFractionChanged(srn_no, fraction) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    let clamped_fraction = f32::round(fraction * 256.0).clamp(0.0, 255.0);
+                    param.center_note =
+                        (param.center_note & 0xFF00) | (clamped_fraction as u16);
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
                 }
             }
-            Message::CenterNoteFractionChanged(id, fraction) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        let clamped_fraction = f32::round(fraction * 256.0).clamp(0.0, 255.0);
-                        srn_win.center_note_fraction = clamped_fraction / 256.0;
-                        param.center_note =
-                            (param.center_note & 0xFF00) | (clamped_fraction as u16);
+            Message::NoteOnVelocityChanged(srn_no, velocity) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.noteon_velocity = velocity;
+                    if param.enable_midi_preview {
                         return Task::perform(async {}, move |_| {
-                            Message::ReceivedSourceParameterUpdate
+                            Message::ReceivedMIDIPreviewRequest(srn_no)
                         });
                     }
                 }
             }
-            Message::NoteOnVelocityChanged(id, velocity) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.noteon_velocity = velocity;
-                        param.noteon_velocity = srn_win.noteon_velocity;
-                        if srn_win.enable_midi_preview {
-                            let srn_no = srn_win.srn_no;
-                            return Task::perform(async {}, move |_| {
-                                Message::ReceivedMIDIPreviewRequest(srn_no)
-                            });
-                        }
-                    }
+            Message::PitchBendWidthChanged(srn_no, width) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.pitchbend_width = width;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
                 }
             }
-            Message::PitchBendWidthChanged(id, width) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.pitchbend_width = width;
-                        param.pitchbend_width = srn_win.pitchbend_width;
-                        return Task::perform(async {}, move |_| {
-                            Message::ReceivedSourceParameterUpdate
-                        });
-                    }
+            Message::EnablePitchBendFlagToggled(srn_no, flag) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.enable_pitch_bend = flag;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
                 }
             }
-            Message::EnablePitchBendFlagToggled(id, flag) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.enable_pitch_bend = flag;
-                        param.enable_pitch_bend = flag;
-                        return Task::perform(async {}, move |_| {
-                            Message::ReceivedSourceParameterUpdate
-                        });
-                    }
+            Message::AutoPanFlagToggled(srn_no, flag) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.auto_pan = flag;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
                 }
             }
-            Message::AutoPanFlagToggled(id, flag) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.auto_pan = flag;
-                        param.auto_pan = flag;
-                        return Task::perform(async {}, move |_| {
-                            Message::ReceivedSourceParameterUpdate
-                        });
-                    }
+            Message::FixedPanChanged(srn_no, pan) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.fixed_pan = pan;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
                 }
             }
-            Message::FixedPanChanged(id, pan) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.fixed_pan = pan;
-                        param.fixed_pan = pan;
-                        return Task::perform(async {}, move |_| {
-                            Message::ReceivedSourceParameterUpdate
-                        });
-                    }
+            Message::AutoVolumeFlagToggled(srn_no, flag) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.auto_volume = flag;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
                 }
             }
-            Message::AutoVolumeFlagToggled(id, flag) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.auto_volume = flag;
-                        param.auto_volume = flag;
-                        return Task::perform(async {}, move |_| {
-                            Message::ReceivedSourceParameterUpdate
-                        });
-                    }
+            Message::FixedVolumeChanged(srn_no, volume) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.fixed_volume = volume;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
                 }
             }
-            Message::FixedVolumeChanged(id, volume) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.fixed_volume = volume;
-                        param.fixed_volume = volume;
-                        return Task::perform(async {}, move |_| {
-                            Message::ReceivedSourceParameterUpdate
-                        });
-                    }
+            Message::EnvelopeAsExpressionFlagToggled(srn_no, flag) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.envelope_as_expression = flag;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
                 }
             }
-            Message::EnvelopeAsExpressionFlagToggled(id, flag) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.envelope_as_expression = flag;
-                        param.envelope_as_expression = flag;
-                        return Task::perform(async {}, move |_| {
-                            Message::ReceivedSourceParameterUpdate
-                        });
-                    }
-                }
-            }
-            Message::EchoAsEffect1FlagToggled(id, flag) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    let mut params = self.source_parameter.write().unwrap();
-                    if let Some(param) = params.get_mut(&srn_win.srn_no) {
-                        srn_win.echo_as_effect1 = flag;
-                        param.echo_as_effect1 = flag;
-                        return Task::perform(async {}, move |_| {
-                            Message::ReceivedSourceParameterUpdate
-                        });
-                    }
+            Message::EchoAsEffect1FlagToggled(srn_no, flag) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.echo_as_effect1 = flag;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
                 }
             }
             Message::ReceivedSourceParameterUpdate => {
@@ -848,7 +765,7 @@ impl App {
             Message::ReceivedMIDIPreviewRequest(srn_no) => {
                 self.preview_midi_sound(srn_no);
             }
-            Message::AudioOutputDeviceSelected(_id, device_name) => {
+            Message::AudioOutputDeviceSelected(device_name) => {
                 let mut audio_out_device_name = self.audio_out_device_name.write().unwrap();
                 *audio_out_device_name = Some(device_name.clone());
                 // オーディオ出力デバイスを再構築
@@ -866,7 +783,7 @@ impl App {
                     .unwrap()
                     .into();
             }
-            Message::MIDIOutputPortSelected(_id, port_name) => {
+            Message::MIDIOutputPortSelected(port_name) => {
                 let mut midi_out_port_name = self.midi_out_port_name.write().unwrap();
                 *midi_out_port_name = Some(port_name.clone());
                 // MIDI出力ポートを再接続
@@ -890,21 +807,21 @@ impl App {
                     None
                 };
             }
-            Message::MIDIOutputBpmChanged(_id, bpm) => {
+            Message::MIDIOutputBpmChanged(bpm) => {
                 let mut config = self.midi_output_configure.write().unwrap();
                 config.beats_per_minute = bpm;
             }
-            Message::MIDIOutputTicksPerQuarterChanged(id, ticks) => {
+            Message::MIDIOutputTicksPerQuarterChanged(ticks) => {
                 let mut config = self.midi_output_configure.write().unwrap();
                 config.ticks_per_quarter = ticks;
             }
-            Message::MIDIOutputUpdatePeriodChanged(_id, period) => {
+            Message::MIDIOutputUpdatePeriodChanged(period) => {
                 let mut config = self.midi_output_configure.write().unwrap();
                 config.playback_parameter_update_period = period;
                 // 再生にかかわることなのでパラメータ反映
                 return Task::perform(async {}, move |_| Message::ReceivedSourceParameterUpdate);
             }
-            Message::MIDIOutputDurationChanged(_id, duration) => {
+            Message::MIDIOutputDurationChanged(duration) => {
                 let mut config = self.midi_output_configure.write().unwrap();
                 config.output_duration_msec = duration;
             }
@@ -1887,7 +1804,6 @@ impl SPC2MIDI2Window for PreferenceWindow {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let window_id = self.window_id;
         let audio_device_name = self.audio_out_device_name.read().unwrap();
         let midi_port_name = self.midi_out_port_name.read().unwrap();
         let midi_output_configure = self.midi_output_configure.read().unwrap();
@@ -1896,36 +1812,36 @@ impl SPC2MIDI2Window for PreferenceWindow {
                 &self.audio_out_devices_box,
                 "Audio Output port",
                 audio_device_name.as_ref(),
-                move |device_name| Message::AudioOutputDeviceSelected(window_id, device_name),
+                move |device_name| Message::AudioOutputDeviceSelected(device_name),
             ),
             combo_box(
                 &self.midi_ports_box,
                 "MIDI Output port",
                 midi_port_name.as_ref(),
-                move |port_name| Message::MIDIOutputPortSelected(window_id, port_name),
+                move |port_name| Message::MIDIOutputPortSelected(port_name),
             ),
             number_input(
                 &midi_output_configure.beats_per_minute,
                 32..=240,
-                move |bpm| { Message::MIDIOutputBpmChanged(window_id, bpm) },
+                move |bpm| { Message::MIDIOutputBpmChanged(bpm) },
             )
             .step(1),
             combo_box(
                 &self.ticks_per_quarter_box,
                 "Ticks per quarter (resolution)",
                 Some(&midi_output_configure.ticks_per_quarter),
-                move |ticks| { Message::MIDIOutputTicksPerQuarterChanged(window_id, ticks) },
+                move |ticks| { Message::MIDIOutputTicksPerQuarterChanged(ticks) },
             ),
             number_input(
                 &midi_output_configure.playback_parameter_update_period,
                 1..=255,
-                move |period| { Message::MIDIOutputUpdatePeriodChanged(window_id, period) },
+                move |period| { Message::MIDIOutputUpdatePeriodChanged(period) },
             )
             .step(1),
             number_input(
                 &midi_output_configure.output_duration_msec,
                 1000..=(3600 * 1000),
-                move |duration| { Message::MIDIOutputDurationChanged(window_id, duration) },
+                move |duration| { Message::MIDIOutputDurationChanged(duration) },
             )
             .step(1),
         ]
@@ -1963,7 +1879,6 @@ impl PreferenceWindow {
             .collect();
         Self {
             title: title,
-            window_id: window_id,
             audio_out_device_name: audio_out_device_name,
             audio_out_devices_box: combo_box::State::new(device_name_list),
             midi_out_port_name: midi_out_port_name,
@@ -1982,7 +1897,11 @@ impl SPC2MIDI2Window for SRNWindow {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let window_id = self.window_id;
+        let srn_no = self.srn_no;
+        let params = self.source_parameter.read().unwrap();
+        let param = params.get(&self.srn_no).unwrap();
+        let center_note_int = (param.center_note >> 8) as u8;
+        let center_note_fraction = (param.center_note & 0xFF) as f32 / 256.0;
         let content = column![
             Canvas::new(self).width(Length::Fill).height(200),
             row![
@@ -1993,9 +1912,9 @@ impl SPC2MIDI2Window for SRNWindow {
                 checkbox(self.enable_loop_play)
                     .label("Loop")
                     .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(self.window_id, flag)),
-                checkbox(self.enable_midi_preview)
+                checkbox(param.enable_midi_preview)
                     .label("MIDI Preview")
-                    .on_toggle(|flag| Message::SRNMIDIPreviewFlagToggled(self.window_id, flag)),
+                    .on_toggle(|flag| Message::SRNMIDIPreviewFlagToggled(self.srn_no, flag)),
             ]
             .spacing(10)
             .width(Length::Fill)
@@ -2003,32 +1922,32 @@ impl SPC2MIDI2Window for SRNWindow {
             combo_box(
                 &self.program_box,
                 "Program",
-                self.program.as_ref(),
-                move |program| Message::ProgramSelected(window_id, program),
+                Some(&param.program),
+                move |program| Message::ProgramSelected(srn_no, program),
             ),
             row![
-                number_input(&self.center_note_int, 0..=127, move |note| {
-                    Message::CenterNoteIntChanged(window_id, note)
+                number_input(&center_note_int, 0..=127, move |note| {
+                    Message::CenterNoteIntChanged(srn_no, note)
                 },)
                 .step(1),
-                number_input(&self.center_note_fraction, 0.0..=1.0, move |fraction| {
-                    Message::CenterNoteFractionChanged(window_id, fraction)
+                number_input(&center_note_fraction, 0.0..=1.0, move |fraction| {
+                    Message::CenterNoteFractionChanged(srn_no, fraction)
                 },)
                 .step(1.0 / 256.0),
             ]
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
-            number_input(&self.noteon_velocity, 1..=127, move |velocity| {
-                Message::NoteOnVelocityChanged(window_id, velocity)
+            number_input(&param.noteon_velocity, 1..=127, move |velocity| {
+                Message::NoteOnVelocityChanged(srn_no, velocity)
             },)
             .step(1),
             row![
-                checkbox(self.enable_pitch_bend)
+                checkbox(param.enable_pitch_bend)
                     .label("Pitch Bend")
-                    .on_toggle(|flag| Message::EnablePitchBendFlagToggled(self.window_id, flag)),
-                number_input(&self.pitchbend_width, 1..=48, move |width| {
-                    Message::PitchBendWidthChanged(window_id, width)
+                    .on_toggle(move |flag| Message::EnablePitchBendFlagToggled(srn_no, flag)),
+                number_input(&param.pitchbend_width, 1..=48, move |width| {
+                    Message::PitchBendWidthChanged(srn_no, width)
                 },)
                 .step(1),
             ]
@@ -2036,17 +1955,17 @@ impl SPC2MIDI2Window for SRNWindow {
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
             row![
-                checkbox(self.auto_pan)
+                checkbox(param.auto_pan)
                     .label("Auto Pan")
-                    .on_toggle(|flag| Message::AutoPanFlagToggled(self.window_id, flag)),
+                    .on_toggle(move |flag| Message::AutoPanFlagToggled(srn_no, flag)),
                 number_input(
-                    &self.fixed_pan,
-                    if self.auto_pan {
-                        self.fixed_pan..=self.fixed_pan
+                    &param.fixed_pan,
+                    if param.auto_pan {
+                        param.fixed_pan..=param.fixed_pan
                     } else {
                         0..=127
                     },
-                    move |pan| { Message::FixedVolumeChanged(window_id, pan) }
+                    move |pan| { Message::FixedPanChanged(srn_no, pan) }
                 )
                 .step(1),
             ]
@@ -2054,29 +1973,29 @@ impl SPC2MIDI2Window for SRNWindow {
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
             row![
-                checkbox(self.auto_volume)
+                checkbox(param.auto_volume)
                     .label("Auto Volume")
-                    .on_toggle(|flag| Message::AutoVolumeFlagToggled(self.window_id, flag)),
+                    .on_toggle(move |flag| Message::AutoVolumeFlagToggled(srn_no, flag)),
                 number_input(
-                    &self.fixed_volume,
-                    if self.auto_volume {
-                        self.fixed_volume..=self.fixed_volume
+                    &param.fixed_volume,
+                    if param.auto_volume {
+                        param.fixed_volume..=param.fixed_volume
                     } else {
                         0..=127
                     },
-                    move |volume| { Message::FixedVolumeChanged(window_id, volume) }
+                    move |volume| { Message::FixedVolumeChanged(srn_no, volume) }
                 )
                 .step(1),
             ]
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
-            checkbox(self.envelope_as_expression)
+            checkbox(param.envelope_as_expression)
                 .label("Envelope as Expression")
-                .on_toggle(|flag| Message::EnvelopeAsExpressionFlagToggled(self.window_id, flag)),
-            checkbox(self.echo_as_effect1)
+                .on_toggle(move |flag| Message::EnvelopeAsExpressionFlagToggled(srn_no, flag)),
+            checkbox(param.echo_as_effect1)
                 .label("Echo as Effect1")
-                .on_toggle(|flag| Message::EchoAsEffect1FlagToggled(self.window_id, flag)),
+                .on_toggle(move |flag| Message::EchoAsEffect1FlagToggled(srn_no, flag)),
         ]
         .spacing(10)
         .padding(10)
@@ -2092,29 +2011,17 @@ impl SRNWindow {
         title: String,
         srn_no: u8,
         source_info: &SourceInformation,
-        source_parameter: &SourceParameter,
+        source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     ) -> Self {
         Self {
             window_id: window_id,
             title: title,
             srn_no: srn_no,
             source_info: source_info.clone().into(),
+            source_parameter: source_parameter,
             enable_loop_play: false,
-            enable_midi_preview: source_parameter.enable_midi_preview,
-            cache: Cache::default(),
-            program: Some(source_parameter.program.clone()),
             program_box: combo_box::State::new(Program::ALL.to_vec()),
-            center_note_int: (source_parameter.center_note >> 8) as u8,
-            center_note_fraction: ((source_parameter.center_note & 0xFF) as f32) / 256.0,
-            noteon_velocity: source_parameter.noteon_velocity,
-            pitchbend_width: source_parameter.pitchbend_width,
-            envelope_as_expression: source_parameter.envelope_as_expression,
-            auto_pan: source_parameter.auto_pan,
-            fixed_pan: source_parameter.fixed_pan,
-            auto_volume: source_parameter.auto_volume,
-            fixed_volume: source_parameter.fixed_volume,
-            enable_pitch_bend: source_parameter.enable_pitch_bend,
-            echo_as_effect1: source_parameter.echo_as_effect1,
+            cache: Cache::default(),
         }
     }
 }
@@ -2399,8 +2306,6 @@ fn draw_indicator(
     formatter: fn(f32) -> String,
 ) {
     let center = bounds.center();
-    let half_height = bounds.height / 2.0;
-    let center_left = Point::new(center.x - bounds.width / 2.0, center.y);
 
     // 背景を塗りつぶす
     frame.fill_rectangle(
