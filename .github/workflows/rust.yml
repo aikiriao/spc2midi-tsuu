@@ -19,6 +19,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v2
+      with:
+        cmake-version: '3.31.0'
     - name: Preparation on Linux
       if: runner.os == 'Linux'
       run: |
