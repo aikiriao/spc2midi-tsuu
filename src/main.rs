@@ -242,7 +242,7 @@ impl App {
                     ..Default::default()
                 });
                 let window = MainWindow::new(
-                    SPC2MIDI2_TITLE_STR.to_string(),
+                    format!("{} {}", SPC2MIDI2_TITLE_STR, env!("CARGO_PKG_VERSION")),
                     self.theme.clone(),
                     self.source_parameter.clone(),
                     self.playback_status.clone(),
@@ -263,7 +263,6 @@ impl App {
                 self.windows.insert(
                     id,
                     Box::new(PreferenceWindow::new(
-                        "Preference".to_string(),
                         self.audio_out_device_name.clone(),
                         self.midi_out_port_name.clone(),
                         self.midi_output_configure.clone(),
@@ -338,7 +337,7 @@ impl App {
                                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                                     main_window.title = format!(
                                         "{} - {}",
-                                        SPC2MIDI2_TITLE_STR,
+                                        main_window.base_title,
                                         path.file_name().unwrap().to_str().unwrap()
                                     );
                                 }

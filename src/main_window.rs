@@ -17,6 +17,7 @@ use std::sync::{Arc, RwLock};
 #[derive(Debug)]
 pub struct MainWindow {
     pub title: String,
+    pub base_title: String,
     theme: iced::Theme,
     source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -40,7 +41,8 @@ impl MainWindow {
         midi_channel_mute: Arc<RwLock<[bool; 8]>>,
     ) -> Self {
         Self {
-            title: title,
+            title: title.clone(),
+            base_title: title.clone(),
             theme: theme,
             source_params: source_params,
             playback_status: playback_status,

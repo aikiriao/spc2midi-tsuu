@@ -10,7 +10,6 @@ use std::sync::{Arc, RwLock};
 
 #[derive(Debug)]
 pub struct PreferenceWindow {
-    title: String,
     audio_out_device_name: Arc<RwLock<Option<String>>>,
     audio_out_devices_box: combo_box::State<String>,
     midi_out_port_name: Arc<RwLock<Option<String>>>,
@@ -21,7 +20,7 @@ pub struct PreferenceWindow {
 
 impl SPC2MIDI2Window for PreferenceWindow {
     fn title(&self) -> String {
-        self.title.clone()
+        "Preference".to_string()
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -126,7 +125,6 @@ impl SPC2MIDI2Window for PreferenceWindow {
 
 impl PreferenceWindow {
     pub fn new(
-        title: String,
         audio_out_device_name: Arc<RwLock<Option<String>>>,
         midi_out_port_name: Arc<RwLock<Option<String>>>,
         midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
@@ -148,7 +146,6 @@ impl PreferenceWindow {
             .map(|p| midi_out.port_name(p).unwrap())
             .collect();
         Self {
-            title: title,
             audio_out_device_name: audio_out_device_name,
             audio_out_devices_box: combo_box::State::new(device_name_list),
             midi_out_port_name: midi_out_port_name,
