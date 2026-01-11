@@ -1035,7 +1035,7 @@ impl App {
                     envelope_as_expression: true,
                     auto_pan: true,
                     fixed_pan: 64,
-                    auto_volume: false,
+                    auto_volume: true,
                     fixed_volume: 100,
                     enable_pitch_bend: true,
                     echo_as_effect1: true,
