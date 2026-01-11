@@ -1699,16 +1699,18 @@ impl SPC2MIDI2Window for MainWindow {
 
         let infos = self.source_infos.read().unwrap();
         let params = self.source_params.read().unwrap();
-        let srn_list: Vec<_> = infos
+        let srn_list: Vec<_> = params
             .iter()
-            .map(|(key, _info)| {
+            .map(|(key, param)| {
                 row![
                     text(format!("0x{:02X}", key)),
-                    {
-                        let param = params.get(&key).unwrap();
-                        text(format!("{} {}", param.program, param.center_note >> 8))
-                    },
-                    button("Configure").on_press(Message::OpenSRNWindow(*key))
+                    text(format!("{}", param.program)),
+                    text(format!(
+                        "CenterNote:{} Velocity:{}",
+                        param.center_note >> 8,
+                        param.noteon_velocity,
+                    )),
+                    button("Configure").on_press(Message::OpenSRNWindow(*key)),
                 ]
                 .spacing(10)
                 .width(Length::Fill)
