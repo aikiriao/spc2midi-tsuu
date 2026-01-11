@@ -973,12 +973,8 @@ impl App {
         let mut start_address_map = BTreeMap::new();
         while tick64khz_count < analyze_duration_64khz_ticks {
             cycle_count += spc.execute_step() as u32;
-            if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
-                spc.clock_tick_64k_hz();
-                cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
-                tick64khz_count += 1;
-            }
             // キーオンが打たれていた時のサンプル番号を取得
+            // DSPを動かすとキーオンフラグが落ちることがあるので64kHzティック前に調べる
             let keyon = spc.dsp.read_register(ram, DSP_ADDRESS_KON);
             if keyon != 0 {
                 let brr_dir_base_address =
@@ -992,6 +988,11 @@ impl App {
                         start_address_map.insert(sample_source, dir_address);
                     }
                 }
+            }
+            if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
+                spc.clock_tick_64k_hz();
+                cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                tick64khz_count += 1;
             }
         }
 
