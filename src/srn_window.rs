@@ -2,7 +2,6 @@ use crate::program::*;
 use crate::types::*;
 use crate::Message;
 use crate::SPC_SAMPLING_RATE;
-use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{button, checkbox, column, combo_box, row, text};
 use iced::{
@@ -236,19 +235,11 @@ impl canvas::Program<Message> for SRNWindow {
     fn update(
         &self,
         _state: &mut Self::State,
-        event: &Event,
+        _event: &Event,
         _bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Option<iced_widget::Action<Message>> {
-        match event {
-            Event::Keyboard(iced::keyboard::Event::KeyReleased {
-                key: iced::keyboard::Key::Named(Named::Enter),
-                ..
-            }) => Some(iced_widget::Action::publish(
-                Message::ReceivedSRNPlayStartRequest(self.srn_no, self.enable_loop_play),
-            )),
-            _ => None,
-        }
+        None
     }
 }
 
