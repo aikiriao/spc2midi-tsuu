@@ -10,19 +10,16 @@ use iced::border::Radius;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{
-    button, center, center_x, checkbox, column, combo_box, container, operation, pick_list, row,
-    scrollable, slider, space, stack, text, text_input, toggler, tooltip, vertical_slider, Column,
-    Space, Stack,
+    button, center, checkbox, column, combo_box, row, scrollable, space, text, Column,
 };
 use iced::{
-    alignment, event, mouse, theme, time, window, Background, Border, Color, Element, Font,
-    Function, Length, Padding, Point, Rectangle, Renderer, Size, Subscription, Task, Theme, Vector,
+    alignment, event, mouse, window, Border, Color, Element, Font, Length, Padding, Point,
+    Rectangle, Renderer, Size, Subscription, Task, Theme,
 };
-use iced_aw::menu::{self, Item, Menu};
+use iced_aw::menu::{self, Menu};
 use iced_aw::style::{menu_bar::primary, Status};
-use iced_aw::{iced_aw_font, menu_bar, menu_items, number_input, ICED_AW_FONT_BYTES};
-use iced_aw::{quad, widgets::InnerBounds};
-use midir::{MidiOutput, MidiOutputConnection, MidiOutputPort};
+use iced_aw::{menu_bar, menu_items, number_input, ICED_AW_FONT_BYTES};
+use midir::{MidiOutput, MidiOutputConnection};
 use num_traits::pow::Pow;
 use rfd::AsyncFileDialog;
 use rimd::{Event as MidiEvent, MidiMessage, SMFFormat, SMFWriter, Track, TrackEvent, SMF};
@@ -143,7 +140,6 @@ enum Message {
 }
 
 trait AsAny {
-    fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
@@ -154,6 +150,7 @@ trait SPC2MIDI2Window: AsAny {
 
 /// 音源情報
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct SourceInformation {
     /// デコードした信号
     signal: Vec<f32>,
@@ -228,7 +225,6 @@ struct MIDIOutputConfigure {
 struct MainWindow {
     title: String,
     theme: iced::Theme,
-    source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
     source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     playback_status: Arc<RwLock<PlaybackStatus>>,
     pcm_spc_mute: Arc<AtomicBool>,
@@ -389,7 +385,6 @@ impl App {
                 let window = MainWindow::new(
                     SPC2MIDI2_TITLE_STR.to_string(),
                     self.theme.clone(),
-                    self.source_infos.clone(),
                     self.source_parameter.clone(),
                     self.playback_status.clone(),
                     self.pcm_spc_mute.clone(),
@@ -409,7 +404,6 @@ impl App {
                 self.windows.insert(
                     id,
                     Box::new(PreferenceWindow::new(
-                        id,
                         "Preference".to_string(),
                         self.audio_out_device_name.clone(),
                         self.midi_out_port_name.clone(),
@@ -1721,7 +1715,6 @@ impl SPC2MIDI2Window for MainWindow {
             ..primary(theme, status)
         });
 
-        let infos = self.source_infos.read().unwrap();
         let params = self.source_params.read().unwrap();
         let srn_list: Vec<_> = params
             .iter()
@@ -1842,7 +1835,6 @@ impl MainWindow {
     fn new(
         title: String,
         theme: iced::Theme,
-        source_info: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
         source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
         pcm_spc_mute: Arc<AtomicBool>,
@@ -1852,7 +1844,6 @@ impl MainWindow {
         Self {
             title: title,
             theme: theme,
-            source_infos: source_info,
             source_params: source_params,
             playback_status: playback_status,
             pcm_spc_mute: pcm_spc_mute,
@@ -1976,7 +1967,6 @@ impl SPC2MIDI2Window for PreferenceWindow {
 
 impl PreferenceWindow {
     fn new(
-        window_id: window::Id,
         title: String,
         audio_out_device_name: Arc<RwLock<Option<String>>>,
         midi_out_port_name: Arc<RwLock<Option<String>>>,
@@ -2243,10 +2233,6 @@ impl<T> AsAny for T
 where
     T: 'static,
 {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
