@@ -909,7 +909,7 @@ impl App {
                     for ch in 0..8 {
                         main_win.expression_indicator[ch].value = status.envelope[ch] as f32;
                         main_win.pitch_indicator[ch].value = if status.pitch[ch] > 0 {
-                            12.0 * f32::log2((status.pitch[ch] as f32) / (0x1000 as f32))
+                            12.0 * (f32::log2(status.pitch[ch] as f32) - 12.0)
                         } else {
                             0.0
                         };
