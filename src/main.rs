@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // Releaseビルドの時コンソールを非表示
+
 mod center_note_estimation;
 mod main_window;
 mod preference_window;
