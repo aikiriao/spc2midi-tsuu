@@ -1878,43 +1878,93 @@ impl SPC2MIDI2Window for PreferenceWindow {
         let audio_device_name = self.audio_out_device_name.read().unwrap();
         let midi_port_name = self.midi_out_port_name.read().unwrap();
         let midi_output_configure = self.midi_output_configure.read().unwrap();
+        let midi_output_configure_view = column![
+            text("MIDI Output Configuration"),
+            row![
+                text("Tempo (BPM)"),
+                number_input(
+                    &midi_output_configure.beats_per_minute,
+                    32..=240,
+                    move |bpm| { Message::MIDIOutputBpmChanged(bpm) },
+                )
+                .step(1),
+            ]
+            .spacing(10)
+            .padding(10)
+            .align_y(alignment::Alignment::Center)
+            .width(Length::Fill),
+            row![
+                text("Ticks Per Quarter (resolution)"),
+                combo_box(
+                    &self.ticks_per_quarter_box,
+                    "Ticks per quarter (resolution)",
+                    Some(&midi_output_configure.ticks_per_quarter),
+                    move |ticks| { Message::MIDIOutputTicksPerQuarterChanged(ticks) },
+                ),
+            ]
+            .spacing(10)
+            .padding(10)
+            .align_y(alignment::Alignment::Center)
+            .width(Length::Fill),
+            row![
+                text("MIDI Control Change Update Period (msec)"),
+                number_input(
+                    &midi_output_configure.playback_parameter_update_period,
+                    0..=255,
+                    move |period| { Message::MIDIOutputUpdatePeriodChanged(period) },
+                )
+                .step(1),
+            ]
+            .spacing(10)
+            .padding(10)
+            .align_y(alignment::Alignment::Center)
+            .width(Length::Fill),
+            row![
+                text("Song Duration (msec)"),
+                number_input(
+                    &midi_output_configure.output_duration_msec,
+                    1000..=(3600 * 1000),
+                    move |duration| { Message::MIDIOutputDurationChanged(duration) },
+                )
+                .step(1),
+            ]
+            .spacing(10)
+            .padding(10)
+            .align_y(alignment::Alignment::Center)
+            .width(Length::Fill),
+        ];
         let content = column![
-            combo_box(
-                &self.audio_out_devices_box,
-                "Audio Output port",
-                audio_device_name.as_ref(),
-                move |device_name| Message::AudioOutputDeviceSelected(device_name),
-            ),
-            combo_box(
-                &self.midi_ports_box,
-                "MIDI Output port",
-                midi_port_name.as_ref(),
-                move |port_name| Message::MIDIOutputPortSelected(port_name),
-            ),
-            number_input(
-                &midi_output_configure.beats_per_minute,
-                32..=240,
-                move |bpm| { Message::MIDIOutputBpmChanged(bpm) },
-            )
-            .step(1),
-            combo_box(
-                &self.ticks_per_quarter_box,
-                "Ticks per quarter (resolution)",
-                Some(&midi_output_configure.ticks_per_quarter),
-                move |ticks| { Message::MIDIOutputTicksPerQuarterChanged(ticks) },
-            ),
-            number_input(
-                &midi_output_configure.playback_parameter_update_period,
-                0..=255,
-                move |period| { Message::MIDIOutputUpdatePeriodChanged(period) },
-            )
-            .step(1),
-            number_input(
-                &midi_output_configure.output_duration_msec,
-                1000..=(3600 * 1000),
-                move |duration| { Message::MIDIOutputDurationChanged(duration) },
-            )
-            .step(1),
+            column![
+                text("Audio Output Device"),
+                combo_box(
+                    &self.audio_out_devices_box,
+                    "Audio Output Device",
+                    audio_device_name.as_ref(),
+                    move |device_name| Message::AudioOutputDeviceSelected(device_name),
+                ),
+            ]
+            .spacing(10)
+            .padding(10)
+            .width(Length::Fill)
+            .align_x(alignment::Alignment::Start),
+            column![
+                text("MIDI Output Port"),
+                combo_box(
+                    &self.midi_ports_box,
+                    "MIDI Output Port",
+                    midi_port_name.as_ref(),
+                    move |port_name| Message::MIDIOutputPortSelected(port_name),
+                )
+            ]
+            .spacing(10)
+            .padding(10)
+            .width(Length::Fill)
+            .align_x(alignment::Alignment::Start),
+            midi_output_configure_view
+                .spacing(10)
+                .padding(10)
+                .width(Length::Fill)
+                .align_x(alignment::Alignment::Start),
         ]
         .spacing(10)
         .padding(10)
