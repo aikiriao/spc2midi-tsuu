@@ -15,8 +15,8 @@ use iced::widget::{
     Space, Stack,
 };
 use iced::{
-    alignment, event, mouse, theme, time, window, Border, Color, Element, Font, Function, Length,
-    Padding, Point, Rectangle, Renderer, Size, Subscription, Task, Theme, Vector,
+    alignment, event, mouse, theme, time, window, Background, Border, Color, Element, Font,
+    Function, Length, Padding, Point, Rectangle, Renderer, Size, Subscription, Task, Theme, Vector,
 };
 use iced_aw::menu::{self, Item, Menu};
 use iced_aw::style::{menu_bar::primary, Status};
@@ -115,6 +115,7 @@ enum Message {
     ReceivedPlayStopRequest,
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
+    SRNMuteFlagToggled(u8, bool),
     ProgramSelected(u8, Program),
     SRNMIDIPreviewFlagToggled(u8, bool),
     ReceivedMIDIPreviewRequest(u8),
@@ -167,6 +168,8 @@ struct SourceInformation {
 /// 1音源のパラメータ
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SourceParameter {
+    /// ミュート（出力するか否か）
+    mute: bool,
     /// プログラム番号
     program: Program,
     /// 基準ノート（8bit整数・8bit小数部）
@@ -224,6 +227,7 @@ struct MIDIOutputConfigure {
 #[derive(Debug)]
 struct MainWindow {
     title: String,
+    theme: iced::Theme,
     source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
     source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -384,6 +388,7 @@ impl App {
                 });
                 let window = MainWindow::new(
                     SPC2MIDI2_TITLE_STR.to_string(),
+                    self.theme.clone(),
                     self.source_infos.clone(),
                     self.source_parameter.clone(),
                     self.playback_status.clone(),
@@ -634,6 +639,15 @@ impl App {
                 // ミュートの時は音を止める
                 if flag {
                     self.stop_midi_all_sound();
+                }
+            }
+            Message::SRNMuteFlagToggled(srn_no, flag) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.mute = flag;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
                 }
             }
             Message::ProgramSelected(srn_no, program) => {
@@ -1029,6 +1043,7 @@ impl App {
             params.insert(
                 *srn,
                 SourceParameter {
+                    mute: false,
                     program: Program::AcousticGrand,
                     center_note: f32::round(center_note * 256.0) as u16,
                     noteon_velocity: 100,
@@ -1455,20 +1470,23 @@ fn apply_source_parameter(
     for (srn_no, param) in source_params.iter() {
         spc.dsp.write_register(ram, DSP_ADDRESS_SRN_TARGET, *srn_no);
         let mut flag = 0;
-        if param.envelope_as_expression {
+        if param.mute {
             flag |= 0x80;
         }
-        if param.enable_pitch_bend {
+        if param.envelope_as_expression {
             flag |= 0x40;
         }
-        if param.echo_as_effect1 {
+        if param.enable_pitch_bend {
             flag |= 0x20;
         }
-        if param.auto_volume {
+        if param.echo_as_effect1 {
             flag |= 0x10;
         }
-        if param.auto_pan {
+        if param.auto_volume {
             flag |= 0x08;
+        }
+        if param.auto_pan {
+            flag |= 0x04;
         }
         spc.dsp.write_register(ram, DSP_ADDRESS_SRN_FLAG, flag);
         spc.dsp
@@ -1704,12 +1722,17 @@ impl SPC2MIDI2Window for MainWindow {
             .map(|(key, param)| {
                 row![
                     text(format!("0x{:02X}", key)),
-                    text(format!("{}", param.program)),
                     text(format!(
-                        "CenterNote:{} Velocity:{}",
+                        "{} Note:{} Velocity:{}",
+                        param.program,
                         param.center_note >> 8,
                         param.noteon_velocity,
-                    )),
+                    ))
+                    .color(if param.mute {
+                        self.theme.palette().warning
+                    } else {
+                        self.theme.palette().text
+                    }),
                     button("Configure").on_press(Message::OpenSRNWindow(*key)),
                 ]
                 .spacing(10)
@@ -1739,14 +1762,17 @@ impl SPC2MIDI2Window for MainWindow {
                         .align_y(alignment::Alignment::Center)
                         .height(Length::Fill)
                         .width(30),
-                    text(format!(
-                        "{}",
+                    {
                         if let Some(param) = params.get(&status.srn_no[ch]) {
-                            param.program.to_string()
+                            text(format!("{}", param.program)).color(if param.mute {
+                                self.theme.palette().warning
+                            } else {
+                                self.theme.palette().text
+                            })
                         } else {
-                            "".to_string()
+                            text(format!(""))
                         }
-                    ))
+                    }
                     .align_y(alignment::Alignment::Center)
                     .size(14.0)
                     .height(Length::Fill)
@@ -1809,6 +1835,7 @@ impl SPC2MIDI2Window for MainWindow {
 impl MainWindow {
     fn new(
         title: String,
+        theme: iced::Theme,
         source_info: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
         source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
@@ -1818,6 +1845,7 @@ impl MainWindow {
     ) -> Self {
         Self {
             title: title,
+            theme: theme,
             source_infos: source_info,
             source_params: source_params,
             playback_status: playback_status,
@@ -1956,6 +1984,9 @@ impl SPC2MIDI2Window for SRNWindow {
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
+            checkbox(param.mute)
+                .label("Mute")
+                .on_toggle(|flag| Message::SRNMuteFlagToggled(self.srn_no, flag)),
             combo_box(
                 &self.program_box,
                 "Program",
