@@ -681,12 +681,17 @@ impl App {
             Message::NoteOnVelocityChanged(srn_no, velocity) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
+                    let mut tasks = vec![];
                     param.noteon_velocity = velocity;
                     if param.enable_midi_preview {
-                        return Task::perform(async {}, move |_| {
+                        tasks.push(Task::perform(async {}, move |_| {
                             Message::ReceivedMIDIPreviewRequest(srn_no)
-                        });
+                        }));
                     }
+                    tasks.push(Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    }));
+                    return Task::batch(tasks);
                 }
             }
             Message::PitchBendWidthChanged(srn_no, width) => {
