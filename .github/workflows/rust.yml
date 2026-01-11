@@ -40,7 +40,7 @@ jobs:
       with:
         name: spc2midi-tsuu_${{ matrix.os }}
         path: |
-          target/release/spc2midi_tsuu.exe
+          target/release/spc2midi-tsuu.exe
         if-no-files-found: error
     - name: Upload artifacts on *nix platforms
       if: runner.os == 'Linux' || runner.os == 'macOS'
