@@ -555,6 +555,12 @@ impl App {
                         return Task::perform(load_file(path), Message::FileOpened);
                     }
                 }
+                iced::event::Event::Keyboard(iced::keyboard::Event::KeyReleased {
+                    key: iced::keyboard::Key::Named(Named::Space),
+                    ..
+                }) => {
+                    return Task::perform(async {}, move |_| Message::ReceivedPlayStartRequest);
+                }
                 _ => {}
             },
             Message::ReceivedSRNPlayStartRequest(srn_no, loop_flag) => {
@@ -2172,7 +2178,7 @@ impl canvas::Program<Message> for SRNWindow {
     ) -> Option<iced_widget::Action<Message>> {
         match event {
             Event::Keyboard(iced::keyboard::Event::KeyReleased {
-                key: iced::keyboard::Key::Named(Named::Space),
+                key: iced::keyboard::Key::Named(Named::Enter),
                 ..
             }) => Some(iced_widget::Action::publish(
                 Message::ReceivedSRNPlayStartRequest(self.srn_no, self.enable_loop_play),
