@@ -38,7 +38,7 @@ jobs:
       if: runner.os == 'Windows'
       uses: actions/upload-artifact@v4
       with:
-        name: spc2midi_tsuu_${{ matrix.os }}
+        name: spc2midi-tsuu_${{ matrix.os }}
         path: |
           target/release/spc2midi_tsuu.exe
         if-no-files-found: error
@@ -46,8 +46,8 @@ jobs:
       if: runner.os == 'Linux' || runner.os == 'macOS'
       uses: actions/upload-artifact@v4
       with:
-        name: spc2midi_tsuu_${{ matrix.os }}
+        name: spc2midi-tsuu_${{ matrix.os }}
         path: |
-          target/release/spc2midi_tsuu
+          target/release/spc2midi-tsuu
         if-no-files-found: error
 
