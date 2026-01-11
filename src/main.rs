@@ -1967,37 +1967,29 @@ impl SPC2MIDI2Window for SRNWindow {
         let param = params.get(&self.srn_no).unwrap();
         let center_note_int = (param.center_note >> 8) as u8;
         let center_note_fraction = (param.center_note & 0xFF) as f32 / 256.0;
-        let content = column![
-            Canvas::new(self).width(Length::Fill).height(200),
-            row![
-                button("Play / Pause").on_press(Message::ReceivedSRNPlayStartRequest(
-                    self.srn_no,
-                    self.enable_loop_play
-                )),
-                checkbox(self.enable_loop_play)
-                    .label("Loop")
-                    .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(self.window_id, flag)),
-                checkbox(param.enable_midi_preview)
-                    .label("MIDI Preview")
-                    .on_toggle(|flag| Message::SRNMIDIPreviewFlagToggled(self.srn_no, flag)),
-            ]
+        let parameter_controller = column![
+            row![checkbox(param.mute)
+                .label("Mute")
+                .on_toggle(|flag| Message::SRNMuteFlagToggled(self.srn_no, flag)),]
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
-            checkbox(param.mute)
-                .label("Mute")
-                .on_toggle(|flag| Message::SRNMuteFlagToggled(self.srn_no, flag)),
-            combo_box(
+            row![combo_box(
                 &self.program_box,
                 "Program",
                 Some(&param.program),
                 move |program| Message::ProgramSelected(srn_no, program),
-            ),
+            ),]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center),
             row![
+                text("Center Note"),
                 number_input(&center_note_int, 0..=127, move |note| {
                     Message::CenterNoteIntChanged(srn_no, note)
                 },)
                 .step(1),
+                text("Fraction"),
                 number_input(&center_note_fraction, 0.0..=1.0, move |fraction| {
                     Message::CenterNoteFractionChanged(srn_no, fraction)
                 },)
@@ -2006,14 +1998,21 @@ impl SPC2MIDI2Window for SRNWindow {
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
-            number_input(&param.noteon_velocity, 1..=127, move |velocity| {
-                Message::NoteOnVelocityChanged(srn_no, velocity)
-            },)
-            .step(1),
             row![
+                text("Velocity"),
+                number_input(&param.noteon_velocity, 1..=127, move |velocity| {
+                    Message::NoteOnVelocityChanged(srn_no, velocity)
+                },)
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center),
+            row![
+                text("Pitch Bend"),
                 checkbox(param.enable_pitch_bend)
-                    .label("Pitch Bend")
+                    .label("On")
                     .on_toggle(move |flag| Message::EnablePitchBendFlagToggled(srn_no, flag)),
+                text("Width (semitone)"),
                 number_input(&param.pitch_bend_width, 1..=48, move |width| {
                     Message::PitchBendWidthChanged(srn_no, width)
                 },)
@@ -2023,8 +2022,9 @@ impl SPC2MIDI2Window for SRNWindow {
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
             row![
+                text("Pan"),
                 checkbox(param.auto_pan)
-                    .label("Auto Pan")
+                    .label("Auto")
                     .on_toggle(move |flag| Message::AutoPanFlagToggled(srn_no, flag)),
                 number_input(
                     &param.fixed_pan,
@@ -2036,13 +2036,9 @@ impl SPC2MIDI2Window for SRNWindow {
                     move |pan| { Message::FixedPanChanged(srn_no, pan) }
                 )
                 .step(1),
-            ]
-            .spacing(10)
-            .width(Length::Fill)
-            .align_y(alignment::Alignment::Center),
-            row![
+                text("Volume"),
                 checkbox(param.auto_volume)
-                    .label("Auto Volume")
+                    .label("Auto")
                     .on_toggle(move |flag| Message::AutoVolumeFlagToggled(srn_no, flag)),
                 number_input(
                     &param.fixed_volume,
@@ -2058,18 +2054,50 @@ impl SPC2MIDI2Window for SRNWindow {
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
-            checkbox(param.envelope_as_expression)
-                .label("Envelope as Expression")
-                .on_toggle(move |flag| Message::EnvelopeAsExpressionFlagToggled(srn_no, flag)),
-            checkbox(param.echo_as_effect1)
-                .label("Echo as Effect1")
-                .on_toggle(move |flag| Message::EchoAsEffect1FlagToggled(srn_no, flag)),
+            row![
+                checkbox(param.envelope_as_expression)
+                    .label("Envelope as Expression")
+                    .on_toggle(move |flag| Message::EnvelopeAsExpressionFlagToggled(srn_no, flag)),
+                checkbox(param.echo_as_effect1)
+                    .label("Echo as Effect1")
+                    .on_toggle(move |flag| Message::EchoAsEffect1FlagToggled(srn_no, flag)),
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center),
+        ];
+        let preview_controller = row![
+            button("Play / Stop").on_press(Message::ReceivedSRNPlayStartRequest(
+                self.srn_no,
+                self.enable_loop_play
+            )),
+            checkbox(self.enable_loop_play)
+                .label("Loop")
+                .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(self.window_id, flag)),
+            checkbox(param.enable_midi_preview)
+                .label("MIDI Preview")
+                .on_toggle(|flag| Message::SRNMIDIPreviewFlagToggled(self.srn_no, flag)),
+        ];
+
+        column![
+            Canvas::new(self)
+                .width(Length::Fill)
+                .height(Length::FillPortion(2)),
+            parameter_controller
+                .spacing(10)
+                .width(Length::Fill)
+                .height(Length::FillPortion(2)),
+            preview_controller
+                .spacing(10)
+                .width(Length::Fill)
+                .height(Length::Shrink)
+                .align_y(alignment::Alignment::Center),
         ]
         .spacing(10)
         .padding(10)
         .width(Length::Fill)
-        .align_x(alignment::Alignment::Center);
-        content.into()
+        .align_x(alignment::Alignment::Center)
+        .into()
     }
 }
 
