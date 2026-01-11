@@ -1899,7 +1899,7 @@ impl SPC2MIDI2Window for PreferenceWindow {
             ),
             number_input(
                 &midi_output_configure.playback_parameter_update_period,
-                1..=255,
+                0..=255,
                 move |period| { Message::MIDIOutputUpdatePeriodChanged(period) },
             )
             .step(1),
