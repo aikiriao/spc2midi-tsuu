@@ -33,7 +33,7 @@ impl SPC2MIDI2Window for PreferenceWindow {
                 text("Tempo (BPM)"),
                 number_input(
                     &midi_output_configure.beats_per_minute,
-                    32..=240,
+                    30..=240,
                     move |bpm| { Message::MIDIOutputBpmChanged(bpm) },
                 )
                 .step(1),

@@ -1,16 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // Releaseビルドの時コンソールを非表示
 
-mod source_estimation;
 mod main_window;
 mod preference_window;
 mod program;
+mod source_estimation;
 mod srn_window;
 mod types;
 
-use crate::source_estimation::*;
 use crate::main_window::*;
 use crate::preference_window::*;
 use crate::program::*;
+use crate::source_estimation::*;
 use crate::srn_window::*;
 use crate::types::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -21,7 +21,9 @@ use iced::{event, window, Subscription, Task, Theme};
 use iced_aw::ICED_AW_FONT_BYTES;
 use midir::{MidiOutput, MidiOutputConnection};
 use rfd::AsyncFileDialog;
-use rimd::{Event as MidiEvent, MidiMessage, SMFFormat, SMFWriter, Track, TrackEvent, SMF};
+use rimd::{
+    Event as MidiEvent, MetaEvent, MidiMessage, SMFFormat, SMFWriter, Track, TrackEvent, SMF,
+};
 use samplerate::{convert, ConverterType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -845,23 +847,28 @@ impl App {
         *params = BTreeMap::new();
 
         // 一定期間シミュレートし、サンプルソース番号とそれに紐づく開始アドレスを取得
-        let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> =
-            SPC::new(&register, ram, dsp_register);
+        let mut midispc: Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>> =
+            Box::new(SPC::new(&register, ram, dsp_register));
+        let mut spc: Box<spc700::spc::SPC<spc700::sdsp::SDSP>> =
+            Box::new(SPC::new(&register, ram, dsp_register));
         let mut cycle_count = 0;
         let mut tick64khz_count = 0;
         let mut start_address_map = BTreeMap::new();
+        let mut signal = vec![];
         while tick64khz_count < analyze_duration_64khz_ticks {
             cycle_count += spc.execute_step() as u32;
+            let _ = midispc.execute_step();
             // キーオンが打たれていた時のサンプル番号を取得
             // DSPを動かすとキーオンフラグが落ちることがあるので64kHzティック前に調べる
-            let keyon = spc.dsp.read_register(ram, DSP_ADDRESS_KON);
+            let keyon = midispc.dsp.read_register(ram, DSP_ADDRESS_KON);
             if keyon != 0 {
                 let brr_dir_base_address =
-                    (spc.dsp.read_register(ram, DSP_ADDRESS_DIR) as u16) << 8;
+                    (midispc.dsp.read_register(ram, DSP_ADDRESS_DIR) as u16) << 8;
                 for ch in 0..8 {
                     if (keyon >> ch) & 1 != 0 {
-                        let sample_source =
-                            spc.dsp.read_register(ram, (ch << 4) | DSP_ADDRESS_V0SRCN);
+                        let sample_source = midispc
+                            .dsp
+                            .read_register(ram, (ch << 4) | DSP_ADDRESS_V0SRCN);
                         let dir_address =
                             (brr_dir_base_address + 4 * (sample_source as u16)) as usize;
                         start_address_map.insert(sample_source, dir_address);
@@ -869,11 +876,17 @@ impl App {
                 }
             }
             if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
-                spc.clock_tick_64k_hz();
+                midispc.clock_tick_64k_hz();
+                if let Some(pcm) = spc.clock_tick_64k_hz() {
+                    signal.push(PCM_NORMALIZE_CONST * 0.5 * (pcm[0] as f32 + pcm[1] as f32));
+                }
                 cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
                 tick64khz_count += 1;
             }
         }
+
+        let mut config = self.midi_output_configure.write().unwrap();
+        config.beats_per_minute = estimate_bpm(&signal);
 
         // 波形情報の読み込み
         for (srn, dir_address) in start_address_map.iter() {
@@ -895,22 +908,23 @@ impl App {
             let loop_address =
                 make_u16_from_u8(&ram[(*dir_address + 2)..(*dir_address + 4)]) as usize;
             let source_info = SourceInformation {
-                    signal: signal.clone(),
-                    start_address: start_address,
-                    end_address: start_address + (signal.len() * 9) / 16,
-                    loop_start_sample: ((loop_address - start_address) * 16) / 9,
-                };
-            infos.insert(
-                *srn,
-                source_info.clone()
-            );
+                signal: signal.clone(),
+                start_address: start_address,
+                end_address: start_address + (signal.len() * 9) / 16,
+                loop_start_sample: ((loop_address - start_address) * 16) / 9,
+            };
+            infos.insert(*srn, source_info.clone());
             // ドラム音とピッチの推定
             let (is_drum, center_note) = estimate_drum_and_note(&source_info);
             params.insert(
                 *srn,
                 SourceParameter {
                     mute: false,
-                    program: if is_drum { Program::AcousticBassDrum } else { Program::AcousticGrand },
+                    program: if is_drum {
+                        Program::AcousticBassDrum
+                    } else {
+                        Program::AcousticGrand
+                    },
                     center_note: f32::round(center_note * 256.0) as u16,
                     noteon_velocity: 100,
                     pitch_bend_width: 12,
@@ -950,13 +964,19 @@ impl App {
             );
 
             // パラメータ適用
-            let configure = self.midi_output_configure.read().unwrap();
             let params = self.source_parameter.read().unwrap();
-            apply_source_parameter(&mut spc, &configure, &params, &spc_file.ram);
+            apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
 
             let mut cycle_count = 0;
             let mut total_elapsed_time_nanosec = 0;
             let mut previous_event_time = 0.0;
+
+            // メタイベントの設定
+            let quarter_usec = (60 * 1000_000) / (config.beats_per_minute as u32);
+            smf.tracks[0].events.push(TrackEvent {
+                vtime: 0,
+                event: MidiEvent::Meta(MetaEvent::tempo_setting(quarter_usec)),
+            });
 
             // 出力で決めた時間だけ出力
             while total_elapsed_time_nanosec < config.output_duration_msec * 1000_000 {

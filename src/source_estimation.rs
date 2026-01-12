@@ -1,6 +1,7 @@
-use czt::{c32, transform};
-use std::f32::consts::PI;
 use crate::types::SourceInformation;
+use czt::{c32, transform};
+use num_traits::Pow;
+use std::f32::consts::PI;
 
 /// SPCの出力サンプリングレート
 const SPC_SAMPLING_RATE: f32 = 32000.0;
@@ -92,7 +93,7 @@ fn detect_drum(source_info: &SourceInformation, power_spec: &Vec<f32>) -> bool {
         .map(|(i, p)| *p * deviation[i] * deviation[i])
         .sum::<f32>()
         .sqrt();
-    
+
     // ドラム音判定
 
     // ワンショット音源
@@ -183,5 +184,66 @@ pub fn estimate_drum_and_note(source_info: &SourceInformation) -> (bool, f32) {
         .map(|c| c.re * c.re + c.im * c.im)
         .collect();
 
-    (detect_drum(&source_info, &power_spec), center_note_estimation(&power_spec))
+    (
+        detect_drum(&source_info, &power_spec),
+        center_note_estimation(&power_spec),
+    )
+}
+
+/// 超簡易テンポ推定
+/// https://web.archive.org/web/20221127013658/http://hp.vector.co.jp/authors/VA046927/tempo/tempo.html を参考
+pub fn estimate_bpm(signal: &Vec<f32>) -> u8 {
+    const TEMPO_ESTIMATION_FRAME_SIZE: usize = 128;
+    const INV_FRAME_SIZE: f32 = 1.0 / (TEMPO_ESTIMATION_FRAME_SIZE as f32);
+    const MIN_BPM: usize = 30;
+    const MAX_BPM: usize = 240;
+
+    // フレームに区切り、RMSを計算
+    let rms: Vec<_> = signal
+        .chunks(TEMPO_ESTIMATION_FRAME_SIZE)
+        .map(|c| {
+            (10.0 * (c.iter().map(|v| v * v).sum::<f32>() * INV_FRAME_SIZE).log10()).max(-100.0)
+        })
+        .collect();
+
+    // RMSの差分を計算
+    let mut diff_rms = vec![];
+    for i in 1..rms.len() {
+        diff_rms.push(if rms[i] > rms[i - 1] {
+            rms[i] - rms[i - 1]
+        } else {
+            0.0
+        });
+    }
+
+    // 窓かけ
+    diff_rms = diff_rms
+        .iter()
+        .enumerate()
+        .map(|(i, d)| *d * f32::sin((PI * (i as f32)) / (diff_rms.len() - 1) as f32).pow(2.0))
+        .collect();
+
+    // BPM繰り返し成分の計算
+    let mut amp_spec = vec![];
+    for bpm in MIN_BPM..=MAX_BPM {
+        let fbpm = bpm as f32 / 60.0;
+        let ffactor = (TEMPO_ESTIMATION_FRAME_SIZE as f32) / 32000.0;
+        let abpm = diff_rms
+            .iter()
+            .enumerate()
+            .map(|(i, d)| *d * f32::cos(2.0 * PI * fbpm * (i as f32) * ffactor))
+            .sum::<f32>();
+        let bbpm = diff_rms
+            .iter()
+            .enumerate()
+            .map(|(i, d)| *d * f32::sin(2.0 * PI * fbpm * (i as f32) * ffactor))
+            .sum::<f32>();
+        amp_spec.push((abpm * abpm + bbpm * bbpm).sqrt());
+    }
+
+    // ビンを降順にインデックスソート
+    let mut peak_bins: Vec<_> = (0..amp_spec.len()).collect();
+    peak_bins.sort_by(|&a, &b| amp_spec[b].total_cmp(&amp_spec[a]));
+
+    (peak_bins[0] + MIN_BPM) as u8
 }
