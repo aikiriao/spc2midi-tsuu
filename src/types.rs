@@ -54,8 +54,6 @@ pub struct SourceParameter {
     pub enable_pitch_bend: bool,
     /// エコーをエフェクト1デプスとして出力するか
     pub echo_as_effect1: bool,
-    /// MIDIプレビューを行うか
-    pub enable_midi_preview: bool,
 }
 
 /// MIDI出力設定

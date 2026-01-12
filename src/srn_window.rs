@@ -5,22 +5,23 @@ use crate::SPC_SAMPLING_RATE;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{button, checkbox, column, combo_box, row, text};
 use iced::{
-    alignment, mouse, window, Color, Element, Font, Length, Point, Rectangle, Renderer, Size, Theme,
+    alignment, mouse, Color, Element, Font, Length, Point, Rectangle, Renderer, Size, Theme,
 };
 use iced_aw::number_input;
 use num_traits::pow::Pow;
 use std::cmp;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug)]
 pub struct SRNWindow {
     title: String,
-    window_id: window::Id,
     srn_no: u8,
     source_info: Arc<SourceInformation>,
     source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
-    pub enable_loop_play: bool,
+    midi_preview: Arc<AtomicBool>,
+    preview_loop: Arc<AtomicBool>,
     program_box: combo_box::State<Program>,
     cache: Cache,
 }
@@ -140,15 +141,14 @@ impl SPC2MIDI2Window for SRNWindow {
         ];
         let preview_controller = row![
             button("Play / Stop").on_press(Message::ReceivedSRNPlayStartRequest(
-                self.srn_no,
-                self.enable_loop_play
+                self.srn_no
             )),
-            checkbox(self.enable_loop_play)
+            checkbox(self.preview_loop.load(Ordering::Relaxed))
                 .label("Loop")
-                .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(self.window_id, flag)),
-            checkbox(param.enable_midi_preview)
+                .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(flag)),
+            checkbox(self.midi_preview.load(Ordering::Relaxed))
                 .label("MIDI Preview")
-                .on_toggle(|flag| Message::SRNMIDIPreviewFlagToggled(self.srn_no, flag)),
+                .on_toggle(|flag| Message::SRNMIDIPreviewFlagToggled(flag)),
         ];
 
         column![
@@ -175,19 +175,20 @@ impl SPC2MIDI2Window for SRNWindow {
 
 impl SRNWindow {
     pub fn new(
-        window_id: window::Id,
         title: String,
         srn_no: u8,
         source_info: &SourceInformation,
         source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
+        midi_preview: Arc<AtomicBool>,
+        preview_loop: Arc<AtomicBool>,
     ) -> Self {
         Self {
-            window_id: window_id,
             title: title,
             srn_no: srn_no,
             source_info: source_info.clone().into(),
             source_parameter: source_parameter,
-            enable_loop_play: false,
+            midi_preview: midi_preview,
+            preview_loop: preview_loop,
             program_box: combo_box::State::new(Program::ALL.to_vec()),
             cache: Cache::default(),
         }

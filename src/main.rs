@@ -96,15 +96,15 @@ enum Message {
     JSONSaved(Result<(), Error>),
     MenuSelected,
     EventOccurred(iced::Event),
-    ReceivedSRNPlayStartRequest(u8, bool),
-    SRNPlayLoopFlagToggled(window::Id, bool),
+    ReceivedSRNPlayStartRequest(u8),
+    SRNPlayLoopFlagToggled(bool),
     ReceivedPlayStartRequest,
     ReceivedPlayStopRequest,
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
     SRNMuteFlagToggled(u8, bool),
     ProgramSelected(u8, Program),
-    SRNMIDIPreviewFlagToggled(u8, bool),
+    SRNMIDIPreviewFlagToggled(bool),
     ReceivedMIDIPreviewRequest(u8),
     CenterNoteIntChanged(u8, u8),
     CenterNoteFractionChanged(u8, f32),
@@ -150,6 +150,8 @@ struct App {
     midi_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>>>>>,
     pcm_spc_mute: Arc<AtomicBool>,
     midi_spc_mute: Arc<AtomicBool>,
+    midi_preview: Arc<AtomicBool>,
+    preview_loop: Arc<AtomicBool>,
     midi_channel_mute: Arc<RwLock<[bool; 8]>>,
     audio_out_device_name: Arc<RwLock<Option<String>>>,
     midi_out_port_name: Arc<RwLock<Option<String>>>,
@@ -210,6 +212,8 @@ impl Default for App {
             midi_spc: None,
             pcm_spc_mute: Arc::new(AtomicBool::new(false)),
             midi_spc_mute: Arc::new(AtomicBool::new(false)),
+            midi_preview: Arc::new(AtomicBool::new(true)),
+            preview_loop: Arc::new(AtomicBool::new(false)),
             midi_channel_mute: Arc::new(RwLock::new([false; 8])),
             audio_out_device_name: Arc::new(RwLock::new(Some(
                 device
@@ -282,11 +286,12 @@ impl App {
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
                     let window = SRNWindow::new(
-                        id,
                         format!("SRN 0x{:02X}", srn_no),
                         srn_no,
                         source,
                         self.source_parameter.clone(),
+                        self.midi_preview.clone(),
+                        self.preview_loop.clone(),
                     );
                     self.windows.insert(id, Box::new(window));
                     return open.map(Message::SRNWindowOpened);
@@ -412,30 +417,22 @@ impl App {
                 }
                 _ => {}
             },
-            Message::ReceivedSRNPlayStartRequest(srn_no, loop_flag) => {
+            Message::ReceivedSRNPlayStartRequest(srn_no) => {
                 if self.stream_is_playing.load(Ordering::Relaxed) {
                     // 再生中の場合は止める
                     self.stream_play_stop().expect("Failed to stop play");
                 } else {
                     // 新規再生処理
-                    if let Err(_) = self.srn_play_start(srn_no, loop_flag) {
+                    if let Err(_) = self.srn_play_start(srn_no) {
                         eprintln!("[{}] Faild to start playback", SPC2MIDI2_TITLE_STR);
                     }
                 }
             }
-            Message::SRNPlayLoopFlagToggled(id, flag) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    // ダウンキャストしてSRNWindowを引っ張り出し変更
-                    let srn_win: &mut SRNWindow =
-                        window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    srn_win.enable_loop_play = flag;
-                }
+            Message::SRNPlayLoopFlagToggled(flag) => {
+                self.preview_loop.store(flag, Ordering::Relaxed);
             }
-            Message::SRNMIDIPreviewFlagToggled(srn_no, flag) => {
-                let mut params = self.source_parameter.write().unwrap();
-                if let Some(param) = params.get_mut(&srn_no) {
-                    param.enable_midi_preview = flag;
-                }
+            Message::SRNMIDIPreviewFlagToggled(flag) => {
+                self.midi_preview.store(flag, Ordering::Relaxed);
             }
             Message::ReceivedPlayStartRequest => {
                 if self.stream_is_playing.load(Ordering::Relaxed) {
@@ -507,14 +504,14 @@ impl App {
             }
             Message::ProgramSelected(srn_no, program) => {
                 let mut params = self.source_parameter.write().unwrap();
-                let mut tasks = vec![];
                 if let Some(param) = params.get_mut(&srn_no) {
                     param.program = program.clone();
-                    if param.enable_midi_preview {
-                        tasks.push(Task::perform(async {}, move |_| {
-                            Message::ReceivedMIDIPreviewRequest(srn_no)
-                        }));
-                    }
+                }
+                let mut tasks = vec![];
+                if self.midi_preview.load(Ordering::Relaxed) {
+                    tasks.push(Task::perform(async {}, move |_| {
+                        Message::ReceivedMIDIPreviewRequest(srn_no)
+                    }));
                 }
                 tasks.push(Task::perform(async {}, move |_| {
                     Message::ReceivedSourceParameterUpdate
@@ -525,17 +522,17 @@ impl App {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
                     param.center_note = (param.center_note & 0x00FF) | ((note as u16) << 8);
-                    let mut tasks = vec![];
-                    if param.enable_midi_preview {
-                        tasks.push(Task::perform(async {}, move |_| {
-                            Message::ReceivedMIDIPreviewRequest(srn_no)
-                        }));
-                    }
-                    tasks.push(Task::perform(async {}, move |_| {
-                        Message::ReceivedSourceParameterUpdate
-                    }));
-                    return Task::batch(tasks);
                 }
+                let mut tasks = vec![];
+                if self.midi_preview.load(Ordering::Relaxed) {
+                    tasks.push(Task::perform(async {}, move |_| {
+                        Message::ReceivedMIDIPreviewRequest(srn_no)
+                    }));
+                }
+                tasks.push(Task::perform(async {}, move |_| {
+                    Message::ReceivedSourceParameterUpdate
+                }));
+                return Task::batch(tasks);
             }
             Message::CenterNoteFractionChanged(srn_no, fraction) => {
                 let mut params = self.source_parameter.write().unwrap();
@@ -550,18 +547,18 @@ impl App {
             Message::NoteOnVelocityChanged(srn_no, velocity) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
-                    let mut tasks = vec![];
                     param.noteon_velocity = velocity;
-                    if param.enable_midi_preview {
-                        tasks.push(Task::perform(async {}, move |_| {
-                            Message::ReceivedMIDIPreviewRequest(srn_no)
-                        }));
-                    }
-                    tasks.push(Task::perform(async {}, move |_| {
-                        Message::ReceivedSourceParameterUpdate
-                    }));
-                    return Task::batch(tasks);
                 }
+                let mut tasks = vec![];
+                if self.midi_preview.load(Ordering::Relaxed) {
+                    tasks.push(Task::perform(async {}, move |_| {
+                        Message::ReceivedMIDIPreviewRequest(srn_no)
+                    }));
+                }
+                tasks.push(Task::perform(async {}, move |_| {
+                    Message::ReceivedSourceParameterUpdate
+                }));
+                return Task::batch(tasks);
             }
             Message::PitchBendWidthChanged(srn_no, width) => {
                 let mut params = self.source_parameter.write().unwrap();
@@ -924,7 +921,6 @@ impl App {
                     fixed_volume: 100,
                     enable_pitch_bend: !is_drum,
                     echo_as_effect1: true,
-                    enable_midi_preview: true,
                 },
             );
         }
@@ -1136,7 +1132,7 @@ impl App {
     }
 
     // プレビュー再生開始
-    fn srn_play_start(&mut self, srn_no: u8, loop_flag: bool) -> Result<(), PlayStreamError> {
+    fn srn_play_start(&mut self, srn_no: u8) -> Result<(), PlayStreamError> {
         // 再生対象の音源をコピー
         let infos = self.source_infos.read().unwrap();
         let source = if let Some(srn) = infos.get(&srn_no) {
@@ -1173,6 +1169,9 @@ impl App {
         // ループ開始位置は出力サンプル数で上限をかける
         let loop_start_progress = cmp::min(num_channels * loop_start_sample, output.len() - 1);
 
+        // ループフラグ
+        let preview_loop = self.preview_loop.clone();
+
         // 再生サンプル数（ワンショットのプレビュー再生なので再生サンプルはselfに保持しない）
         let mut progress = 0;
 
@@ -1189,7 +1188,7 @@ impl App {
                 progress += num_copy_samples;
                 // 端点に来た時の処理
                 if progress >= output.len() {
-                    if loop_flag {
+                    if preview_loop.load(Ordering::Relaxed) {
                         // ループしながらバッファがいっぱいになるまでコピー
                         let mut buffer_pos = num_copy_samples;
                         progress = loop_start_progress;
