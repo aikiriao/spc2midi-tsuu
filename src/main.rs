@@ -123,7 +123,7 @@ enum Message {
     ReceivedSourceParameterUpdate,
     AudioOutputDeviceSelected(String),
     MIDIOutputPortSelected(String),
-    MIDIOutputBpmChanged(u8),
+    MIDIOutputBpmChanged(f32),
     MIDIOutputTicksPerQuarterChanged(u16),
     MIDIOutputUpdatePeriodChanged(u8),
     MIDIOutputDurationChanged(u64),
@@ -885,8 +885,11 @@ impl App {
             }
         }
 
+        // テンポ推定
         let mut config = self.midi_output_configure.write().unwrap();
-        config.beats_per_minute = estimate_bpm(&signal);
+        // 小数点以下は0.25に丸め込む
+        let estimated_bpm = estimate_bpm(&signal);
+        config.beats_per_minute = f32::round(estimated_bpm * 4.0) / 4.0;
 
         // 波形情報の読み込み
         for (srn, dir_address) in start_address_map.iter() {
@@ -972,7 +975,7 @@ impl App {
             let mut previous_event_time = 0.0;
 
             // メタイベントの設定
-            let quarter_usec = (60 * 1000_000) / (config.beats_per_minute as u32);
+            let quarter_usec = (60_000_000.0 / config.beats_per_minute) as u32;
             smf.tracks[0].events.push(TrackEvent {
                 vtime: 0,
                 event: MidiEvent::Meta(MetaEvent::tempo_setting(quarter_usec)),

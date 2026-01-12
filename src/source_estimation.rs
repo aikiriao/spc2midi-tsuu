@@ -193,7 +193,7 @@ pub fn estimate_drum_and_note(source_info: &SourceInformation) -> (bool, f32) {
 }
 
 /// 超簡易テンポ推定
-pub fn estimate_bpm(signal: &Vec<f32>) -> u8 {
+pub fn estimate_bpm(signal: &Vec<f32>) -> f32 {
     const TEMPO_ESTIMATION_FRAME_SIZE: usize = 64;
     const INV_FRAME_SIZE: f32 = 1.0 / (TEMPO_ESTIMATION_FRAME_SIZE as f32);
     const MIN_BPM: usize = 30;
@@ -244,6 +244,5 @@ pub fn estimate_bpm(signal: &Vec<f32>) -> u8 {
     }
 
     // 先頭に見つかったピークをビートとする
-    f32::round((60.0 * SPC_SAMPLING_RATE) / (peak_lags[0] as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32))
-        as u8
+    (60.0 * SPC_SAMPLING_RATE) / (peak_lags[0] as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32)
 }

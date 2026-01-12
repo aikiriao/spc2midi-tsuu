@@ -9,7 +9,7 @@ pub const DEFAULT_OUTPUT_DURATION_MSEC: u64 = 60 * 1000;
 /// デフォルトのMIDI再生パラメータ更新間隔(msec)
 pub const DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC: u8 = 5;
 /// デフォルトの出力MIDIのBPM
-pub const DEFAULT_MIDI_BPM: u8 = 120;
+pub const DEFAULT_MIDI_BPM: f32 = 120.0;
 /// デフォルトの出力MIDIの四分音符内のティック数
 pub const DEFAULT_MIDI_RESOLUSIONS: u16 = 480;
 
@@ -64,7 +64,7 @@ pub struct MIDIOutputConfigure {
     /// MIDI再生パラメータ更新周期
     pub playback_parameter_update_period: u8,
     /// BPM
-    pub beats_per_minute: u8,
+    pub beats_per_minute: f32,
     /// 四分の一音符当たりのティック数
     pub ticks_per_quarter: u16,
 }
