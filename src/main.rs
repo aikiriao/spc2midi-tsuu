@@ -1,13 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // Releaseビルドの時コンソールを非表示
 
-mod center_note_estimation;
+mod source_estimation;
 mod main_window;
 mod preference_window;
 mod program;
 mod srn_window;
 mod types;
 
-use crate::center_note_estimation::*;
+use crate::source_estimation::*;
 use crate::main_window::*;
 use crate::preference_window::*;
 use crate::program::*;
@@ -883,31 +883,32 @@ impl App {
                 make_u16_from_u8(&ram[(*dir_address + 0)..(*dir_address + 2)]) as usize;
             let loop_address =
                 make_u16_from_u8(&ram[(*dir_address + 2)..(*dir_address + 4)]) as usize;
-            infos.insert(
-                *srn,
-                SourceInformation {
+            let source_info = SourceInformation {
                     signal: signal.clone(),
                     start_address: start_address,
                     end_address: start_address + (signal.len() * 9) / 16,
                     loop_start_sample: ((loop_address - start_address) * 16) / 9,
-                },
+                };
+            infos.insert(
+                *srn,
+                source_info.clone()
             );
-            // 推定ピッチ
-            let center_note = center_note_estimation(&signal);
+            // ドラム音とピッチの推定
+            let (is_drum, center_note) = estimate_drum_and_note(&source_info);
             params.insert(
                 *srn,
                 SourceParameter {
                     mute: false,
-                    program: Program::AcousticGrand,
+                    program: if is_drum { Program::AcousticBassDrum } else { Program::AcousticGrand },
                     center_note: f32::round(center_note * 256.0) as u16,
                     noteon_velocity: 100,
-                    pitch_bend_width: 6,
-                    envelope_as_expression: true,
+                    pitch_bend_width: 12,
+                    envelope_as_expression: !is_drum,
                     auto_pan: true,
                     fixed_pan: 64,
                     auto_volume: true,
                     fixed_volume: 100,
-                    enable_pitch_bend: true,
+                    enable_pitch_bend: !is_drum,
                     echo_as_effect1: true,
                     enable_midi_preview: true,
                 },
