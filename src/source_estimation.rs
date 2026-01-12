@@ -9,6 +9,8 @@ const SPC_SAMPLING_RATE: f32 = 32000.0;
 const A4_PITCH_HZ: f32 = 440.0;
 /// 有効なピッチ候補と認めるスレッショルド
 const PITCH_PEAK_THRESHOLD: f32 = 0.8;
+/// 有効なビート候補と認めるスレッショルド
+const BPM_PEAK_THRESHOLD: f32 = 0.98;
 
 macro_rules! chirp(
     ($m:expr) => ({
@@ -191,59 +193,57 @@ pub fn estimate_drum_and_note(source_info: &SourceInformation) -> (bool, f32) {
 }
 
 /// 超簡易テンポ推定
-/// https://web.archive.org/web/20221127013658/http://hp.vector.co.jp/authors/VA046927/tempo/tempo.html を参考
 pub fn estimate_bpm(signal: &Vec<f32>) -> u8 {
-    const TEMPO_ESTIMATION_FRAME_SIZE: usize = 128;
+    const TEMPO_ESTIMATION_FRAME_SIZE: usize = 64;
     const INV_FRAME_SIZE: f32 = 1.0 / (TEMPO_ESTIMATION_FRAME_SIZE as f32);
     const MIN_BPM: usize = 30;
     const MAX_BPM: usize = 240;
+    const MIN_LAG: usize = ((60.0 * SPC_SAMPLING_RATE)
+        / (MAX_BPM as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32))
+        as usize;
+    const MAX_LAG: usize = ((60.0 * SPC_SAMPLING_RATE)
+        / (MIN_BPM as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32))
+        as usize;
 
     // フレームに区切り、RMSを計算
-    let rms: Vec<_> = signal
+    let mut rms: Vec<_> = signal
         .chunks(TEMPO_ESTIMATION_FRAME_SIZE)
-        .map(|c| {
-            (10.0 * (c.iter().map(|v| v * v).sum::<f32>() * INV_FRAME_SIZE).log10()).max(-100.0)
-        })
+        .map(|c| (c.iter().map(|v| v * v).sum::<f32>() * INV_FRAME_SIZE).sqrt())
         .collect();
-
-    // RMSの差分を計算
-    let mut diff_rms = vec![];
-    for i in 1..rms.len() {
-        diff_rms.push(if rms[i] > rms[i - 1] {
-            rms[i] - rms[i - 1]
-        } else {
-            0.0
-        });
-    }
 
     // 窓かけ
-    diff_rms = diff_rms
+    rms = rms
         .iter()
         .enumerate()
-        .map(|(i, d)| *d * f32::sin((PI * (i as f32)) / (diff_rms.len() - 1) as f32).pow(2.0))
+        .map(|(i, r)| *r * f32::sin((PI * (i as f32)) / (rms.len() - 1) as f32).pow(2.0))
         .collect();
 
-    // BPM繰り返し成分の計算
-    let mut amp_spec = vec![];
-    for bpm in MIN_BPM..=MAX_BPM {
-        let fbpm = bpm as f32 / 60.0;
-        let ffactor = (TEMPO_ESTIMATION_FRAME_SIZE as f32) / 32000.0;
-        let abpm = diff_rms
-            .iter()
-            .enumerate()
-            .map(|(i, d)| *d * f32::cos(2.0 * PI * fbpm * (i as f32) * ffactor))
-            .sum::<f32>();
-        let bbpm = diff_rms
-            .iter()
-            .enumerate()
-            .map(|(i, d)| *d * f32::sin(2.0 * PI * fbpm * (i as f32) * ffactor))
-            .sum::<f32>();
-        amp_spec.push((abpm * abpm + bbpm * bbpm).sqrt());
+    // 自己相関計算
+    let m = rms.len();
+    let power_spec: Vec<_> = transform(rms.as_slice(), m, chirp!(m), c32::new(1.0, 0.0))
+        .iter()
+        .map(|c| c.re * c.re + c.im * c.im)
+        .collect();
+    let auto_corr: Vec<_> = transform(power_spec.as_slice(), m, chirp!(m), c32::new(1.0, 0.0))
+        [..(power_spec.len() / 2)]
+        .iter()
+        .map(|c| c.re)
+        .collect();
+
+    // 候補ラグ内でのピーク
+    let max = auto_corr[MIN_LAG..=MAX_LAG]
+        .iter()
+        .fold(0.0 / 0.0, |m, v| v.max(m));
+
+    // ピーク値から候補ラグを列挙
+    let mut peak_lags = vec![];
+    for i in MIN_LAG..=MAX_LAG {
+        if auto_corr[i] >= BPM_PEAK_THRESHOLD * max {
+            peak_lags.push(i);
+        }
     }
 
-    // ビンを降順にインデックスソート
-    let mut peak_bins: Vec<_> = (0..amp_spec.len()).collect();
-    peak_bins.sort_by(|&a, &b| amp_spec[b].total_cmp(&amp_spec[a]));
-
-    (peak_bins[0] + MIN_BPM) as u8
+    // 先頭に見つかったピークをビートとする
+    f32::round((60.0 * SPC_SAMPLING_RATE) / (peak_lags[0] as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32))
+        as u8
 }
