@@ -117,6 +117,7 @@ enum Message {
     FixedVolumeChanged(u8, u8),
     EnvelopeAsExpressionFlagToggled(u8, bool),
     EchoAsEffect1FlagToggled(u8, bool),
+    SRNNoteEstimationClicked(u8),
     ReceivedSourceParameterUpdate,
     AudioOutputDeviceSelected(String),
     MIDIOutputPortSelected(String),
@@ -175,7 +176,7 @@ impl Default for App {
         let device = host
             .default_output_device()
             .expect("no output device available");
-        let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
+        let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).expect("no MIDI output port available");
         let midi_out_ports = midi_out.ports();
         let midi_out_port_name = if midi_out_ports.len() > 0 {
             Some(midi_out.port_name(&midi_out_ports[0]).unwrap())
@@ -632,6 +633,19 @@ impl App {
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
                     });
+                }
+            }
+            Message::SRNNoteEstimationClicked(srn_no) => {
+                let mut params = self.source_parameter.write().unwrap();
+                let infos = self.source_infos.read().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    if let Some(info) = infos.get(&srn_no) {
+                        let (_, center_note) = estimate_drum_and_note(&info);
+                        param.center_note = f32::round(center_note * 256.0) as u16;
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        });
+                    }
                 }
             }
             Message::ReceivedSourceParameterUpdate => {

@@ -63,6 +63,9 @@ impl SPC2MIDI2Window for SRNWindow {
                     Message::CenterNoteFractionChanged(srn_no, fraction)
                 },)
                 .step(1.0 / 256.0),
+                button("Reset").on_press(Message::SRNNoteEstimationClicked(
+                        self.srn_no,
+                )),
             ]
             .spacing(10)
             .width(Length::Fill)
