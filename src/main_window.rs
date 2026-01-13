@@ -213,10 +213,13 @@ impl SPC2MIDI2Window for MainWindow {
         let status_list: Vec<_> = (0..8)
             .map(|ch| {
                 row![
-                    text(format!("{}", ch)),
+                    text(format!("{}", ch)).width(10),
                     checkbox(midi_channel_mute[ch])
-                        .on_toggle(move |flag| Message::MuteChannel(ch as u8, flag)),
-                    button("S").on_press(Message::SoloChannel(ch as u8)),
+                        .on_toggle(move |flag| Message::MuteChannel(ch as u8, flag))
+                        .width(10),
+                    button("S")
+                        .on_press(Message::SoloChannel(ch as u8))
+                        .width(30),
                     text(format!("{}", if status.noteon[ch] { "♪" } else { "" }))
                         .align_y(alignment::Alignment::Center)
                         .height(Length::Fill)
