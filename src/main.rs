@@ -247,6 +247,16 @@ impl App {
         match message {
             Message::OpenMainWindow => {
                 let (id, open) = window::open(window::Settings {
+                    icon: Some(
+                        window::icon::from_file_data(
+                            include_bytes!(concat!(
+                                env!("CARGO_MANIFEST_DIR"),
+                                "/spc2midi-tsuu.ico"
+                            )),
+                            None,
+                        )
+                        .expect("failed to load ico file"),
+                    ),
                     size: iced::Size::new(500.0, 600.0),
                     ..Default::default()
                 });

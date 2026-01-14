@@ -7,7 +7,7 @@ edition = "2024"
 cpal = "0.17.0"
 czt = "0.3.7"
 fixed-resample = "0.9.2"
-iced = { version = "0.14.0", features = ["tokio"] }
+iced = { version = "0.14.0", features = ["tokio", "image"] }
 iced_aw = { version = "0.13.0", features = ["full"] }
 iced_widget = "0.14.2"
 midir = "0.10.3"
