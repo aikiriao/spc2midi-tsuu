@@ -992,7 +992,8 @@ impl App {
                 // MIDI出力
                 if let Some(out) = spc.clock_tick_64k_hz() {
                     // ティック数：経過ティック数（現時刻までの総ティック数とこれまでのティック数の差）
-                    let ticks = (total_elapsed_time_nanosec * ticks_per_minutes) / 60_000_000_000 - total_ticks;
+                    let ticks = (total_elapsed_time_nanosec * ticks_per_minutes) / 60_000_000_000
+                        - total_ticks;
                     // メッセージ追記
                     for i in 0..out.num_messages {
                         let msg = out.messages[i];
