@@ -947,8 +947,6 @@ impl App {
     fn create_smf(&self) -> Option<SMF> {
         if let Some(spc_file) = &self.spc_file {
             let config = self.midi_output_configure.read().unwrap();
-            let ticks_per_minutes =
-                (config.beats_per_minute as f64) * (config.ticks_per_quarter as f64);
             let mut smf = SMF {
                 format: SMFFormat::Single,
                 tracks: vec![Track {
@@ -970,45 +968,43 @@ impl App {
             let params = self.source_parameter.read().unwrap();
             apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
 
-            let mut cycle_count = 0;
-            let mut total_elapsed_time_nanosec = 0;
-            let mut previous_event_time = 0.0;
-
             // メタイベントの設定
-            let quarter_usec = (60_000_000.0 / config.beats_per_minute) as u32;
+            let quarter_usec = (60_000_000 / config.beats_per_minute) as u32;
             smf.tracks[0].events.push(TrackEvent {
                 vtime: 0,
                 event: MidiEvent::Meta(MetaEvent::tempo_setting(quarter_usec)),
             });
 
             // 出力で決めた時間だけ出力
+            let ticks_per_minutes =
+                (config.beats_per_minute as u64) * (config.ticks_per_quarter as u64);
+            let mut total_ticks = 0;
+            let mut total_elapsed_time_nanosec = 0;
+            let mut cycle_count = 0;
             while total_elapsed_time_nanosec < config.output_duration_msec * 1000_000 {
                 // 64kHzタイマーティックするまで処理
                 while cycle_count < CLOCK_TICK_CYCLE_64KHZ {
                     cycle_count += spc.execute_step() as u32;
                 }
                 cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                // clock_tick_64k_hz実行後に64KHz周期がすぎるので、ここで時間を増加
+                total_elapsed_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
                 // MIDI出力
                 if let Some(out) = spc.clock_tick_64k_hz() {
-                    // 経過時間からティック数を計算
-                    let delta_nano_time = total_elapsed_time_nanosec as f64 - previous_event_time;
-                    let ticks = (delta_nano_time * ticks_per_minutes) / (60.0 * 1000_000_000.0);
-                    // ティック数は切り捨てる（切り上げると経過時間が未来になって経過時間が負になりうる）
+                    // ティック数：経過ティック数（現時刻までの総ティック数とこれまでのティック数の差）
+                    let ticks = (total_elapsed_time_nanosec * ticks_per_minutes) / 60_000_000_000 - total_ticks;
+                    // メッセージ追記
                     for i in 0..out.num_messages {
                         let msg = out.messages[i];
                         smf.tracks[0].events.push(TrackEvent {
-                            vtime: if i == 0 { f64::floor(ticks) as u64 } else { 0 },
+                            vtime: if i == 0 { ticks } else { 0 },
                             event: MidiEvent::Midi(MidiMessage {
                                 data: msg.data[..msg.length].to_vec(),
                             }),
                         });
                     }
-                    // 実際のtickから経過時間計算
-                    previous_event_time +=
-                        (ticks.floor() * 60.0 * 1000_000_000.0) / ticks_per_minutes;
+                    total_ticks += ticks;
                 }
-                // 時間を進める
-                total_elapsed_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
             }
 
             Some(smf)
