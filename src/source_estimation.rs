@@ -46,7 +46,7 @@ fn detect_drum(source_info: &SourceInformation, power_spec: &Vec<f32>) -> bool {
     }
 
     // ループ位置が端点にあればワンショット音源
-    let one_shot = nsmpls == source_info.loop_start_sample;
+    let one_shot = (source_info.loop_start_sample == 0) || (source_info.loop_start_sample == nsmpls);
 
     // 最初の1/8と最後の1/8のパワーの比
     let power_ratio;
@@ -113,13 +113,8 @@ fn detect_drum(source_info: &SourceInformation, power_spec: &Vec<f32>) -> bool {
         return true;
     }
 
-    // スペクトル重心が高い
-    if centroid >= 8000.0 {
-        return true;
-    }
-
-    // スペクトル帯域幅が広い
-    if bandwidth >= 8000.0 {
+    // スペクトル重心が高くスペクトル帯域幅が広い
+    if centroid >= 8000.0 && bandwidth >= 8000.0 {
         return true;
     }
 
