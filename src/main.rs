@@ -969,7 +969,7 @@ impl App {
             apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
 
             // メタイベントの設定
-            let quarter_usec = (60_000_000 / config.beats_per_minute) as u32;
+            let quarter_usec = (60_000_000.0 / config.beats_per_minute) as u32;
             smf.tracks[0].events.push(TrackEvent {
                 vtime: 0,
                 event: MidiEvent::Meta(MetaEvent::tempo_setting(quarter_usec)),
