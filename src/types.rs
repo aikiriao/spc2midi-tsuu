@@ -19,6 +19,8 @@ pub const DEFAULT_MIDI_RESOLUSIONS: u16 = 480;
 pub struct SourceInformation {
     /// デコードした信号
     pub signal: Vec<f32>,
+    /// パワースペクトル
+    pub power_spectrum: Vec<f32>,
     /// 開始アドレス
     pub start_address: usize,
     /// 終端アドレス

@@ -930,6 +930,7 @@ impl App {
                 make_u16_from_u8(&ram[(*dir_address + 2)..(*dir_address + 4)]) as usize;
             let source_info = SourceInformation {
                 signal: signal.clone(),
+                power_spectrum: compute_power_spectrum(&signal),
                 start_address: start_address,
                 end_address: start_address + (signal.len() * 9) / 16,
                 loop_start_sample: ((loop_address - start_address) * 16) / 9,

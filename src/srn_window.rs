@@ -11,8 +11,8 @@ use iced_aw::number_input;
 use num_traits::pow::Pow;
 use std::cmp;
 use std::collections::BTreeMap;
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug)]
 pub struct SRNWindow {
@@ -24,6 +24,18 @@ pub struct SRNWindow {
     preview_loop: Arc<AtomicBool>,
     program_box: combo_box::State<Program>,
     cache: Cache,
+}
+
+/// 描画モード
+pub enum DrawMode {
+    WaveForm, // 時間波形
+    Spectrum, // 周波数スペクトル
+}
+
+impl Default for DrawMode {
+    fn default() -> Self {
+        Self::WaveForm
+    }
 }
 
 impl SPC2MIDI2Window for SRNWindow {
@@ -68,9 +80,7 @@ impl SPC2MIDI2Window for SRNWindow {
                     let note = param.center_note as f32 / 256.0;
                     text(format!("{:8.2}Hz", 440.0 * 2.0.pow((note - 69.0) / 12.0)))
                 },
-                button("Reset").on_press(Message::SRNNoteEstimationClicked(
-                        self.srn_no,
-                )),
+                button("Reset").on_press(Message::SRNNoteEstimationClicked(self.srn_no,)),
             ]
             .spacing(10)
             .width(Length::Fill)
@@ -144,9 +154,7 @@ impl SPC2MIDI2Window for SRNWindow {
             .align_y(alignment::Alignment::Center),
         ];
         let preview_controller = row![
-            button("Play / Stop").on_press(Message::ReceivedSRNPlayStartRequest(
-                self.srn_no
-            )),
+            button("Play / Stop").on_press(Message::ReceivedSRNPlayStartRequest(self.srn_no)),
             checkbox(self.preview_loop.load(Ordering::Relaxed))
                 .label("Loop")
                 .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(flag)),
@@ -200,11 +208,11 @@ impl SRNWindow {
 }
 
 impl canvas::Program<Message> for SRNWindow {
-    type State = Option<()>;
+    type State = DrawMode;
 
     fn draw(
         &self,
-        _state: &Self::State,
+        state: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
@@ -212,41 +220,96 @@ impl canvas::Program<Message> for SRNWindow {
     ) -> Vec<Geometry> {
         const TIMELABEL_HEIGHT: f32 = 10.0;
         let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
-            // 波形描画
-            draw_waveform(
-                frame,
-                &Rectangle::new(Point::new(0.0, 0.0), Size::new(bounds.width, bounds.height)),
-                &self.source_info.signal,
-                false,
-            );
-            // ループポイント描画
-            draw_loop_point(
-                frame,
-                &Rectangle::new(Point::new(0.0, 0.0), Size::new(bounds.width, bounds.height)),
-                self.source_info.signal.len(),
-                self.source_info.loop_start_sample,
-            );
-            // 時刻ラベル描画
-            draw_timelabel(
-                frame,
-                &Rectangle::new(
-                    Point::new(0.0, bounds.height - TIMELABEL_HEIGHT),
-                    Size::new(bounds.width, TIMELABEL_HEIGHT),
-                ),
-                SPC_SAMPLING_RATE as f32,
-                self.source_info.signal.len(),
-            );
+            match state {
+                DrawMode::WaveForm => {
+                    // 波形描画
+                    draw_waveform(
+                        frame,
+                        &Rectangle::new(
+                            Point::new(0.0, 0.0),
+                            Size::new(bounds.width, bounds.height),
+                        ),
+                        &self.source_info.signal,
+                        false,
+                    );
+                    // ループポイント描画
+                    draw_loop_point(
+                        frame,
+                        &Rectangle::new(
+                            Point::new(0.0, 0.0),
+                            Size::new(bounds.width, bounds.height),
+                        ),
+                        self.source_info.signal.len(),
+                        self.source_info.loop_start_sample,
+                    );
+                    // 時刻ラベル描画
+                    draw_timelabel(
+                        frame,
+                        &Rectangle::new(
+                            Point::new(0.0, bounds.height - TIMELABEL_HEIGHT),
+                            Size::new(bounds.width, TIMELABEL_HEIGHT),
+                        ),
+                        SPC_SAMPLING_RATE as f32,
+                        self.source_info.signal.len(),
+                    );
+                }
+                DrawMode::Spectrum => {
+                    let log_spec: Vec<_> = self
+                        .source_info
+                        .power_spectrum
+                        .iter()
+                        .map(|p| 10.0 * p.log10())
+                        .collect();
+                    let max = log_spec.iter().max_by(|a, b| a.total_cmp(&b)).unwrap();
+                    let min = log_spec.iter().min_by(|a, b| a.total_cmp(&b)).unwrap();
+                    if *min < *max {
+                        // スペクトラム描画
+                        draw_spectrum(
+                            frame,
+                            &Rectangle::new(
+                                Point::new(0.0, 0.0),
+                                Size::new(bounds.width, bounds.height),
+                            ),
+                            &log_spec,
+                            (*min, *max),
+                        );
+                        // スペクトラムピークラベル描画
+                        draw_spectrum_peak_label(
+                            frame,
+                            &Rectangle::new(
+                                Point::new(0.0, 0.0),
+                                Size::new(bounds.width, bounds.height),
+                            ),
+                            &log_spec,
+                            SPC_SAMPLING_RATE as f32,
+                            6,
+                        );
+                    }
+                }
+            }
         });
         vec![geometry]
     }
 
     fn update(
         &self,
-        _state: &mut Self::State,
-        _event: &Event,
-        _bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        state: &mut Self::State,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
     ) -> Option<iced_widget::Action<Message>> {
+        if let Some(_) = cursor.position_in(bounds) {
+            match event {
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                    *state = match *state {
+                        DrawMode::WaveForm => DrawMode::Spectrum,
+                        DrawMode::Spectrum => DrawMode::WaveForm,
+                    };
+                    self.cache.clear();
+                }
+                _ => {}
+            }
+        }
         None
     }
 }
@@ -396,5 +459,98 @@ fn draw_timelabel(frame: &mut Frame, bounds: &Rectangle, sampling_rate: f32, num
             });
             next_tick += tick;
         }
+    }
+}
+
+/// スペクトラム描画
+fn draw_spectrum(frame: &mut Frame, bounds: &Rectangle, spec: &[f32], db_range: (f32, f32)) {
+    const HEIGHT_OFFSET: f32 = 10.0;
+    let center = bounds.center();
+    let center_left = Point::new(center.x - bounds.width / 2.0, center.y);
+
+    let num_points_to_draw = cmp::min(spec.len(), 4 * bounds.width as usize); // 描画する点数（それ以外は間引く）
+    let sample_stride = spec.len() as f32 / num_points_to_draw as f32;
+
+    assert!(db_range.0 < db_range.1);
+
+    // x,y座標の計算クロージャ（周波数軸は対数スケール）
+    let normalize = |val: f32, min: f32, max: f32| -> f32 { (val - min) / (max - min) };
+    let compute_x = move |s: usize| -> f32 {
+        center_left.x
+            + bounds.width * normalize((s as f32).log10(), 0.0, ((spec.len() - 1) as f32).log10())
+    };
+    let compute_y = move |p: f32| -> f32 {
+        HEIGHT_OFFSET + bounds.height * (1.0 - normalize(p, db_range.0, db_range.1))
+    };
+
+    // 背景を塗りつぶす
+    frame.fill_rectangle(
+        Point::new(bounds.x, bounds.y),
+        Size::new(bounds.width, bounds.height),
+        Color::from_rgb8(0, 0, 0),
+    );
+
+    let line_color = Color::from_rgb8(0, 196, 0);
+
+    // 描画パスを生成
+    let path = Path::new(|b| {
+        b.move_to(Point::new(center_left.x, compute_y(spec[0])));
+        for i in 1..num_points_to_draw {
+            b.line_to(Point::new(
+                compute_x((i as f32 * sample_stride).round() as usize),
+                compute_y(spec[(i as f32 * sample_stride).round() as usize]),
+            ));
+        }
+    });
+    // スペクトラム描画
+    frame.stroke(
+        &path,
+        Stroke {
+            style: stroke::Style::Solid(line_color),
+            width: 1.0,
+            ..Stroke::default()
+        },
+    );
+}
+
+/// スペクトラムピークラベル描画
+fn draw_spectrum_peak_label(
+    frame: &mut Frame,
+    bounds: &Rectangle,
+    spec: &[f32],
+    sampling_rate: f32,
+    num_peaks: usize,
+) {
+    let center = bounds.center();
+    let center_left = Point::new(center.x - bounds.width / 2.0, center.y);
+
+    let normalize = |val: f32, min: f32, max: f32| -> f32 { (val - min) / (max - min) };
+    let compute_x = move |s: usize| -> f32 {
+        center_left.x
+            + bounds.width * normalize((s as f32).log10(), 0.0, ((spec.len() - 1) as f32).log10())
+    };
+    let compute_frequency =
+        move |s: usize| -> f32 { sampling_rate * (s as f32) / (2.0 * spec.len() as f32) };
+
+    // スペクトルを降順にソートし対応するビンを並べる
+    let mut peak_bins = (0..spec.len()).collect::<Vec<_>>();
+    peak_bins.sort_unstable_by(|&i, &j| spec[j].total_cmp(&spec[i]));
+
+    // ピークの周波数を描画
+    const FONT_SIZE: f32 = 16.0;
+    for i in 0..num_peaks {
+        frame.fill_text(canvas::Text {
+            content: format!("{:.1}", compute_frequency(peak_bins[i])),
+            size: iced::Pixels(FONT_SIZE),
+            position: Point::new(
+                compute_x(peak_bins[i]),
+                bounds.height - FONT_SIZE * (num_peaks - i) as f32,
+            ),
+            color: Color::WHITE,
+            align_x: alignment::Horizontal::Center.into(),
+            align_y: alignment::Vertical::Bottom,
+            font: Font::MONOSPACE,
+            ..canvas::Text::default()
+        });
     }
 }

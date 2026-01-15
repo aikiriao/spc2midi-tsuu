@@ -34,10 +34,11 @@ fn detect_nonzero_erea(signal: &Vec<f32>) -> (usize, usize) {
 }
 
 // 超簡易ドラム音判定
-fn detect_drum(source_info: &SourceInformation, power_spec: &Vec<f32>) -> bool {
+fn detect_drum(source_info: &SourceInformation) -> bool {
     const NUM_DIVISIONS: usize = 8;
 
     let signal = &source_info.signal;
+    let power_spec = &source_info.power_spectrum;
     let nsmpls = signal.len();
     let nspecs = power_spec.len();
 
@@ -122,7 +123,8 @@ fn detect_drum(source_info: &SourceInformation, power_spec: &Vec<f32>) -> bool {
 }
 
 /// センターノートの推定
-fn center_note_estimation(power_spec: &Vec<f32>) -> f32 {
+fn center_note_estimation(source_info: &SourceInformation) -> f32 {
+    let power_spec = &source_info.power_spectrum;
     // 対数パワースペクトルに変換
     let log_spec: Vec<f32> = power_spec.iter().map(|p| 10.0 * f32::log10(*p)).collect();
 
@@ -161,29 +163,9 @@ fn center_note_estimation(power_spec: &Vec<f32>) -> f32 {
 
 /// ドラム音とノート番号の推定
 pub fn estimate_drum_and_note(source_info: &SourceInformation) -> (bool, f32) {
-    let signal = &source_info.signal;
-
-    // 分析範囲の切り出し
-    let (start, end) = detect_nonzero_erea(signal);
-    let signal = if start < end {
-        signal[start..end].to_vec()
-    } else {
-        signal.to_vec()
-    };
-
-    // Chirp-z transform
-    let m = signal.len();
-    let spec = transform(signal.as_slice(), m, chirp!(m), c32::new(1.0, 0.0));
-
-    // パワースペクトル計算（偶対象になるので半分だけ計算）
-    let power_spec: Vec<f32> = spec[..=(m / 2)]
-        .iter()
-        .map(|c| c.re * c.re + c.im * c.im)
-        .collect();
-
     (
-        detect_drum(&source_info, &power_spec),
-        center_note_estimation(&power_spec),
+        detect_drum(&source_info),
+        center_note_estimation(&source_info),
     )
 }
 
@@ -240,4 +222,28 @@ pub fn estimate_bpm(signal: &Vec<f32>) -> f32 {
 
     // 先頭に見つかったピークをビートとする
     (60.0 * SPC_SAMPLING_RATE) / (peak_lags[0] as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32)
+}
+
+/// パワースペクトルの計算
+pub fn compute_power_spectrum(signal: &Vec<f32>) -> Vec<f32> {
+    // 分析範囲の切り出し（TODO: 要るか？）
+    let (start, end) = detect_nonzero_erea(signal);
+    let mut signal = if start < end {
+        signal[start..end].to_vec()
+    } else {
+        signal.to_vec()
+    };
+
+    // 正規化 + 窓かけ
+    let m = signal.len();
+    signal = signal
+        .iter()
+        .enumerate()
+        .map(|(i, r)| *r * f32::sin((PI * (i as f32)) / (signal.len() - 1) as f32).pow(2.0) / (m as f32))
+        .collect();
+
+    transform(signal.as_slice(), m, chirp!(m), c32::new(1.0, 0.0))[..=(m/2)]
+        .iter()
+        .map(|c| c.re * c.re + c.im * c.im)
+        .collect::<Vec<_>>()
 }
