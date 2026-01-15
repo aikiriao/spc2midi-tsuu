@@ -320,7 +320,15 @@ impl App {
                 if self.stream_is_playing.load(Ordering::Relaxed) {
                     self.stream_play_stop().expect("Failed to stop play");
                 }
-                return Task::perform(open_file(), Message::FileOpened);
+                // すでに開いているメインウィンドウ以外を閉じる
+                let mut tasks = vec![];
+                for (id, _) in &self.windows {
+                    if *id != self.main_window_id {
+                        tasks.push(window::close(*id));
+                    }
+                }
+                tasks.push(Task::perform(open_file(), Message::FileOpened));
+                return Task::batch(tasks);
             }
             Message::FileOpened(result) => match result {
                 Ok((path, data)) => {
