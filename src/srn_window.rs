@@ -64,6 +64,10 @@ impl SPC2MIDI2Window for SRNWindow {
                     Message::CenterNoteFractionChanged(srn_no, fraction)
                 },)
                 .step(1.0 / 256.0),
+                {
+                    let note = param.center_note as f32 / 256.0;
+                    text(format!("{:8.2}Hz", 440.0 * 2.0.pow((note - 69.0) / 12.0)))
+                },
                 button("Reset").on_press(Message::SRNNoteEstimationClicked(
                         self.srn_no,
                 )),
