@@ -71,6 +71,8 @@ impl SPC2MIDI2Window for SRNWindow {
                     Message::CenterNoteIntChanged(srn_no, note)
                 },)
                 .step(1),
+                button("↓").on_press(Message::SRNCenterNoteOctaveDownClicked(self.srn_no)),
+                button("↑").on_press(Message::SRNCenterNoteOctaveUpClicked(self.srn_no)),
                 text("Fraction"),
                 number_input(&center_note_fraction, 0.0..=1.0, move |fraction| {
                     Message::CenterNoteFractionChanged(srn_no, fraction)
@@ -78,9 +80,9 @@ impl SPC2MIDI2Window for SRNWindow {
                 .step(1.0 / 512.0),
                 {
                     let note = param.center_note as f32 / 512.0;
-                    text(format!("{:8.2}Hz", 440.0 * 2.0.pow((note - 69.0) / 12.0)))
+                    text(format!("{:8.2}Hz", 440.0 * 2.0.pow((note - 69.0) / 12.0))).width(90)
                 },
-                button("Reset").on_press(Message::SRNNoteEstimationClicked(self.srn_no,)),
+                button("Reset").on_press(Message::SRNNoteEstimationClicked(self.srn_no)),
             ]
             .spacing(10)
             .width(Length::Fill)
@@ -477,7 +479,8 @@ fn draw_spectrum(frame: &mut Frame, bounds: &Rectangle, spec: &[f32], db_range: 
     let normalize = |val: f32, min: f32, max: f32| -> f32 { (val - min) / (max - min) };
     let compute_x = move |s: usize| -> f32 {
         center_left.x
-            + bounds.width * normalize((s as f32).log10(), 0.0, ((spec.len() - 1) as f32).log10()) // 横軸が対数軸なので1オリジン = log(1) = 0
+            + bounds.width * normalize((s as f32).log10(), 0.0, ((spec.len() - 1) as f32).log10())
+        // 横軸が対数軸なので1オリジン = log(1) = 0
     };
     let compute_y = move |p: f32| -> f32 {
         HEIGHT_OFFSET + bounds.height * (1.0 - normalize(p, db_range.0, db_range.1))

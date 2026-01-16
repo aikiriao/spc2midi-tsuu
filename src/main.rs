@@ -71,6 +71,8 @@ const MIDI_PREVIEW_CHANNEL: u8 = 0;
 const MIDI_PREVIEW_DURATION_MSEC: u64 = 500;
 /// デフォルトの音源の分析時間(sec)
 const DEFAULT_ANALYZING_TIME_SEC: u32 = 120;
+/// 1オクターブに相当するノート(9bit小数部の固定小数)
+const OCTAVE_NOTE: u16 = 12 << 9;
 
 pub fn main() -> iced::Result {
     iced::daemon(App::new, App::update, App::view)
@@ -119,6 +121,8 @@ enum Message {
     FixedVolumeChanged(u8, u8),
     EnvelopeAsExpressionFlagToggled(u8, bool),
     EchoAsEffect1FlagToggled(u8, bool),
+    SRNCenterNoteOctaveUpClicked(u8),
+    SRNCenterNoteOctaveDownClicked(u8),
     SRNNoteEstimationClicked(u8),
     ReceivedSourceParameterUpdate,
     AudioOutputDeviceSelected(String),
@@ -650,6 +654,43 @@ impl App {
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
                     });
+                }
+            }
+            Message::SRNCenterNoteOctaveUpClicked(srn_no) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    let note = param.center_note as u32 + OCTAVE_NOTE as u32;
+                    if note <= u16::MAX as u32 {
+                        param.center_note += OCTAVE_NOTE;
+                        let mut tasks = vec![];
+                        if self.midi_preview.load(Ordering::Relaxed) {
+                            tasks.push(Task::perform(async {}, move |_| {
+                                Message::ReceivedMIDIPreviewRequest(srn_no)
+                            }));
+                        }
+                        tasks.push(Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        }));
+                        return Task::batch(tasks);
+                    }
+                }
+            }
+            Message::SRNCenterNoteOctaveDownClicked(srn_no) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    if param.center_note >= OCTAVE_NOTE {
+                        param.center_note -= OCTAVE_NOTE;
+                        let mut tasks = vec![];
+                        if self.midi_preview.load(Ordering::Relaxed) {
+                            tasks.push(Task::perform(async {}, move |_| {
+                                Message::ReceivedMIDIPreviewRequest(srn_no)
+                            }));
+                        }
+                        tasks.push(Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        }));
+                        return Task::batch(tasks);
+                    }
                 }
             }
             Message::SRNNoteEstimationClicked(srn_no) => {
