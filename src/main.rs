@@ -1423,17 +1423,8 @@ fn apply_source_parameter(
         if param.envelope_as_expression {
             flag |= 0x40;
         }
-        if param.enable_pitch_bend {
-            flag |= 0x20;
-        }
         if param.echo_as_effect1 {
-            flag |= 0x10;
-        }
-        if param.auto_volume {
-            flag |= 0x08;
-        }
-        if param.auto_pan {
-            flag |= 0x04;
+            flag |= 0x20;
         }
         spc.dsp.write_register(ram, DSP_ADDRESS_SRN_FLAG, flag);
         spc.dsp
@@ -1450,14 +1441,20 @@ fn apply_source_parameter(
             DSP_ADDRESS_SRN_CENTER_NOTE_LOW,
             ((param.center_note >> 0) & 0xFF) as u8,
         );
-        spc.dsp
-            .write_register(ram, DSP_ADDRESS_SRN_FIXED_VOLUME, param.fixed_volume);
-        spc.dsp
-            .write_register(ram, DSP_ADDRESS_SRN_FIXED_PAN, param.fixed_pan);
+        spc.dsp.write_register(
+            ram,
+            DSP_ADDRESS_SRN_VOLUME,
+            if param.auto_volume { 0x80 } else { 0x00 } | param.fixed_volume,
+        );
+        spc.dsp.write_register(
+            ram,
+            DSP_ADDRESS_SRN_PAN,
+            if param.auto_pan { 0x80 } else { 0x00 } | param.fixed_pan,
+        );
         spc.dsp.write_register(
             ram,
             DSP_ADDRESS_SRN_PITCHBEND_SENSITIVITY,
-            param.pitch_bend_width,
+            if param.enable_pitch_bend { 0x80 } else { 0x00 } | param.pitch_bend_width,
         );
     }
     // 音源に依存しないパラメータ
