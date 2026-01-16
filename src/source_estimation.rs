@@ -47,7 +47,8 @@ fn detect_drum(source_info: &SourceInformation) -> bool {
     }
 
     // ループ位置が端点にあればワンショット音源
-    let one_shot = (source_info.loop_start_sample == 0) || (source_info.loop_start_sample == nsmpls);
+    let one_shot =
+        (source_info.loop_start_sample == 0) || (source_info.loop_start_sample == nsmpls);
 
     // 最初の1/8と最後の1/8のパワーの比
     let power_ratio;
@@ -183,21 +184,34 @@ pub fn estimate_bpm(signal: &Vec<f32>) -> f32 {
         as usize;
 
     // フレームに区切り、RMSを計算
-    let mut rms: Vec<_> = signal
+    let rms: Vec<_> = signal
         .chunks(TEMPO_ESTIMATION_FRAME_SIZE)
         .map(|c| (c.iter().map(|v| v * v).sum::<f32>() * INV_FRAME_SIZE).sqrt())
         .collect();
 
-    // 窓かけ
-    rms = rms
+    // RMSの差分 かつ 0でクリップ
+    let mut diff_rms: Vec<_> = rms
         .iter()
         .enumerate()
-        .map(|(i, r)| *r * f32::sin((PI * (i as f32)) / (rms.len() - 1) as f32).pow(2.0))
+        .map(|(i, _)| {
+            if i == 0 {
+                rms[0]
+            } else {
+                (rms[i] - rms[i - 1]).max(0.0)
+            }
+        })
+        .collect();
+
+    // 窓かけ
+    diff_rms = diff_rms
+        .iter()
+        .enumerate()
+        .map(|(i, r)| *r * f32::sin((PI * (i as f32)) / (diff_rms.len() - 1) as f32).pow(2.0))
         .collect();
 
     // 自己相関計算
-    let m = rms.len();
-    let power_spec: Vec<_> = transform(rms.as_slice(), m, chirp!(m), c32::new(1.0, 0.0))
+    let m = diff_rms.len();
+    let power_spec: Vec<_> = transform(diff_rms.as_slice(), m, chirp!(m), c32::new(1.0, 0.0))
         .iter()
         .map(|c| c.re * c.re + c.im * c.im)
         .collect();
@@ -239,10 +253,12 @@ pub fn compute_power_spectrum(signal: &Vec<f32>) -> Vec<f32> {
     signal = signal
         .iter()
         .enumerate()
-        .map(|(i, r)| *r * f32::sin((PI * (i as f32)) / (signal.len() - 1) as f32).pow(2.0) / (m as f32))
+        .map(|(i, r)| {
+            *r * f32::sin((PI * (i as f32)) / (signal.len() - 1) as f32).pow(2.0) / (m as f32)
+        })
         .collect();
 
-    transform(signal.as_slice(), m, chirp!(m), c32::new(1.0, 0.0))[..=(m/2)]
+    transform(signal.as_slice(), m, chirp!(m), c32::new(1.0, 0.0))[..=(m / 2)]
         .iter()
         .map(|c| c.re * c.re + c.im * c.im)
         .collect::<Vec<_>>()
