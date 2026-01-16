@@ -541,7 +541,7 @@ impl App {
             Message::CenterNoteIntChanged(srn_no, note) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
-                    param.center_note = (param.center_note & 0x00FF) | ((note as u16) << 8);
+                    param.center_note = (param.center_note & 0x01FF) | ((note as u16) << 9);
                 }
                 let mut tasks = vec![];
                 if self.midi_preview.load(Ordering::Relaxed) {
@@ -557,8 +557,8 @@ impl App {
             Message::CenterNoteFractionChanged(srn_no, fraction) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
-                    let clamped_fraction = f32::round(fraction * 256.0).clamp(0.0, 255.0);
-                    param.center_note = (param.center_note & 0xFF00) | (clamped_fraction as u16);
+                    let clamped_fraction = f32::round(fraction * 512.0).clamp(0.0, 511.0) as u16;
+                    param.center_note = (param.center_note & 0xFE00) | clamped_fraction;
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
                     });
@@ -658,7 +658,7 @@ impl App {
                 if let Some(param) = params.get_mut(&srn_no) {
                     if let Some(info) = infos.get(&srn_no) {
                         let (_, center_note) = estimate_drum_and_note(&info);
-                        param.center_note = f32::round(center_note * 256.0) as u16;
+                        param.center_note = f32::round(center_note * 512.0) as u16;
                         return Task::perform(async {}, move |_| {
                             Message::ReceivedSourceParameterUpdate
                         });
@@ -947,7 +947,7 @@ impl App {
                     } else {
                         Program::AcousticGrand
                     },
-                    center_note: f32::round(center_note * 256.0) as u16,
+                    center_note: f32::round(center_note * 512.0) as u16,
                     noteon_velocity: 100,
                     pitch_bend_width: 12,
                     envelope_as_expression: !is_drum,
@@ -1306,7 +1306,7 @@ impl App {
         let param = params.get(&srn_no).unwrap();
         let program = param.program.clone() as u8;
         let velocity = param.noteon_velocity;
-        let note = (param.center_note >> 8) as u8;
+        let note = (param.center_note >> 9) as u8;
 
         // MIDI出力の作成
         let midi_out_conn = if let Some(midi_out_conn_ref) = &self.midi_out_conn {
@@ -1401,13 +1401,13 @@ fn apply_source_parameter(
             .write_register(ram, DSP_ADDRESS_SRN_NOTEON_VELOCITY, param.noteon_velocity);
         spc.dsp.write_register(
             ram,
-            DSP_ADDRESS_SRN_CENTER_NOTE,
-            (param.center_note >> 8) as u8,
+            DSP_ADDRESS_SRN_CENTER_NOTE_HIGH,
+            ((param.center_note >> 8) & 0xFF) as u8,
         );
         spc.dsp.write_register(
             ram,
-            DSP_ADDRESS_SRN_CENTER_NOTE_FRACTION,
-            (param.center_note & 0xFF) as u8,
+            DSP_ADDRESS_SRN_CENTER_NOTE_LOW,
+            ((param.center_note >> 0) & 0xFF) as u8,
         );
         spc.dsp
             .write_register(ram, DSP_ADDRESS_SRN_FIXED_VOLUME, param.fixed_volume);

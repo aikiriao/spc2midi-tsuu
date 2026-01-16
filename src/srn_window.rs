@@ -47,8 +47,8 @@ impl SPC2MIDI2Window for SRNWindow {
         let srn_no = self.srn_no;
         let params = self.source_parameter.read().unwrap();
         let param = params.get(&self.srn_no).unwrap();
-        let center_note_int = (param.center_note >> 8) as u8;
-        let center_note_fraction = (param.center_note & 0xFF) as f32 / 256.0;
+        let center_note_int = (param.center_note >> 9) as u8;
+        let center_note_fraction = (param.center_note & 0x1FF) as f32 / 512.0;
         let parameter_controller = column![
             row![checkbox(param.mute)
                 .label("Mute")
@@ -75,9 +75,9 @@ impl SPC2MIDI2Window for SRNWindow {
                 number_input(&center_note_fraction, 0.0..=1.0, move |fraction| {
                     Message::CenterNoteFractionChanged(srn_no, fraction)
                 },)
-                .step(1.0 / 256.0),
+                .step(1.0 / 512.0),
                 {
-                    let note = param.center_note as f32 / 256.0;
+                    let note = param.center_note as f32 / 512.0;
                     text(format!("{:8.2}Hz", 440.0 * 2.0.pow((note - 69.0) / 12.0)))
                 },
                 button("Reset").on_press(Message::SRNNoteEstimationClicked(self.srn_no,)),
