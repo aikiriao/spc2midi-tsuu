@@ -477,7 +477,7 @@ fn draw_spectrum(frame: &mut Frame, bounds: &Rectangle, spec: &[f32], db_range: 
     let normalize = |val: f32, min: f32, max: f32| -> f32 { (val - min) / (max - min) };
     let compute_x = move |s: usize| -> f32 {
         center_left.x
-            + bounds.width * normalize((s as f32).log10(), 0.0, ((spec.len() - 1) as f32).log10())
+            + bounds.width * normalize((s as f32).log10(), 0.0, ((spec.len() - 1) as f32).log10()) // 横軸が対数軸なので1オリジン = log(1) = 0
     };
     let compute_y = move |p: f32| -> f32 {
         HEIGHT_OFFSET + bounds.height * (1.0 - normalize(p, db_range.0, db_range.1))
@@ -494,7 +494,7 @@ fn draw_spectrum(frame: &mut Frame, bounds: &Rectangle, spec: &[f32], db_range: 
 
     // 描画パスを生成
     let path = Path::new(|b| {
-        b.move_to(Point::new(center_left.x, compute_y(spec[0])));
+        b.move_to(Point::new(center_left.x, compute_y(spec[1]))); // 横軸が対数軸なので1オリジン
         for i in 1..num_points_to_draw {
             b.line_to(Point::new(
                 compute_x((i as f32 * sample_stride).round() as usize),
