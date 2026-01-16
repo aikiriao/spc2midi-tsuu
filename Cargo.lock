@@ -3900,7 +3900,7 @@ dependencies = [
 
 [[package]]
 name = "spc2midi-tsuu"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "cpal 0.17.1",
  "czt",
@@ -3921,7 +3921,7 @@ dependencies = [
 [[package]]
 name = "spc700"
 version = "0.1.0"
-source = "git+https://github.com/aikiriao/spc700.git#b3256183e86b4622652dabb911eb3facc54a568f"
+source = "git+https://github.com/aikiriao/spc700.git#f4a2e60c011ccc5eac10e0aa49a3796dd239e28e"
 dependencies = [
  "cpal 0.16.0",
  "fixed-resample",
