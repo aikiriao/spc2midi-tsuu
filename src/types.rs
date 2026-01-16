@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
-use std::any::Any;
 use crate::program::*;
 use crate::Message;
 use iced::Element;
+use serde::{Deserialize, Serialize};
+use std::any::Any;
 
 /// デフォルトのMIDIファイル出力時間(sec)
 pub const DEFAULT_OUTPUT_DURATION_MSEC: u64 = 60 * 1000;
@@ -95,7 +95,6 @@ pub struct Indicator {
     pub formatter: fn(f32) -> String,
 }
 
-
 pub trait SPC2MIDI2Window: AsAny {
     fn title(&self) -> String;
     fn view(&self) -> Element<'_, Message>;
@@ -136,4 +135,9 @@ impl PlaybackStatus {
             volume: [[0, 0]; 8],
         }
     }
+}
+
+/// 小数点を含むノート番号を周波数に変換
+pub fn note_to_frequency(note: f32) -> f32 {
+    440.0 * 2.0f32.powf((note - 69.0) / 12.0)
 }

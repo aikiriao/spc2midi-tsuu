@@ -69,7 +69,7 @@ impl SPC2MIDI2Window for SRNWindow {
                 text("Center Note"),
                 number_input(&center_note_int, 0..=127, move |note| {
                     Message::CenterNoteIntChanged(srn_no, note)
-                },)
+                })
                 .step(1),
                 button("↓").on_press(Message::SRNCenterNoteOctaveDownClicked(self.srn_no)),
                 button("↑").on_press(Message::SRNCenterNoteOctaveUpClicked(self.srn_no)),
@@ -80,7 +80,7 @@ impl SPC2MIDI2Window for SRNWindow {
                 .step(1.0 / 512.0),
                 {
                     let note = param.center_note as f32 / 512.0;
-                    text(format!("{:8.2}Hz", 440.0 * 2.0.pow((note - 69.0) / 12.0))).width(90)
+                    text(format!("{:8.2}Hz", note_to_frequency(note))).width(90)
                 },
                 button("Reset").on_press(Message::SRNNoteEstimationClicked(self.srn_no)),
             ]
@@ -286,6 +286,19 @@ impl canvas::Program<Message> for SRNWindow {
                             SPC_SAMPLING_RATE as f32,
                             6,
                         );
+                        // ノート番号に相当する周波数を描画
+                        let params = self.source_parameter.read().unwrap();
+                        let param = params.get(&self.srn_no).unwrap();
+                        draw_center_note_hz(
+                            frame,
+                            &Rectangle::new(
+                                Point::new(0.0, 0.0),
+                                Size::new(bounds.width, bounds.height),
+                            ),
+                            &log_spec,
+                            SPC_SAMPLING_RATE as f32,
+                            note_to_frequency(param.center_note as f32 / 512.0),
+                        );
                     }
                 }
             }
@@ -311,6 +324,9 @@ impl canvas::Program<Message> for SRNWindow {
                 }
                 _ => {}
             }
+        } else {
+            // キャンバス外のイベントの時は画面の再描画を依頼
+            self.cache.clear();
         }
         None
     }
@@ -413,7 +429,6 @@ fn draw_loop_point(
     num_samples: usize,
     loop_start_sample: usize,
 ) {
-    let line_color = Color::from_rgb8(200, 200, 200);
     let path = Path::new(|b| {
         b.move_to(Point::new(
             (bounds.width * loop_start_sample as f32) / num_samples as f32,
@@ -427,7 +442,7 @@ fn draw_loop_point(
     frame.stroke(
         &path,
         Stroke {
-            style: stroke::Style::Solid(line_color),
+            style: stroke::Style::Solid(Color::from_rgb8(200, 200, 200)),
             width: 1.5,
             ..Stroke::default()
         },
@@ -493,8 +508,6 @@ fn draw_spectrum(frame: &mut Frame, bounds: &Rectangle, spec: &[f32], db_range: 
         Color::from_rgb8(0, 0, 0),
     );
 
-    let line_color = Color::from_rgb8(0, 196, 0);
-
     // 描画パスを生成
     let path = Path::new(|b| {
         b.move_to(Point::new(center_left.x, compute_y(spec[1]))); // 横軸が対数軸なので1オリジン
@@ -509,7 +522,7 @@ fn draw_spectrum(frame: &mut Frame, bounds: &Rectangle, spec: &[f32], db_range: 
     frame.stroke(
         &path,
         Stroke {
-            style: stroke::Style::Solid(line_color),
+            style: stroke::Style::Solid(Color::from_rgb8(0, 196, 0)),
             width: 1.0,
             ..Stroke::default()
         },
@@ -556,4 +569,34 @@ fn draw_spectrum_peak_label(
             ..canvas::Text::default()
         });
     }
+}
+
+/// ノート番号に相当する周波数位置の描画
+fn draw_center_note_hz(
+    frame: &mut Frame,
+    bounds: &Rectangle,
+    spec: &[f32],
+    sampling_rate: f32,
+    center_note_hz: f32,
+) {
+    let center = bounds.center();
+    let center_left = Point::new(center.x - bounds.width / 2.0, center.y);
+
+    let normalize = |val: f32, min: f32, max: f32| -> f32 { (val - min) / (max - min) };
+    let bin = 2.0 * spec.len() as f32 * center_note_hz / sampling_rate;
+    let line_x = center_left.x
+        + bounds.width * normalize(bin.log10(), 0.0, ((spec.len() - 1) as f32).log10());
+
+    let path = Path::new(|b| {
+        b.move_to(Point::new(line_x, 0.0));
+        b.line_to(Point::new(line_x, bounds.height));
+    });
+    frame.stroke(
+        &path,
+        Stroke {
+            style: stroke::Style::Solid(Color::from_rgb8(200, 200, 200)),
+            width: 1.5,
+            ..Stroke::default()
+        },
+    );
 }
