@@ -172,6 +172,13 @@ impl Default for App {
         let device = host
             .default_output_device()
             .expect("No audio output device available");
+        let mut supported_configs_range = device
+            .supported_output_configs()
+            .expect("error while querying configs");
+        let stream_config = supported_configs_range
+            .next()
+            .expect("no supported config?!")
+            .with_max_sample_rate();
         // MIDIの初期接続設定
         let (midi_out_port_name, midi_out_conn) =
             if let Ok(midi_out) = MidiOutput::new(SPC2MIDI2_TITLE_STR) {
@@ -201,7 +208,7 @@ impl Default for App {
             source_parameter: Arc::new(RwLock::new(BTreeMap::new())),
             playback_status: Arc::new(RwLock::new(PlaybackStatus::new())),
             midi_output_configure: Arc::new(RwLock::new(MIDIOutputConfigure::new())),
-            stream_config: device.default_output_config().unwrap().into(),
+            stream_config: stream_config.into(),
             stream_device: device.clone(),
             stream: None,
             stream_played_samples: Arc::new(AtomicUsize::new(0)),
@@ -716,11 +723,15 @@ impl App {
                     .filter(|d| d.supports_output())
                     .find(|d| d.description().unwrap().to_string() == device_name)
                     .expect("Failed to create output stream device");
-                self.stream_config = self
+                let mut supported_configs_range = self
                     .stream_device
                     .clone()
-                    .default_output_config()
-                    .unwrap()
+                    .supported_output_configs()
+                    .expect("error while querying configs");
+                self.stream_config = supported_configs_range
+                    .next()
+                    .expect("no supported config?!")
+                    .with_max_sample_rate()
                     .into();
             }
             Message::MIDIOutputPortSelected(port_name) => {
