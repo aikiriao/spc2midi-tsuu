@@ -1681,4 +1681,48 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn configure_set_test() -> Result<(), Box<dyn std::error::Error>> {
+        let test_files = ["./tests/data/forest_album_230125_spc_supermidipak/02_orphee.spc"];
+
+        macro_rules! test_config_field(
+            ($app:expr, $field:tt, $expect:expr) => {
+                {
+                    let config = $app.midi_output_configure.clone();
+                    let config = config.read().unwrap();
+                    assert_eq!(config.$field, $expect);
+                }
+            }
+        );
+
+        for file in test_files {
+            let mut app = App::default();
+            let data = std::fs::read(&file)?;
+            let _ = app.update(Message::FileOpened(Ok((
+                file.into(),
+                LoadedFile::SPCFile(data),
+            ))));
+
+            // 意図した値が設定されているか確認
+            let _ = app.update(Message::MIDIOutputBpmChanged(32.0));
+            test_config_field!(app, beats_per_minute, 32.0);
+            let _ = app.update(Message::MIDIOutputBpmChanged(240.0));
+            test_config_field!(app, beats_per_minute, 240.0);
+            let _ = app.update(Message::MIDIOutputTicksPerQuarterChanged(24));
+            test_config_field!(app, ticks_per_quarter, 24);
+            let _ = app.update(Message::MIDIOutputTicksPerQuarterChanged(960));
+            test_config_field!(app, ticks_per_quarter, 960);
+            let _ = app.update(Message::MIDIOutputUpdatePeriodChanged(0));
+            test_config_field!(app, playback_parameter_update_period, 0);
+            let _ = app.update(Message::MIDIOutputUpdatePeriodChanged(255));
+            test_config_field!(app, playback_parameter_update_period, 255);
+            let _ = app.update(Message::MIDIOutputDurationChanged(0));
+            test_config_field!(app, output_duration_msec, 0);
+            let _ = app.update(Message::MIDIOutputDurationChanged(u64::MAX));
+            test_config_field!(app, output_duration_msec, u64::MAX);
+        }
+
+        Ok(())
+    }
 }
