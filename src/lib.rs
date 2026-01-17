@@ -171,14 +171,26 @@ impl Default for App {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
-            .expect("no output device available");
-        let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).expect("no MIDI output port available");
-        let midi_out_ports = midi_out.ports();
-        let midi_out_port_name = if midi_out_ports.len() > 0 {
-            Some(midi_out.port_name(&midi_out_ports[0]).unwrap())
-        } else {
-            None
-        };
+            .expect("No audio output device available");
+        // MIDIの初期接続設定
+        let (midi_out_port_name, midi_out_conn) =
+            if let Ok(midi_out) = MidiOutput::new(SPC2MIDI2_TITLE_STR) {
+                let midi_out_ports = midi_out.ports();
+                if midi_out_ports.len() > 0 {
+                    let default_midi_port_name = &midi_out_ports[0];
+                    let port_name = Some(midi_out.port_name(default_midi_port_name).unwrap());
+                    let midi_out_conn =
+                        match midi_out.connect(default_midi_port_name, SPC2MIDI2_TITLE_STR) {
+                            Ok(conn) => Some(Arc::new(Mutex::new(conn))),
+                            Err(_) => None,
+                        };
+                    (port_name, midi_out_conn)
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
         Self {
             theme: iced::Theme::Dark,
             main_window_id: window::Id::unique(),
@@ -194,14 +206,7 @@ impl Default for App {
             stream: None,
             stream_played_samples: Arc::new(AtomicUsize::new(0)),
             stream_is_playing: Arc::new(AtomicBool::new(false)),
-            midi_out_conn: if midi_out_ports.len() > 0 {
-                match midi_out.connect(&midi_out_ports[0], SPC2MIDI2_TITLE_STR) {
-                    Ok(conn) => Some(Arc::new(Mutex::new(conn))),
-                    Err(_) => None,
-                }
-            } else {
-                None
-            },
+            midi_out_conn: midi_out_conn,
             pcm_spc: None,
             midi_spc: None,
             pcm_spc_mute: Arc::new(AtomicBool::new(false)),
