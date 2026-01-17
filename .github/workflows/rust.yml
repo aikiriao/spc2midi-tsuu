@@ -33,7 +33,6 @@ jobs:
         cargo build --verbose
         cargo build --release --verbose
     - name: Run tests
-      if: runner.os != 'Linux'
       run: cargo test --verbose
     - name: Upload artifacts on Windows
       if: runner.os == 'Windows'

@@ -134,8 +134,8 @@ pub struct App {
     source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     playback_status: Arc<RwLock<PlaybackStatus>>,
     midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
-    stream_device: Device,
-    stream_config: StreamConfig,
+    stream_device: Option<Device>,
+    stream_config: Option<StreamConfig>,
     stream: Option<Stream>,
     stream_played_samples: Arc<AtomicUsize>,
     stream_is_playing: Arc<AtomicBool>,
@@ -168,17 +168,17 @@ pub enum LoadedFile {
 
 impl Default for App {
     fn default() -> Self {
+        // 出力オーディオデバイスの初期設定
         let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .expect("No audio output device available");
-        let mut supported_configs_range = device
-            .supported_output_configs()
-            .expect("error while querying configs");
-        let stream_config = supported_configs_range
-            .next()
-            .expect("no supported config?!")
-            .with_max_sample_rate();
+        let (device, stream_config) = if let Some(device) = host.default_output_device() {
+            if let Ok(config) = device.default_output_config() {
+                (Some(device), Some(Into::<StreamConfig>::into(config)))
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
         // MIDIの初期接続設定
         let (midi_out_port_name, midi_out_conn) =
             if let Ok(midi_out) = MidiOutput::new(SPC2MIDI2_TITLE_STR) {
@@ -208,7 +208,7 @@ impl Default for App {
             source_parameter: Arc::new(RwLock::new(BTreeMap::new())),
             playback_status: Arc::new(RwLock::new(PlaybackStatus::new())),
             midi_output_configure: Arc::new(RwLock::new(MIDIOutputConfigure::new())),
-            stream_config: stream_config.into(),
+            stream_config: stream_config,
             stream_device: device.clone(),
             stream: None,
             stream_played_samples: Arc::new(AtomicUsize::new(0)),
@@ -221,12 +221,16 @@ impl Default for App {
             midi_preview: Arc::new(AtomicBool::new(true)),
             preview_loop: Arc::new(AtomicBool::new(false)),
             midi_channel_mute: Arc::new(RwLock::new([false; 8])),
-            audio_out_device_name: Arc::new(RwLock::new(Some(
-                device
-                    .description()
-                    .expect("Failed to get device name")
-                    .to_string(),
-            ))),
+            audio_out_device_name: Arc::new(RwLock::new(if let Some(device) = device {
+                Some(
+                    device
+                        .description()
+                        .expect("Failed to get device name")
+                        .to_string(),
+                )
+            } else {
+                None
+            })),
             midi_out_port_name: Arc::new(RwLock::new(midi_out_port_name)),
         }
     }
@@ -719,20 +723,21 @@ impl App {
                 let devices = cpal::default_host()
                     .devices()
                     .expect("Failed to get devices");
-                self.stream_device = devices
+                if let Some(device) = devices
                     .filter(|d| d.supports_output())
                     .find(|d| d.description().unwrap().to_string() == device_name)
-                    .expect("Failed to create output stream device");
-                let mut supported_configs_range = self
-                    .stream_device
-                    .clone()
-                    .supported_output_configs()
-                    .expect("error while querying configs");
-                self.stream_config = supported_configs_range
-                    .next()
-                    .expect("no supported config?!")
-                    .with_max_sample_rate()
-                    .into();
+                {
+                    if let Ok(config) = device.default_output_config() {
+                        self.stream_device = Some(device);
+                        self.stream_config = Some(config.into());
+                    } else {
+                        self.stream_device = None;
+                        self.stream_config = None;
+                    }
+                } else {
+                    self.stream_device = None;
+                    self.stream_config = None;
+                }
             }
             Message::MIDIOutputPortSelected(port_name) => {
                 let mut midi_out_port_name = self.midi_out_port_name.write().unwrap();
@@ -848,8 +853,8 @@ impl App {
                     let main_win: &mut MainWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let played_samples = self.stream_played_samples.load(Ordering::Relaxed);
-                    main_win.playback_time_sec =
-                        played_samples as f32 / self.stream_config.sample_rate as f32;
+                    main_win.playback_time_sec = played_samples as f32
+                        / self.stream_config.as_ref().unwrap().sample_rate as f32;
                     for ch in 0..8 {
                         main_win.expression_indicator[ch].value = status.envelope[ch] as f32;
                         main_win.pitch_indicator[ch].value = if status.pitch[ch] > 0 {
@@ -1101,18 +1106,24 @@ impl App {
                 return Ok(());
             };
 
+        // オーディオデバイスとMIDI出力ポートの存在確認
+        if self.stream_device.is_none() || self.stream_config.is_none() {
+            return Err(PlayStreamError::DeviceNotAvailable);
+        }
+        let stream_device = self.stream_device.clone().unwrap();
+        let stream_config = self.stream_config.clone().unwrap();
+
         let midi_out_conn = if let Some(midi_out_conn_ref) = &self.midi_out_conn {
             midi_out_conn_ref.clone()
         } else {
-            // TODO: エラーにした方がよい
-            return Ok(());
+            return Err(PlayStreamError::DeviceNotAvailable);
         };
 
         // リサンプラ初期化 32k -> デバイスの出力レート変換となるように
         let (mut prod, mut cons) = fixed_resample::resampling_channel::<f32, NUM_CHANNELS>(
             NonZero::new(NUM_CHANNELS).unwrap(),
             SPC_SAMPLING_RATE,
-            self.stream_config.sample_rate,
+            stream_config.sample_rate,
             Default::default(),
         );
 
@@ -1138,8 +1149,8 @@ impl App {
         // 再生ストリーム作成
         let mut cycle_count = 0;
         let mut pcm_buffer = vec![0.0f32; BUFFER_SIZE * NUM_CHANNELS];
-        let stream = match self.stream_device.build_output_stream(
-            &self.stream_config,
+        let stream = match stream_device.build_output_stream(
+            &stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let mut progress = played_samples.load(Ordering::Relaxed);
                 // SPCをロックして獲得
@@ -1225,17 +1236,24 @@ impl App {
             return Ok(());
         };
 
-        let num_channels = self.stream_config.channels as usize;
+        // オーディオデバイスの存在確認
+        if self.stream_device.is_none() || self.stream_config.is_none() {
+            return Err(PlayStreamError::DeviceNotAvailable);
+        }
+        let stream_device = self.stream_device.clone().unwrap();
+        let stream_config = self.stream_config.clone().unwrap();
+
+        let num_channels = stream_config.channels as usize;
         let is_playing = self.stream_is_playing.clone();
         let loop_start_sample = f64::round(
-            (source.loop_start_sample * self.stream_config.sample_rate as usize) as f64
+            (source.loop_start_sample * stream_config.sample_rate as usize) as f64
                 / SPC_SAMPLING_RATE as f64,
         ) as usize;
 
         // 出力先デバイスのレートに合わせてレート変換
         let resampled_pcm = convert(
             SPC_SAMPLING_RATE,
-            self.stream_config.sample_rate,
+            stream_config.sample_rate,
             1,
             ConverterType::SincBestQuality,
             &source.signal,
@@ -1260,8 +1278,8 @@ impl App {
         let mut progress = 0;
 
         // 再生ストリーム作成
-        let stream = match self.stream_device.build_output_stream(
-            &self.stream_config,
+        let stream = match stream_device.build_output_stream(
+            &stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 // 一旦バッファを無音で埋める
                 buffer.fill(0.0);
