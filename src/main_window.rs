@@ -188,7 +188,7 @@ impl SPC2MIDI2Window for MainWindow {
                     text(format!(
                         "{} Note:{} Velocity:{}",
                         param.program,
-                        param.center_note >> 8,
+                        param.center_note >> 9,
                         param.noteon_velocity,
                     ))
                     .color(if param.mute {
