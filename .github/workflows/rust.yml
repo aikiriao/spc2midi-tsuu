@@ -28,13 +28,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install libgtk-3-dev libasound2-dev
-        sudo apt-get install -y pulseaudio
-    - name: Start PulseAudio and create a null sink
-      if: runner.os == 'Linux'
-      run: |
-        pulseaudio --start -D
-        pactl load-module module-null-sink sink_name=virtual_sink
-        pactl set-default-sink virtual_sink
+        sudo modprobe snd-aloop
     - name: Build
       run: |
         cargo build --verbose
