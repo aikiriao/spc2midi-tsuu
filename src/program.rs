@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 
 #[repr(u8)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Program {
     // PIANO
     AcousticGrand = 0,

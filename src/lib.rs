@@ -1606,4 +1606,79 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn parameter_set_test() -> Result<(), Box<dyn std::error::Error>> {
+        let test_files = ["./tests/data/forest_album_230125_spc_supermidipak/02_orphee.spc"];
+
+        macro_rules! test_param_field(
+            ($app:expr, $srn_no:expr, $field:tt, $expect:expr) => {
+                {
+                    let params = $app.source_parameter.clone();
+                    let params = params.read().unwrap();
+                    let param = params.get(&$srn_no).unwrap();
+                    assert_eq!(param.$field, $expect);
+                }
+            }
+        );
+
+        for file in test_files {
+            let mut app = App::default();
+            let data = std::fs::read(&file)?;
+            let _ = app.update(Message::FileOpened(Ok((
+                file.into(),
+                LoadedFile::SPCFile(data),
+            ))));
+
+            // SRN = 0に対してパラメータ編集し、意図した値が設定されているか確認
+            let _ = app.update(Message::SRNMuteFlagToggled(0, true));
+            test_param_field!(app, 0, mute, true);
+            let _ = app.update(Message::SRNMuteFlagToggled(0, false));
+            test_param_field!(app, 0, mute, false);
+            let _ = app.update(Message::ProgramSelected(0, Program::BrightAcoustic));
+            test_param_field!(app, 0, program, Program::BrightAcoustic);
+            let _ = app.update(Message::CenterNoteIntChanged(0, 0));
+            let _ = app.update(Message::CenterNoteFractionChanged(0, 0.0));
+            test_param_field!(app, 0, center_note, 0);
+            let _ = app.update(Message::CenterNoteIntChanged(0, 127));
+            let _ = app.update(Message::CenterNoteFractionChanged(0, 1.0));
+            test_param_field!(app, 0, center_note, 0xFFFF);
+            let _ = app.update(Message::NoteOnVelocityChanged(0, 1));
+            test_param_field!(app, 0, noteon_velocity, 1);
+            let _ = app.update(Message::PitchBendWidthChanged(0, 0));
+            test_param_field!(app, 0, pitch_bend_width, 0);
+            let _ = app.update(Message::PitchBendWidthChanged(0, 48));
+            test_param_field!(app, 0, pitch_bend_width, 48);
+            let _ = app.update(Message::EnablePitchBendFlagToggled(0, true));
+            test_param_field!(app, 0, enable_pitch_bend, true);
+            let _ = app.update(Message::EnablePitchBendFlagToggled(0, false));
+            test_param_field!(app, 0, enable_pitch_bend, false);
+            let _ = app.update(Message::AutoPanFlagToggled(0, true));
+            test_param_field!(app, 0, auto_pan, true);
+            let _ = app.update(Message::AutoPanFlagToggled(0, false));
+            test_param_field!(app, 0, auto_pan, false);
+            let _ = app.update(Message::FixedPanChanged(0, 0));
+            test_param_field!(app, 0, fixed_pan, 0);
+            let _ = app.update(Message::FixedPanChanged(0, 127));
+            test_param_field!(app, 0, fixed_pan, 127);
+            let _ = app.update(Message::AutoVolumeFlagToggled(0, true));
+            test_param_field!(app, 0, auto_volume, true);
+            let _ = app.update(Message::AutoVolumeFlagToggled(0, false));
+            test_param_field!(app, 0, auto_volume, false);
+            let _ = app.update(Message::FixedVolumeChanged(0, 0));
+            test_param_field!(app, 0, fixed_volume, 0);
+            let _ = app.update(Message::FixedVolumeChanged(0, 127));
+            test_param_field!(app, 0, fixed_volume, 127);
+            let _ = app.update(Message::EnvelopeAsExpressionFlagToggled(0, true));
+            test_param_field!(app, 0, envelope_as_expression, true);
+            let _ = app.update(Message::EnvelopeAsExpressionFlagToggled(0, false));
+            test_param_field!(app, 0, envelope_as_expression, false);
+            let _ = app.update(Message::EchoAsEffect1FlagToggled(0, true));
+            test_param_field!(app, 0, echo_as_effect1, true);
+            let _ = app.update(Message::EchoAsEffect1FlagToggled(0, false));
+            test_param_field!(app, 0, echo_as_effect1, false);
+        }
+
+        Ok(())
+    }
 }
