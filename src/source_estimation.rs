@@ -222,13 +222,14 @@ pub fn estimate_bpm(signal: &Vec<f32>) -> f32 {
         .collect();
 
     // 候補ラグ内でのピーク
-    let max = auto_corr[MIN_LAG..=MAX_LAG]
+    let max_lag = MAX_LAG.min(auto_corr.len() - 1);
+    let max = auto_corr[MIN_LAG..=max_lag]
         .iter()
         .fold(0.0 / 0.0, |m, v| v.max(m));
 
     // ピーク値から候補ラグを列挙
     let mut peak_lags = vec![];
-    for i in MIN_LAG..=MAX_LAG {
+    for i in MIN_LAG..=max_lag {
         if auto_corr[i] >= BPM_PEAK_THRESHOLD * max {
             peak_lags.push(i);
         }

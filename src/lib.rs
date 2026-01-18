@@ -122,6 +122,8 @@ pub enum Message {
     MIDIOutputDurationChanged(u64),
     MuteChannel(u8, bool),
     SoloChannel(u8),
+    ReceivedBpmAnalyzeRequest,
+    ReceivedSRNReanalyzeRequest,
     Tick,
 }
 
@@ -850,6 +852,50 @@ impl App {
                 }
                 // もはや全チャンネルミュートではないのでフラグを落とす
                 self.midi_spc_mute.clone().store(false, Ordering::Relaxed);
+            }
+            Message::ReceivedBpmAnalyzeRequest => {
+                if let Some(spc_file) = &self.spc_file {
+                    let mut config = self.midi_output_configure.write().unwrap();
+                    let mut spc: Box<spc700::spc::SPC<spc700::sdsp::SDSP>> = Box::new(SPC::new(
+                        &spc_file.header.spc_register,
+                        &spc_file.ram,
+                        &spc_file.dsp_register,
+                    ));
+                    let analyze_duration_64khz_ticks = config.output_duration_msec * 64;
+                    let mut cycle_count = 0;
+                    let mut tick64khz_count = 0;
+                    let mut signal = vec![];
+                    while tick64khz_count < analyze_duration_64khz_ticks {
+                        cycle_count += spc.execute_step() as u32;
+                        if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
+                            if let Some(pcm) = spc.clock_tick_64k_hz() {
+                                signal.push(
+                                    PCM_NORMALIZE_CONST * 0.5 * (pcm[0] as f32 + pcm[1] as f32),
+                                );
+                            }
+                            cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                            tick64khz_count += 1;
+                        }
+                    }
+                    // 小数点以下は0.25に丸め込む
+                    let estimated_bpm = estimate_bpm(&signal);
+                    config.beats_per_minute = f32::round(estimated_bpm * 4.0) / 4.0;
+                }
+            }
+            Message::ReceivedSRNReanalyzeRequest => {
+                let output_duration = {
+                    let config = self.midi_output_configure.read().unwrap();
+                    (config.output_duration_msec as f32 / 1000.0).round() as u32
+                };
+                if let Some(spc_file) = &self.spc_file {
+                    let spc_file = spc_file.clone();
+                    self.analyze_sources(
+                        output_duration,
+                        &spc_file.header.spc_register,
+                        &spc_file.ram,
+                        &spc_file.dsp_register,
+                    );
+                }
             }
             Message::Tick => {
                 // 再生情報取得

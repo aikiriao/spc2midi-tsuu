@@ -2,7 +2,7 @@ use crate::types::*;
 use crate::Message;
 use crate::SPC2MIDI2_TITLE_STR;
 use cpal::traits::{DeviceTrait, HostTrait};
-use iced::widget::{column, combo_box, row, text};
+use iced::widget::{column, combo_box, row, text, button};
 use iced::{alignment, Element, Length};
 use iced_aw::number_input;
 use midir::MidiOutput;
@@ -37,6 +37,7 @@ impl SPC2MIDI2Window for PreferenceWindow {
                     move |bpm| { Message::MIDIOutputBpmChanged(bpm) },
                 )
                 .step(0.25),
+                button("Re-estimate").on_press(Message::ReceivedBpmAnalyzeRequest),
             ]
             .spacing(10)
             .padding(10)
@@ -76,6 +77,7 @@ impl SPC2MIDI2Window for PreferenceWindow {
                     move |duration| { Message::MIDIOutputDurationChanged(duration) },
                 )
                 .step(1),
+                button("Re-analyze SRN").on_press(Message::ReceivedSRNReanalyzeRequest),
             ]
             .spacing(10)
             .padding(10)
