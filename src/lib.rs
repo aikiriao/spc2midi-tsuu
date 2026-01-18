@@ -1607,10 +1607,10 @@ mod tests {
 
         for file in test_files {
             let mut app = App::default();
-            let data = std::fs::read(&file)?;
+            let data = Box::new(std::fs::read(&file)?);
             let _ = app.update(Message::FileOpened(Ok((
                 file.into(),
-                LoadedFile::SPCFile(data),
+                LoadedFile::SPCFile(*data),
             ))));
 
             assert!(app.spc_file.is_some());
@@ -1637,10 +1637,10 @@ mod tests {
 
         for file in test_files {
             let mut app = App::default();
-            let data = std::fs::read(&file)?;
+            let data = Box::new(std::fs::read(&file)?);
             let _ = app.update(Message::FileOpened(Ok((
                 file.into(),
-                LoadedFile::SPCFile(data),
+                LoadedFile::SPCFile(*data),
             ))));
 
             // SRN = 0に対してパラメータ編集し、意図した値が設定されているか確認
@@ -1711,10 +1711,10 @@ mod tests {
 
         for file in test_files {
             let mut app = App::default();
-            let data = std::fs::read(&file)?;
+            let data = Box::new(std::fs::read(&file)?);
             let _ = app.update(Message::FileOpened(Ok((
                 file.into(),
-                LoadedFile::SPCFile(data),
+                LoadedFile::SPCFile(*data),
             ))));
 
             // 意図した値が設定されているか確認
