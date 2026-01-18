@@ -3900,7 +3900,7 @@ dependencies = [
 
 [[package]]
 name = "spc2midi-tsuu"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "cpal 0.17.1",
  "czt",
@@ -3921,14 +3921,12 @@ dependencies = [
 [[package]]
 name = "spc700"
 version = "0.1.0"
-source = "git+https://github.com/aikiriao/spc700.git#f4a2e60c011ccc5eac10e0aa49a3796dd239e28e"
+source = "git+https://github.com/aikiriao/spc700.git#93ad3e095a374084f6dc2a080b5759a5e56c439e"
 dependencies = [
  "cpal 0.16.0",
  "fixed-resample",
  "libm",
  "log",
- "midir",
- "rimd",
 ]
 
 [[package]]
@@ -5379,9 +5377,9 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.14"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd8f3f50b848df28f887acb68e41201b5aea6bc8a8dacc00fb40635ff9a72fea"
+checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"
 
 [[package]]
 name = "zune-core"

@@ -14,6 +14,7 @@ use crate::types::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, PauseStreamError, PlayStreamError, Stream, StreamConfig};
 use fixed_resample::ReadStatus;
+use iced::keyboard::key::Named;
 use iced::widget::{center, space};
 use iced::{event, window, Subscription, Task, Theme};
 use midir::{MidiOutput, MidiOutputConnection};
@@ -442,6 +443,18 @@ impl App {
                     if let iced::window::Event::FileDropped(path) = event {
                         return Task::perform(load_file(path), Message::FileOpened);
                     }
+                }
+                iced::event::Event::Keyboard(iced::keyboard::Event::KeyReleased {
+                    key: iced::keyboard::Key::Named(Named::F4),
+                    ..
+                }) => {
+                    return Task::perform(async {}, move |_| Message::ReceivedPlayStopRequest);
+                }
+                iced::event::Event::Keyboard(iced::keyboard::Event::KeyReleased {
+                    key: iced::keyboard::Key::Named(Named::F5),
+                    ..
+                }) => {
+                    return Task::perform(async {}, move |_| Message::ReceivedPlayStartRequest);
                 }
                 _ => {}
             },

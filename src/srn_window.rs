@@ -2,6 +2,7 @@ use crate::program::*;
 use crate::types::*;
 use crate::Message;
 use crate::SPC_SAMPLING_RATE;
+use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{button, checkbox, column, combo_box, row, text};
 use iced::{
@@ -161,7 +162,7 @@ impl SPC2MIDI2Window for SRNWindow {
                 .label("Loop")
                 .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(flag)),
             checkbox(self.midi_preview.load(Ordering::Relaxed))
-                .label("MIDI Preview")
+                .label("MIDI Update Preview")
                 .on_toggle(|flag| Message::SRNMIDIPreviewFlagToggled(flag)),
         ];
 
@@ -313,6 +314,25 @@ impl canvas::Program<Message> for SRNWindow {
         bounds: Rectangle,
         cursor: mouse::Cursor,
     ) -> Option<iced_widget::Action<Message>> {
+        match event {
+            Event::Keyboard(iced::keyboard::Event::KeyReleased {
+                key: iced::keyboard::Key::Named(Named::F6),
+                ..
+            }) => {
+                return Some(iced_widget::Action::publish(
+                    Message::ReceivedSRNPlayStartRequest(self.srn_no),
+                ))
+            }
+            Event::Keyboard(iced::keyboard::Event::KeyReleased {
+                key: iced::keyboard::Key::Named(Named::F7),
+                ..
+            }) => {
+                return Some(iced_widget::Action::publish(
+                    Message::ReceivedMIDIPreviewRequest(self.srn_no),
+                ))
+            }
+            _ => {}
+        }
         if let Some(_) = cursor.position_in(bounds) {
             match event {
                 Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
