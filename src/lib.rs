@@ -888,7 +888,7 @@ impl App {
                     (config.output_duration_msec as f32 / 1000.0).round() as u32
                 };
                 if let Some(spc_file) = &self.spc_file {
-                    let spc_file = spc_file.clone();
+                    let spc_file = Box::new(spc_file.clone());
                     self.analyze_sources(
                         output_duration,
                         &spc_file.header.spc_register,
