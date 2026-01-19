@@ -272,7 +272,7 @@ impl SPC2MIDI2Window for MainWindow {
             checkbox(self.midi_spc_mute.clone().load(Ordering::Relaxed))
                 .label("MIDI Mute")
                 .on_toggle(|flag| Message::MIDIMuteFlagToggled(flag)),
-            text(format!("{:8.2} sec", self.playback_time_sec)),
+            text(format!("{:8.02} sec", self.playback_time_sec)).width(Length::Shrink),
         ]
         .spacing(10)
         .width(Length::Fill)
