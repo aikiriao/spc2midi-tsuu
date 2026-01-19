@@ -158,6 +158,7 @@ impl SPC2MIDI2Window for SRNWindow {
         ];
         let preview_controller = row![
             button("Play / Stop").on_press(Message::ReceivedSRNPlayStartRequest(self.srn_no)),
+            button("MIDI Preview").on_press(Message::ReceivedMIDIPreviewRequest(self.srn_no)),
             checkbox(self.preview_loop.load(Ordering::Relaxed))
                 .label("Loop")
                 .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(flag)),
