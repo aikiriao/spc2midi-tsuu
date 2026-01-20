@@ -76,7 +76,7 @@ impl SPC2MIDI2Window for PreferenceWindow {
                     1000..=(3600 * 1000),
                     move |duration| { Message::MIDIOutputDurationChanged(duration) },
                 )
-                .step(1),
+                .step(100),
                 button("Re-analyze SRN").on_press(Message::ReceivedSRNReanalyzeRequest),
             ]
             .spacing(10)
