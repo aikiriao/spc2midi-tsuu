@@ -156,6 +156,8 @@ pub struct App {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ExportInformation {
+    /// 出力ツール情報
+    tool_information: String,
     /// MIDI出力設定
     midi_output_configure: MIDIOutputConfigure,
     /// 音源パラメータ割当
@@ -1147,6 +1149,7 @@ impl App {
         let config = self.midi_output_configure.read().unwrap();
         let params = self.source_parameter.read().unwrap();
         json!(ExportInformation {
+            tool_information: format!("{} Ver.{}", SPC2MIDI2_TITLE_STR, env!("CARGO_PKG_VERSION")),
             midi_output_configure: config.clone(),
             source_parameter: params.clone(),
         })
