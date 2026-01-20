@@ -1059,7 +1059,7 @@ impl App {
                     center_note: f32::round(center_note * 512.0) as u16,
                     noteon_velocity: 100,
                     pitch_bend_width: 12,
-                    envelope_as_expression: !is_drum,
+                    envelope_as_expression: false,
                     auto_pan: true,
                     fixed_pan: 64,
                     auto_volume: true,
