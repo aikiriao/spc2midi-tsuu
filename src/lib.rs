@@ -222,7 +222,7 @@ impl Default for App {
             pcm_spc_mute: Arc::new(AtomicBool::new(false)),
             midi_spc_mute: Arc::new(AtomicBool::new(false)),
             midi_preview: Arc::new(AtomicBool::new(true)),
-            preview_loop: Arc::new(AtomicBool::new(false)),
+            preview_loop: Arc::new(AtomicBool::new(true)),
             midi_channel_mute: Arc::new(RwLock::new([false; 8])),
             audio_out_device_name: Arc::new(RwLock::new(if let Some(device) = device {
                 Some(
