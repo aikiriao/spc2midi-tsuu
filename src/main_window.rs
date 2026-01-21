@@ -25,6 +25,7 @@ pub struct MainWindow {
     midi_spc_mute: Arc<AtomicBool>,
     midi_channel_mute: Arc<RwLock<[bool; 8]>>,
     pub playback_time_sec: f32,
+    pub midi_bit_rate: f32,
     pub pitch_indicator: [Indicator; 8],
     pub expression_indicator: [Indicator; 8],
     pub volume_indicator: [[Indicator; 2]; 8],
@@ -50,6 +51,7 @@ impl MainWindow {
             midi_spc_mute: midi_spc_mute,
             midi_channel_mute: midi_channel_mute,
             playback_time_sec: 0.0f32,
+            midi_bit_rate: 0.0f32,
             expression_indicator: [Indicator::new(0.0, 0.0, 127.0, |value| format!("{:<3}", value));
                 8],
             pitch_indicator: [Indicator::new(0.0, -48.0, 48.0, |value| format!("{:+4.1}", value));
@@ -264,15 +266,25 @@ impl SPC2MIDI2Window for MainWindow {
             .collect();
 
         let preview_control = row![
-            button("Play / Pause").on_press(Message::ReceivedPlayStartRequest),
+            button("Play/Pause").on_press(Message::ReceivedPlayStartRequest),
             button("Stop").on_press(Message::ReceivedPlayStopRequest),
             checkbox(self.pcm_spc_mute.clone().load(Ordering::Relaxed))
-                .label("SPC Mute")
+                .label("SPC")
                 .on_toggle(|flag| Message::SPCMuteFlagToggled(flag)),
             checkbox(self.midi_spc_mute.clone().load(Ordering::Relaxed))
-                .label("MIDI Mute")
+                .label("MIDI")
                 .on_toggle(|flag| Message::MIDIMuteFlagToggled(flag)),
-            text(format!("{:8.02} sec", self.playback_time_sec)).width(Length::Shrink),
+            text(format!("{:8.02}sec", self.playback_time_sec))
+                .width(90)
+                .align_x(alignment::Alignment::End),
+            text(format!("{:8.02}kbps", self.midi_bit_rate / 1000.0))
+                .color(if self.midi_bit_rate > 31_500.0 {
+                    self.theme.palette().warning
+                } else {
+                    self.theme.palette().text
+                })
+                .width(90)
+                .align_x(alignment::Alignment::End),
         ]
         .spacing(10)
         .width(Length::Fill)

@@ -141,6 +141,7 @@ pub struct App {
     stream_config: Option<StreamConfig>,
     stream: Option<Stream>,
     stream_played_samples: Arc<AtomicUsize>,
+    midi_output_bytes: Arc<AtomicUsize>,
     stream_is_playing: Arc<AtomicBool>,
     midi_out_conn: Option<Arc<Mutex<MidiOutputConnection>>>,
     pcm_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::sdsp::SDSP>>>>>,
@@ -217,6 +218,7 @@ impl Default for App {
             stream_device: device.clone(),
             stream: None,
             stream_played_samples: Arc::new(AtomicUsize::new(0)),
+            midi_output_bytes: Arc::new(AtomicUsize::new(0)),
             stream_is_playing: Arc::new(AtomicBool::new(false)),
             midi_out_conn: midi_out_conn,
             pcm_spc: None,
@@ -370,8 +372,9 @@ impl App {
                                     &spc_file.ram,
                                     &spc_file.dsp_register,
                                 )))));
-                                // 再生サンプル数をリセット
+                                // 再生サンプル数・MIDI出力サイズをリセット
                                 self.stream_played_samples.store(0, Ordering::Relaxed);
+                                self.midi_output_bytes.store(0, Ordering::Relaxed);
                                 // ウィンドウタイトルに開いたファイル名を追記
                                 if let Some(window) = self.windows.get_mut(&self.main_window_id) {
                                     let main_window: &mut MainWindow =
@@ -510,6 +513,7 @@ impl App {
                 }
                 // Stopの場合は再生サンプル数をリセット
                 self.stream_played_samples.store(0, Ordering::Relaxed);
+                self.midi_output_bytes.store(0, Ordering::Relaxed);
             }
             Message::SPCMuteFlagToggled(flag) => {
                 // フラグ書き換え
@@ -914,8 +918,15 @@ impl App {
                     let main_win: &mut MainWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let played_samples = self.stream_played_samples.load(Ordering::Relaxed);
-                    main_win.playback_time_sec = played_samples as f32
+                    let midi_output_bytes = self.midi_output_bytes.load(Ordering::Relaxed);
+                    let playback_time = played_samples as f32
                         / self.stream_config.as_ref().unwrap().sample_rate as f32;
+                    main_win.playback_time_sec = playback_time;
+                    main_win.midi_bit_rate = if playback_time > 0.0 {
+                        (midi_output_bytes as f32 * 10.0) / playback_time // スタート・ストップビットの2bitを加えて1バイト当たり10bit送るとする
+                    } else {
+                        0.0
+                    };
                     for ch in 0..8 {
                         main_win.expression_indicator[ch].value = status.envelope[ch] as f32;
                         main_win.pitch_indicator[ch].value = if status.pitch[ch] > 0 {
@@ -1205,8 +1216,9 @@ impl App {
         // SPCにパラメータ適用
         self.apply_source_parameter();
 
-        // 再生済みサンプル数
+        // 再生済みサンプル数・MIDI出力サイズ
         let played_samples = self.stream_played_samples.clone();
+        let midi_output_bytes = self.midi_output_bytes.clone();
 
         // 再生ストリーム作成
         let mut cycle_count = 0;
@@ -1215,6 +1227,7 @@ impl App {
             &stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let mut progress = played_samples.load(Ordering::Relaxed);
+                let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
                 // SPCをロックして獲得
                 let mut spc = pcm_spc.lock().unwrap();
                 let mut midispc = midi_spc.lock().unwrap();
@@ -1247,6 +1260,7 @@ impl App {
                             for i in 0..msgs.num_messages {
                                 let msg = msgs.messages[i];
                                 conn_out.send(&msg.data[..msg.length]).unwrap();
+                                midi_bytes += msg.length;
                             }
                         }
                     }
@@ -1272,6 +1286,7 @@ impl App {
                 // 再生サンプル数増加
                 progress += frames;
                 played_samples.store(progress, Ordering::Relaxed);
+                midi_output_bytes.store(midi_bytes, Ordering::Relaxed);
             },
             |err| eprintln!("[{}] {err}", SPC2MIDI2_TITLE_STR),
             None,
