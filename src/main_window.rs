@@ -11,7 +11,7 @@ use iced_aw::menu::{self, Menu};
 use iced_aw::style::{menu_bar::primary, Status};
 use iced_aw::{menu_bar, menu_items};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug)]
@@ -23,7 +23,7 @@ pub struct MainWindow {
     playback_status: Arc<RwLock<PlaybackStatus>>,
     pcm_spc_mute: Arc<AtomicBool>,
     midi_spc_mute: Arc<AtomicBool>,
-    midi_channel_mute: Arc<RwLock<[bool; 8]>>,
+    channel_mute_flags: Arc<AtomicU8>,
     pub playback_time_sec: f32,
     pub midi_bit_rate: f32,
     pub pitch_indicator: [Indicator; 8],
@@ -39,7 +39,7 @@ impl MainWindow {
         playback_status: Arc<RwLock<PlaybackStatus>>,
         pcm_spc_mute: Arc<AtomicBool>,
         midi_spc_mute: Arc<AtomicBool>,
-        midi_channel_mute: Arc<RwLock<[bool; 8]>>,
+        channel_mute_flags: Arc<AtomicU8>,
     ) -> Self {
         Self {
             title: title.clone(),
@@ -49,7 +49,7 @@ impl MainWindow {
             playback_status: playback_status,
             pcm_spc_mute: pcm_spc_mute,
             midi_spc_mute: midi_spc_mute,
-            midi_channel_mute: midi_channel_mute,
+            channel_mute_flags: channel_mute_flags,
             playback_time_sec: 0.0f32,
             midi_bit_rate: 0.0f32,
             expression_indicator: [Indicator::new(0.0, 0.0, 127.0, |value| format!("{:<3}", value));
@@ -208,7 +208,7 @@ impl SPC2MIDI2Window for MainWindow {
             .collect();
 
         let status = self.playback_status.read().unwrap();
-        let midi_channel_mute = self.midi_channel_mute.read().unwrap();
+        let channel_mute_flags = self.channel_mute_flags.load(Ordering::Relaxed);
         let expression_indicator = self.expression_indicator;
         let pitch_indicator = self.pitch_indicator;
         let volume_indicator = self.volume_indicator;
@@ -216,7 +216,7 @@ impl SPC2MIDI2Window for MainWindow {
             .map(|ch| {
                 row![
                     text(format!("{}", ch)).width(10),
-                    checkbox(midi_channel_mute[ch])
+                    checkbox((channel_mute_flags >> ch) & 1 != 0)
                         .on_toggle(move |flag| Message::MuteChannel(ch as u8, flag))
                         .width(10),
                     button("S")

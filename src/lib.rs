@@ -31,7 +31,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::num::NonZero;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -150,7 +150,7 @@ pub struct App {
     midi_spc_mute: Arc<AtomicBool>,
     midi_preview: Arc<AtomicBool>,
     preview_loop: Arc<AtomicBool>,
-    midi_channel_mute: Arc<RwLock<[bool; 8]>>,
+    channel_mute_flags: Arc<AtomicU8>,
     audio_out_device_name: Arc<RwLock<Option<String>>>,
     midi_out_port_name: Arc<RwLock<Option<String>>>,
 }
@@ -227,7 +227,7 @@ impl Default for App {
             midi_spc_mute: Arc::new(AtomicBool::new(false)),
             midi_preview: Arc::new(AtomicBool::new(true)),
             preview_loop: Arc::new(AtomicBool::new(true)),
-            midi_channel_mute: Arc::new(RwLock::new([false; 8])),
+            channel_mute_flags: Arc::new(AtomicU8::new(0)),
             audio_out_device_name: Arc::new(RwLock::new(if let Some(device) = device {
                 Some(
                     device
@@ -282,7 +282,7 @@ impl App {
                     self.playback_status.clone(),
                     self.pcm_spc_mute.clone(),
                     self.midi_spc_mute.clone(),
-                    self.midi_channel_mute.clone(),
+                    self.channel_mute_flags.clone(),
                 );
                 self.main_window_id = id;
                 self.windows.insert(id, Box::new(window));
@@ -516,25 +516,32 @@ impl App {
                 self.midi_output_bytes.store(0, Ordering::Relaxed);
             }
             Message::SPCMuteFlagToggled(flag) => {
-                // フラグ書き換え
-                self.pcm_spc_mute.clone().store(flag, Ordering::Relaxed);
+                if let Some(pcm_spc_ref) = &self.pcm_spc {
+                    let pcm_spc = pcm_spc_ref.clone();
+                    let flags = self.channel_mute_flags.load(Ordering::Relaxed);
+                    let mut spc = pcm_spc.lock().unwrap();
+                    // 全チャンネルミュートorフラグを復帰
+                    spc.dsp.write_register(
+                        &[0u8],
+                        DSP_ADDRESS_CHANNEL_MUTE,
+                        if flag { 0xFF } else { flags },
+                    );
+                    // フラグ書き換え
+                    self.pcm_spc_mute.clone().store(flag, Ordering::Relaxed);
+                }
             }
             Message::MIDIMuteFlagToggled(flag) => {
                 if let Some(midi_spc_ref) = &self.midi_spc {
                     let midi_spc = midi_spc_ref.clone();
+                    let flags = self.channel_mute_flags.load(Ordering::Relaxed);
                     let mut spc = midi_spc.lock().unwrap();
-                    // 全チャンネルミュートを切り替え
+                    // 全チャンネルミュートorフラグを復帰
                     spc.dsp.write_register(
                         &[0u8],
-                        DSP_ADDRESS_MIDI_MUTE,
-                        if flag { 0xFF } else { 0 },
+                        DSP_ADDRESS_CHANNEL_MUTE,
+                        if flag { 0xFF } else { flags },
                     );
-                    // トグルスイッチの値を書き換え
-                    if let Ok(mut ch_mute) = self.midi_channel_mute.write() {
-                        for ch in 0..8 {
-                            ch_mute[ch as usize] = flag;
-                        }
-                    }
+                    // フラグ書き換え
                     self.midi_spc_mute.clone().store(flag, Ordering::Relaxed);
                 }
                 // ミュートの時は音を止める
@@ -803,61 +810,62 @@ impl App {
                 config.output_duration_msec = duration;
             }
             Message::MuteChannel(ch, flag) => {
-                if let Some(midi_spc_ref) = &self.midi_spc {
-                    let midi_spc = midi_spc_ref.clone();
-                    let mut spc = midi_spc.lock().unwrap();
-                    // 指定チャンネルをミュート
-                    let mut flags = spc.dsp.read_register(&[0u8], DSP_ADDRESS_MIDI_MUTE);
-                    flags = if flag {
+                if let (Some(pcm_spc_ref), Some(midi_spc_ref)) = (&self.pcm_spc, &self.midi_spc) {
+                    let (pcm_spc, midi_spc) = (pcm_spc_ref.clone(), midi_spc_ref.clone());
+                    let flags = self.channel_mute_flags.load(Ordering::Relaxed);
+                    let new_flags = if flag {
                         flags | (1 << ch)
                     } else {
                         flags & !(1 << ch)
                     };
-                    spc.dsp.write_register(&[0u8], DSP_ADDRESS_MIDI_MUTE, flags);
-                    let mut ch_flag = self.midi_channel_mute.write().unwrap();
-                    ch_flag[ch as usize] = flag;
-                }
-                if flag {
-                    // ミュートの場合は音を止める
-                    self.stop_midi_channel_sound(ch);
-                    // 全チャンネルミュートになった場合はミュートフラグを立てる
-                    let ch_flag = self.midi_channel_mute.read().unwrap();
-                    let mut all_ch_mute = true;
-                    for ch in 0..8 {
-                        if !ch_flag[ch] {
-                            all_ch_mute = false;
-                            break;
-                        }
+                    let midi_mute = self.midi_spc_mute.load(Ordering::Relaxed);
+                    let mut midi_spc = midi_spc.lock().unwrap();
+                    midi_spc.dsp.write_register(
+                        &[0u8],
+                        DSP_ADDRESS_CHANNEL_MUTE,
+                        if midi_mute { 0xFF } else { new_flags },
+                    );
+                    let pcm_mute = self.pcm_spc_mute.load(Ordering::Relaxed);
+                    let mut pcm_spc = pcm_spc.lock().unwrap();
+                    pcm_spc.dsp.write_register(
+                        &[0u8],
+                        DSP_ADDRESS_CHANNEL_MUTE,
+                        if pcm_mute { 0xFF } else { new_flags },
+                    );
+                    self.channel_mute_flags.store(new_flags, Ordering::Relaxed);
+                    if flag {
+                        // ミュートの場合は音を止める
+                        self.stop_midi_channel_sound(ch);
                     }
-                    if all_ch_mute {
-                        self.midi_spc_mute.clone().store(true, Ordering::Relaxed);
-                    }
-                } else {
-                    // もはや全チャンネルミュートではないのでフラグを落とす
-                    self.midi_spc_mute.clone().store(false, Ordering::Relaxed);
                 }
             }
             Message::SoloChannel(ch) => {
-                if let Some(midi_spc_ref) = &self.midi_spc {
-                    let midi_spc = midi_spc_ref.clone();
-                    let mut spc = midi_spc.lock().unwrap();
+                if let (Some(pcm_spc_ref), Some(midi_spc_ref)) = (&self.pcm_spc, &self.midi_spc) {
+                    let (pcm_spc, midi_spc) = (pcm_spc_ref.clone(), midi_spc_ref.clone());
                     // 指定チャンネル以外をミュート
-                    spc.dsp
-                        .write_register(&[0u8], DSP_ADDRESS_MIDI_MUTE, !(1 << ch));
-                    if let Ok(mut ch_mute) = self.midi_channel_mute.write() {
-                        for mute_ch in 0..8 {
-                            ch_mute[mute_ch as usize] = mute_ch != ch;
+                    let new_flags = !(1 << ch);
+                    let midi_mute = self.midi_spc_mute.load(Ordering::Relaxed);
+                    let mut midi_spc = midi_spc.lock().unwrap();
+                    midi_spc.dsp.write_register(
+                        &[0u8],
+                        DSP_ADDRESS_CHANNEL_MUTE,
+                        if midi_mute { 0xFF } else { new_flags },
+                    );
+                    let pcm_mute = self.pcm_spc_mute.load(Ordering::Relaxed);
+                    let mut pcm_spc = pcm_spc.lock().unwrap();
+                    pcm_spc.dsp.write_register(
+                        &[0u8],
+                        DSP_ADDRESS_CHANNEL_MUTE,
+                        if pcm_mute { 0xFF } else { new_flags },
+                    );
+                    self.channel_mute_flags.store(new_flags, Ordering::Relaxed);
+                    // ミュートの場合は音を止める
+                    for mute_ch in 0..8 {
+                        if mute_ch != ch {
+                            self.stop_midi_channel_sound(mute_ch);
                         }
                     }
                 }
-                // ミュートの場合は音を止める
-                for mute_ch in 0..8 {
-                    if mute_ch != ch {
-                        self.stop_midi_channel_sound(mute_ch);
-                    }
-                }
-                // もはや全チャンネルミュートではないのでフラグを落とす
-                self.midi_spc_mute.clone().store(false, Ordering::Relaxed);
             }
             Message::ReceivedBpmAnalyzeRequest => {
                 if let Some(spc_file) = &self.spc_file {
@@ -1201,16 +1209,22 @@ impl App {
         );
 
         // SPCのミュートフラグ取得・設定
-        let pcm_spc_mute = self.pcm_spc_mute.clone();
-        if let Ok(ch_mute) = self.midi_channel_mute.read() {
-            let mut flags = 0;
-            for ch in 0..8 {
-                if ch_mute[ch] {
-                    flags |= 1 << ch;
-                }
-            }
-            let mut spc = midi_spc.lock().unwrap();
-            spc.dsp.write_register(&[0u8], DSP_ADDRESS_MIDI_MUTE, flags);
+        {
+            let flags = self.channel_mute_flags.load(Ordering::Relaxed);
+            let pcm_mute = self.pcm_spc_mute.load(Ordering::Relaxed);
+            let midi_mute = self.midi_spc_mute.load(Ordering::Relaxed);
+            let mut pcm_spc = pcm_spc.lock().unwrap();
+            let mut midi_spc = midi_spc.lock().unwrap();
+            pcm_spc.dsp.write_register(
+                &[0u8],
+                DSP_ADDRESS_CHANNEL_MUTE,
+                if pcm_mute { 0xFF } else { flags },
+            );
+            midi_spc.dsp.write_register(
+                &[0u8],
+                DSP_ADDRESS_CHANNEL_MUTE,
+                if midi_mute { 0xFF } else { flags },
+            );
         }
 
         // SPCにパラメータ適用
@@ -1244,15 +1258,10 @@ impl App {
                         cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
                         // PCM出力
                         if let Some(pcm) = spc.clock_tick_64k_hz() {
-                            let fout = if !pcm_spc_mute.load(Ordering::Relaxed) {
-                                [
-                                    (pcm[0] as f32) * PCM_NORMALIZE_CONST,
-                                    (pcm[1] as f32) * PCM_NORMALIZE_CONST,
-                                ]
-                            } else {
-                                [0.0f32, 0.0f32]
-                            };
-                            prod.push_interleaved(&fout);
+                            prod.push_interleaved(&[
+                                (pcm[0] as f32) * PCM_NORMALIZE_CONST,
+                                (pcm[1] as f32) * PCM_NORMALIZE_CONST,
+                            ]);
                             nsamples = prod.available_frames();
                         }
                         // MIDI出力
