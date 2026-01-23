@@ -34,12 +34,15 @@ jobs:
         brew update
         brew install jq
     - name: Get crate version on *nix platforms
+      id: get_version_unix
       if: runner.os == 'Linux' || runner.os == 'macOS'
       run: |
         VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
         echo "crate_version=$VERSION" >> $GITHUB_OUTPUT
     - name: Get crate version on Windows
+      id: get_version_windows
       shell: pwsh
+      if: runner.os == 'Windows'
       run: |
         $meta = cargo metadata --no-deps --format-version 1 --manifest-path "$env:GITHUB_WORKSPACE\Cargo.toml" | ConvertFrom-Json
         $version = $meta.packages | Where-Object { $_.manifest_path -like "*\Cargo.toml" } | Select-Object -First 1 -ExpandProperty version
@@ -54,7 +57,7 @@ jobs:
       if: runner.os == 'Windows'
       uses: actions/upload-artifact@v4
       with:
-        name: spc2midi-tsuu_${{ matrix.os }}
+        name: spc2midi-tsuu_${{ steps.get_version_windows.outputs.crate_version }}_${{ matrix.os }}
         path: |
           target/release/spc2midi-tsuu.exe
         if-no-files-found: error
@@ -62,7 +65,7 @@ jobs:
       if: runner.os == 'Linux' || runner.os == 'macOS'
       uses: actions/upload-artifact@v4
       with:
-        name: spc2midi-tsuu_${{ matrix.os }}
+        name: spc2midi-tsuu_${{ steps.get_version_unix.outputs.crate_version }}_${{ matrix.os }}
         path: |
           target/release/spc2midi-tsuu
         if-no-files-found: error
