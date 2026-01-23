@@ -33,14 +33,18 @@ jobs:
       run: |
         brew update
         brew install jq
-    - name: Preparation on Windows
-      if: runner.os == 'Windows'
-      run: |
-        choco install jq
-    - name: Get crate version
+    - name: Get crate version on *nix platforms
+      if: runner.os == 'Linux' || runner.os == 'macOS'
       run: |
         VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
         echo "crate_version=$VERSION" >> $GITHUB_OUTPUT
+    - name: Get crate version on Windows
+      runs-on: windows-latest
+      shell: pwsh
+      run: |
+        $meta = cargo metadata --no-deps --format-version 1 --manifest-path "$env:GITHUB_WORKSPACE\Cargo.toml" | ConvertFrom-Json
+        $version = $meta.packages | Where-Object { $_.manifest_path -like "*\Cargo.toml" } | Select-Object -First 1 -ExpandProperty version
+        Add-Content -Path $env:GITHUB_OUTPUT -Value "crate_version=$version"
     - name: Build
       run: |
         cargo build --verbose
