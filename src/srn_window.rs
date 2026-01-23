@@ -182,8 +182,8 @@ impl SPC2MIDI2Window for SRNWindow {
                 tooltip::Position::Top,
             ),
             tooltip(
-                button("MIDI").on_press(Message::ReceivedMIDIPreviewRequest(self.srn_no)),
-                "MIDI Preview (F7)",
+                button("Preview MIDI").on_press(Message::ReceivedMIDIPreviewRequest(self.srn_no)),
+                "Preview MIDI Sound (F7)",
                 tooltip::Position::Top,
             ),
             checkbox(self.preview_loop.load(Ordering::Relaxed))
