@@ -246,6 +246,7 @@ impl SPC2MIDI2Window for MainWindow {
                         .on_toggle(move |flag| Message::MuteChannel(ch as u8, flag))
                         .width(10),
                     button("S")
+                        .style(iced::widget::button::success)
                         .on_press(Message::SoloChannel(ch as u8))
                         .width(30),
                     text(format!("{}", if status.noteon[ch] { "♪" } else { "" }))
@@ -294,15 +295,17 @@ impl SPC2MIDI2Window for MainWindow {
             text("Mute").width(35).align_x(alignment::Alignment::Start),
             text("Solo").width(50).align_x(alignment::Alignment::Start),
             text("SRN").width(30).align_x(alignment::Alignment::Start),
-            text("Program").width(120).align_x(alignment::Alignment::Start),
+            text("Program")
+                .width(120)
+                .align_x(alignment::Alignment::Start),
             text("Pitch").width(60).align_x(alignment::Alignment::Start),
             text("Env.").width(50).align_x(alignment::Alignment::Start),
             text("Lvol").width(40).align_x(alignment::Alignment::Start),
             text("Rvol").width(40).align_x(alignment::Alignment::Start),
         ]
-            .spacing(10)
-            .width(Length::Fill)
-            .align_y(alignment::Alignment::Center);
+        .spacing(10)
+        .width(Length::Fill)
+        .align_y(alignment::Alignment::Center);
         status_list.insert(0, status_index.into());
 
         let preview_control = row![
@@ -429,7 +432,7 @@ fn draw_indicator(
     frame.fill_rectangle(
         Point::new(bounds.x, bounds.y),
         Size::new(ratio * bounds.width, bounds.height),
-        theme.palette().primary,
+        theme.palette().success,
     );
 
     frame.fill_text(canvas::Text {
