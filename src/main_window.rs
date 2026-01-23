@@ -238,7 +238,7 @@ impl SPC2MIDI2Window for MainWindow {
         let expression_indicator = self.expression_indicator;
         let pitch_indicator = self.pitch_indicator;
         let volume_indicator = self.volume_indicator;
-        let status_list: Vec<_> = (0..8)
+        let mut status_list: Vec<_> = (0..8)
             .map(|ch| {
                 row![
                     text(format!("{}", ch)).width(10),
@@ -290,6 +290,20 @@ impl SPC2MIDI2Window for MainWindow {
                 .into()
             })
             .collect();
+        let status_index = row![
+            text("Mute").width(35).align_x(alignment::Alignment::Start),
+            text("Solo").width(50).align_x(alignment::Alignment::Start),
+            text("SRN").width(30).align_x(alignment::Alignment::Start),
+            text("Program").width(120).align_x(alignment::Alignment::Start),
+            text("Pitch").width(60).align_x(alignment::Alignment::Start),
+            text("Env.").width(50).align_x(alignment::Alignment::Start),
+            text("Lvol").width(40).align_x(alignment::Alignment::Start),
+            text("Rvol").width(40).align_x(alignment::Alignment::Start),
+        ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center);
+        status_list.insert(0, status_index.into());
 
         let preview_control = row![
             tooltip(
