@@ -39,7 +39,6 @@ jobs:
         VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
         echo "crate_version=$VERSION" >> $GITHUB_OUTPUT
     - name: Get crate version on Windows
-      runs-on: windows-latest
       shell: pwsh
       run: |
         $meta = cargo metadata --no-deps --format-version 1 --manifest-path "$env:GITHUB_WORKSPACE\Cargo.toml" | ConvertFrom-Json
