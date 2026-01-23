@@ -37,7 +37,7 @@ impl SPC2MIDI2Window for PreferencesWindow {
                     move |bpm| { Message::MIDIOutputBpmChanged(bpm) },
                 )
                 .step(0.25),
-                button("Re-estimate").on_press(Message::ReceivedBpmAnalyzeRequest),
+                button("Re-estimate Tempo").on_press(Message::ReceivedBpmAnalyzeRequest),
             ]
             .spacing(10)
             .padding(10)

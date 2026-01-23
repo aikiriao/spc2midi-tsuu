@@ -2,7 +2,7 @@ use crate::types::*;
 use crate::Message;
 use iced::border::Radius;
 use iced::widget::canvas::{self, Canvas, Event, Frame, Geometry};
-use iced::widget::{button, checkbox, column, row, scrollable, space, text, Column};
+use iced::widget::{button, checkbox, column, row, scrollable, space, text, tooltip, Column};
 use iced::{
     alignment, mouse, Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer,
     Size, Theme,
@@ -182,23 +182,31 @@ impl SPC2MIDI2Window for MainWindow {
         });
 
         let params = self.source_params.read().unwrap();
-        let srn_list: Vec<_> = params
+        // 音源リスト
+        let mut srn_list: Vec<_> = params
             .iter()
             .map(|(key, param)| {
                 row![
-                    text(format!("0x{:02X}", key)),
-                    text(format!(
-                        "{} Note:{} Velocity:{}",
-                        param.program,
-                        param.center_note >> 9,
-                        param.noteon_velocity,
-                    ))
-                    .color(if param.mute {
-                        self.theme.palette().warning
-                    } else {
-                        self.theme.palette().text
-                    }),
-                    button("Configure").on_press(Message::OpenSRNWindow(*key)),
+                    text(format!("0x{:02X}", key))
+                        .width(60)
+                        .align_x(alignment::Alignment::Center),
+                    text(format!("{}", param.program))
+                        .color(if param.mute {
+                            self.theme.palette().warning
+                        } else {
+                            self.theme.palette().text
+                        })
+                        .width(200)
+                        .align_x(alignment::Alignment::Start),
+                    text(format!("{:6.2}", param.center_note as f32 / 512.0))
+                        .width(60)
+                        .align_x(alignment::Alignment::End),
+                    text(format!("{}", param.noteon_velocity))
+                        .width(60)
+                        .align_x(alignment::Alignment::End),
+                    button("Open")
+                        .on_press(Message::OpenSRNWindow(*key))
+                        .width(60),
                 ]
                 .spacing(10)
                 .width(Length::Fill)
@@ -206,6 +214,24 @@ impl SPC2MIDI2Window for MainWindow {
                 .into()
             })
             .collect();
+        // 表インデックス
+        let srn_index = row![
+            text("SRN").width(60).align_x(alignment::Alignment::Center),
+            text("Program")
+                .width(200)
+                .align_x(alignment::Alignment::Start),
+            text("C.Note").width(60).align_x(alignment::Alignment::End),
+            text("Velocity")
+                .width(60)
+                .align_x(alignment::Alignment::End),
+            text("Config")
+                .width(60)
+                .align_x(alignment::Alignment::Center),
+        ]
+        .spacing(10)
+        .width(Length::Fill)
+        .align_y(alignment::Alignment::Center);
+        srn_list.insert(0, srn_index.into());
 
         let status = self.playback_status.read().unwrap();
         let channel_mute_flags = self.channel_mute_flags.load(Ordering::Relaxed);
@@ -266,8 +292,16 @@ impl SPC2MIDI2Window for MainWindow {
             .collect();
 
         let preview_control = row![
-            button("Play/Pause").on_press(Message::ReceivedPlayStartRequest),
-            button("Stop").on_press(Message::ReceivedPlayStopRequest),
+            tooltip(
+                button("Play/Pause").on_press(Message::ReceivedPlayStartRequest),
+                "(F5)",
+                tooltip::Position::FollowCursor,
+            ),
+            tooltip(
+                button("Stop").on_press(Message::ReceivedPlayStopRequest),
+                "(F4)",
+                tooltip::Position::FollowCursor,
+            ),
             checkbox(self.pcm_spc_mute.clone().load(Ordering::Relaxed))
                 .label("SPC")
                 .on_toggle(|flag| Message::SPCMuteFlagToggled(flag)),
