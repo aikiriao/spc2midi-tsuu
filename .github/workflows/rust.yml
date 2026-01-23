@@ -32,7 +32,6 @@ jobs:
       if: runner.os == 'macOS'
       run: |
         brew update
-        brew install jq
     - name: Get crate version on *nix platforms
       id: get_version_unix
       if: runner.os == 'Linux' || runner.os == 'macOS'
