@@ -154,7 +154,7 @@ impl SPC2MIDI2Window for MainWindow {
                             text("Preferences...")
                                 .height(Length::Shrink)
                                 .align_y(alignment::Vertical::Center),
-                            Message::OpenPreferenceWindow,
+                            Message::OpenPreferencesWindow,
                         )
                         .width(Length::Fill)
                         .height(Length::Shrink)),

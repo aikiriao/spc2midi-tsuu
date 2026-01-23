@@ -4,7 +4,7 @@ use crate::Message;
 use crate::SPC_SAMPLING_RATE;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
-use iced::widget::{button, checkbox, column, combo_box, row, text};
+use iced::widget::{button, checkbox, column, combo_box, row, text, tooltip};
 use iced::{
     alignment, mouse, Color, Element, Font, Length, Point, Rectangle, Renderer, Size, Theme,
 };
@@ -67,13 +67,23 @@ impl SPC2MIDI2Window for SRNWindow {
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
             row![
-                text("Center Note"),
+                text("Center Note")
+                    .width(100)
+                    .align_x(alignment::Alignment::Start),
                 number_input(&center_note_int, 0..=127, move |note| {
                     Message::CenterNoteIntChanged(srn_no, note)
                 })
                 .step(1),
-                button("↓").on_press(Message::SRNCenterNoteOctaveDownClicked(self.srn_no)),
-                button("↑").on_press(Message::SRNCenterNoteOctaveUpClicked(self.srn_no)),
+                tooltip(
+                    button("↓").on_press(Message::SRNCenterNoteOctaveDownClicked(self.srn_no)),
+                    "Note Octave Down",
+                    tooltip::Position::Bottom,
+                ),
+                tooltip(
+                    button("↑").on_press(Message::SRNCenterNoteOctaveUpClicked(self.srn_no)),
+                    "Note Octave Up",
+                    tooltip::Position::Bottom,
+                ),
                 text("Fraction"),
                 number_input(&center_note_fraction, 0.0..=1.0, move |fraction| {
                     Message::CenterNoteFractionChanged(srn_no, fraction)
@@ -89,7 +99,9 @@ impl SPC2MIDI2Window for SRNWindow {
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
             row![
-                text("Velocity"),
+                text("Velocity")
+                    .width(100)
+                    .align_x(alignment::Alignment::Start),
                 number_input(&param.noteon_velocity, 1..=127, move |velocity| {
                     Message::NoteOnVelocityChanged(srn_no, velocity)
                 },)
@@ -98,7 +110,9 @@ impl SPC2MIDI2Window for SRNWindow {
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
             row![
-                text("Pitch Bend"),
+                text("Pitch Bend")
+                    .width(100)
+                    .align_x(alignment::Alignment::Start),
                 checkbox(param.enable_pitch_bend)
                     .label("On")
                     .on_toggle(move |flag| Message::EnablePitchBendFlagToggled(srn_no, flag)),
@@ -112,9 +126,9 @@ impl SPC2MIDI2Window for SRNWindow {
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
             row![
-                text("Pan"),
+                text("Pan").width(100).align_x(alignment::Alignment::Start),
                 checkbox(param.auto_pan)
-                    .label("Auto")
+                    .label("Use SPC Value")
                     .on_toggle(move |flag| Message::AutoPanFlagToggled(srn_no, flag)),
                 number_input(
                     &param.fixed_pan,
@@ -126,9 +140,11 @@ impl SPC2MIDI2Window for SRNWindow {
                     move |pan| { Message::FixedPanChanged(srn_no, pan) }
                 )
                 .step(1),
-                text("Volume"),
+                text("Volume")
+                    .width(100)
+                    .align_x(alignment::Alignment::Start),
                 checkbox(param.auto_volume)
-                    .label("Auto")
+                    .label("Use SPC Value")
                     .on_toggle(move |flag| Message::AutoVolumeFlagToggled(srn_no, flag)),
                 number_input(
                     &param.fixed_volume,
@@ -145,11 +161,14 @@ impl SPC2MIDI2Window for SRNWindow {
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
             row![
+                text("Others")
+                    .width(100)
+                    .align_x(alignment::Alignment::Start),
                 checkbox(param.envelope_as_expression)
                     .label("Envelope as Expression")
                     .on_toggle(move |flag| Message::EnvelopeAsExpressionFlagToggled(srn_no, flag)),
                 checkbox(param.echo_as_effect1)
-                    .label("Echo as Effect1")
+                    .label("Echo as Reverb")
                     .on_toggle(move |flag| Message::EchoAsEffect1FlagToggled(srn_no, flag)),
             ]
             .spacing(10)
@@ -157,8 +176,8 @@ impl SPC2MIDI2Window for SRNWindow {
             .align_y(alignment::Alignment::Center),
         ];
         let preview_controller = row![
-            button("Play / Stop").on_press(Message::ReceivedSRNPlayStartRequest(self.srn_no)),
-            button("MIDI Preview").on_press(Message::ReceivedMIDIPreviewRequest(self.srn_no)),
+            button("▶Play/Stop").on_press(Message::ReceivedSRNPlayStartRequest(self.srn_no)),
+            button("▶MIDI").on_press(Message::ReceivedMIDIPreviewRequest(self.srn_no)),
             checkbox(self.preview_loop.load(Ordering::Relaxed))
                 .label("Loop")
                 .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(flag)),
@@ -168,9 +187,13 @@ impl SPC2MIDI2Window for SRNWindow {
         ];
 
         column![
-            Canvas::new(self)
-                .width(Length::Fill)
-                .height(Length::FillPortion(2)),
+            tooltip(
+                Canvas::new(self)
+                    .width(Length::Fill)
+                    .height(Length::FillPortion(2)),
+                "Click to toggle time / frequency view",
+                tooltip::Position::Bottom,
+            ),
             parameter_controller
                 .spacing(10)
                 .width(Length::Fill)

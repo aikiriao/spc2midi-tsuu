@@ -76,8 +76,8 @@ const OCTAVE_NOTE: u16 = 12 << 9;
 pub enum Message {
     OpenMainWindow,
     MainWindowOpened(window::Id),
-    OpenPreferenceWindow,
-    PreferenceWindowOpened(window::Id),
+    OpenPreferencesWindow,
+    PreferencesWindowOpened(window::Id),
     OpenSRNWindow(u8),
     SRNWindowOpened(window::Id),
     WindowClosed(window::Id),
@@ -289,22 +289,22 @@ impl App {
                 return open.map(Message::MainWindowOpened);
             }
             Message::MainWindowOpened(_id) => {}
-            Message::OpenPreferenceWindow => {
+            Message::OpenPreferencesWindow => {
                 let (id, open) = window::open(window::Settings {
                     size: iced::Size::new(500.0, 500.0),
                     ..Default::default()
                 });
                 self.windows.insert(
                     id,
-                    Box::new(PreferenceWindow::new(
+                    Box::new(PreferencesWindow::new(
                         self.audio_out_device_name.clone(),
                         self.midi_out_port_name.clone(),
                         self.midi_output_configure.clone(),
                     )),
                 );
-                return open.map(Message::PreferenceWindowOpened);
+                return open.map(Message::PreferencesWindowOpened);
             }
-            Message::PreferenceWindowOpened(_id) => {}
+            Message::PreferencesWindowOpened(_id) => {}
             Message::OpenSRNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
                     size: iced::Size::new(800.0, 600.0),
