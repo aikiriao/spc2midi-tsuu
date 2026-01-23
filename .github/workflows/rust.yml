@@ -27,7 +27,20 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install libgtk-3-dev libasound2-dev
+        sudo apt-get install libgtk-3-dev libasound2-dev jq
+    - name: Preparation on Mac
+      if: runner.os == 'macOS'
+      run: |
+        brew update
+        brew install jq
+    - name: Preparation on Windows
+      if: runner.os == 'Windows'
+      run: |
+        choco install jq
+    - name: Get crate version
+      run: |
+        VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+        echo "crate_version=$VERSION" >> $GITHUB_OUTPUT
     - name: Build
       run: |
         cargo build --verbose
