@@ -2,7 +2,7 @@ use crate::types::*;
 use crate::Message;
 use crate::SPC2MIDI2_TITLE_STR;
 use cpal::traits::{DeviceTrait, HostTrait};
-use iced::widget::{button, column, combo_box, row, text};
+use iced::widget::{button, column, combo_box, row, text, tooltip};
 use iced::{alignment, Element, Length};
 use iced_aw::number_input;
 use midir::MidiOutput;
@@ -34,11 +34,21 @@ impl SPC2MIDI2Window for PreferencesWindow {
                 text("Tempo (BPM)"),
                 number_input(
                     &midi_output_configure.beats_per_minute,
-                    30.0..=240.0,
+                    (MIN_BEATS_PER_MINUTE as f32)..=(MAX_BEATS_PER_MINUTE as f32),
                     move |bpm| { Message::MIDIOutputBpmChanged(bpm) },
                 )
                 .step(1.0),
-                button("Re-estimate Tempo").on_press(Message::ReceivedBpmAnalyzeRequest),
+                tooltip(
+                    button("↓").on_press(Message::ReceivedBpmHalfButtonClicked),
+                    "Half BPM",
+                    tooltip::Position::Top,
+                ),
+                tooltip(
+                    button("↑").on_press(Message::ReceivedBpmDoubleButtonClicked),
+                    "Double BPM",
+                    tooltip::Position::Top,
+                ),
+                button("Reset BPM").on_press(Message::ReceivedBpmAnalyzeRequest),
             ]
             .spacing(10)
             .padding(10)

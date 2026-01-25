@@ -124,6 +124,8 @@ pub enum Message {
     MuteChannel(u8, bool),
     SoloChannel(u8),
     ReceivedBpmAnalyzeRequest,
+    ReceivedBpmDoubleButtonClicked,
+    ReceivedBpmHalfButtonClicked,
     ReceivedSRNReanalyzeRequest,
     Tick,
 }
@@ -794,8 +796,8 @@ impl App {
             }
             Message::MIDIOutputBpmChanged(bpm) => {
                 let mut config = self.midi_output_configure.write().unwrap();
-                // 0.25刻みに丸め込む
-                config.beats_per_minute = (bpm * 4.0).round() / 4.0;
+                // 0.125刻みに丸め込む
+                config.beats_per_minute = (bpm * 8.0).round() / 8.0;
             }
             Message::MIDIOutputTicksPerQuarterChanged(ticks) => {
                 let mut config = self.midi_output_configure.write().unwrap();
@@ -897,9 +899,23 @@ impl App {
                             tick64khz_count += 1;
                         }
                     }
-                    // 小数点以下は0.25に丸め込む
+                    // 小数点以下は0.125に丸め込む
                     let estimated_bpm = estimate_bpm(&signal);
-                    config.beats_per_minute = f32::round(estimated_bpm * 4.0) / 4.0;
+                    config.beats_per_minute = f32::round(estimated_bpm * 8.0) / 8.0;
+                }
+            }
+            Message::ReceivedBpmDoubleButtonClicked => {
+                let mut config = self.midi_output_configure.write().unwrap();
+                let bpm = config.beats_per_minute * 2.0;
+                if bpm <= MAX_BEATS_PER_MINUTE as f32 {
+                    config.beats_per_minute = bpm;
+                }
+            }
+            Message::ReceivedBpmHalfButtonClicked => {
+                let mut config = self.midi_output_configure.write().unwrap();
+                let bpm = config.beats_per_minute / 2.0;
+                if bpm >= MIN_BEATS_PER_MINUTE as f32 {
+                    config.beats_per_minute = bpm;
                 }
             }
             Message::ReceivedSRNReanalyzeRequest => {
@@ -1043,7 +1059,7 @@ impl App {
         let mut config = self.midi_output_configure.write().unwrap();
         // 小数点以下は0.25に丸め込む
         let estimated_bpm = estimate_bpm(&signal);
-        config.beats_per_minute = f32::round(estimated_bpm * 4.0) / 4.0;
+        config.beats_per_minute = f32::round(estimated_bpm * 8.0) / 8.0;
 
         // 波形情報の読み込み
         for (srn, dir_address) in start_address_map.iter() {
