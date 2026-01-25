@@ -1,7 +1,6 @@
 use crate::types::*;
 use czt::{c32, transform};
 use num_traits::Pow;
-use realfft::RealFftPlanner;
 use std::f32::consts::PI;
 
 /// SPCの出力サンプリングレート
@@ -172,55 +171,34 @@ pub fn estimate_drum_and_note(source_info: &SourceInformation) -> (bool, f32) {
 }
 
 /// 超簡易テンポ推定
-pub fn estimate_bpm(signal: &Vec<f32>) -> f32 {
-    const TEMPO_ESTIMATION_FRAME_SIZE: usize = 32;
-    const FFT_SIZE: usize = 2 * TEMPO_ESTIMATION_FRAME_SIZE;
-    const INV_FFT_SIZE: f32 = 1.0 / (FFT_SIZE as f32);
+pub fn estimate_bpm(onset_signal: &Vec<f32>) -> f32 {
+    const TEMPO_ESTIMATION_FRAME_SIZE: usize = 128;
     const MIN_LAG: usize = ((60.0 * SPC_SAMPLING_RATE)
         / (MAX_BEATS_PER_MINUTE as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32))
-        as usize;
+        as usize + 1;
     const MAX_LAG: usize = ((60.0 * SPC_SAMPLING_RATE)
         / (MIN_BEATS_PER_MINUTE as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32))
         as usize;
 
-    let mut smpl = 0;
-    let mut onset_envelope = vec![];
-    let mut prev_spec = vec![0.0; FFT_SIZE / 2];
-    let window: Vec<_> = (0..FFT_SIZE)
-        .map(|i| f32::sin((PI * (i as f32)) / (FFT_SIZE - 1) as f32).pow(2.0))
+    // フレームに区切り和をとる
+    let onset_envelope: Vec<_> = onset_signal
+        .chunks(TEMPO_ESTIMATION_FRAME_SIZE)
+        .map(|c| c.iter().sum::<f32>())
         .collect();
-    let mut fft_planner = RealFftPlanner::<f32>::new();
-    let r2c = fft_planner.plan_fft_forward(FFT_SIZE);
-    while smpl + FFT_SIZE < signal.len() {
-        // フレーム切り出し・窓かけ
-        let mut frame = signal[smpl..(smpl + FFT_SIZE)].to_vec();
-        frame = frame.iter().zip(&window).map(|(&s, w)| s * w * INV_FFT_SIZE).collect();
-        // FFT・対数パワースペクトル計算
-        let mut spec = r2c.make_output_vec();
-        r2c.process(&mut frame, &mut spec).unwrap();
-        let spec: Vec<_> = spec
-            .iter()
-            .map(|c| 20.0 * (c.norm() + 1e-10).log10())
-            .collect();
-        // 前のパワースペクトル計算との平均差分計算
-        onset_envelope.push(
-            (spec
-                .iter()
-                .zip(prev_spec)
-                .map(|(&curr, prev)| curr - prev)
-                .sum::<f32>()
-                * INV_FFT_SIZE)
-                .max(0.0),
-        );
-        prev_spec = spec;
-        smpl += TEMPO_ESTIMATION_FRAME_SIZE;
-    }
 
-    // 窓かけ
-    onset_envelope = onset_envelope
+    // 前のフレームとの差をとり窓かけ
+    let onset_envelope: Vec<_> = onset_envelope
         .iter()
         .enumerate()
-        .map(|(i, r)| *r * f32::sin((PI * (i as f32)) / (onset_envelope.len() - 1) as f32).pow(2.0))
+        .map(|(i, _)| {
+            if i == 0 {
+                onset_envelope[0]
+            } else {
+                (onset_envelope[i] - onset_envelope[i - 1]).max(0.0)
+            }
+        })
+        .enumerate()
+        .map(|(i, r)| r * f32::sin((PI * (i as f32)) / (onset_envelope.len() - 1) as f32).pow(2.0))
         .collect();
 
     // 自己相関計算
@@ -241,16 +219,14 @@ pub fn estimate_bpm(signal: &Vec<f32>) -> f32 {
         .iter()
         .fold(0.0 / 0.0, |m, v| v.max(m));
 
-    // ピーク値に近い候補からBPMを選出
-    let mut peak_bpms = vec![];
+    // ピークとみなす閾値を超えた最初のピークをBPMとする
     for i in (MIN_LAG as usize)..=(max_lag as usize) {
-        if auto_corr[i] >= BPM_PEAK_THRESHOLD * max {
-            let bpm = (60.0 * SPC_SAMPLING_RATE) / (i as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32);
-            peak_bpms.push(bpm);
+        if auto_corr[i] >= max * BPM_PEAK_THRESHOLD {
+            return (60.0 * SPC_SAMPLING_RATE) / (i as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32);
         }
     }
 
-    peak_bpms[0]
+    unreachable!("max peak should be founded!");
 }
 
 /// パワースペクトルの計算

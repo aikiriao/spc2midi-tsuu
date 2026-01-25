@@ -1,6 +1,6 @@
 [package]
 name = "spc2midi-tsuu"
-version = "0.1.38"
+version = "0.1.39"
 edition = "2024"
 
 [dependencies]
@@ -12,7 +12,6 @@ iced_aw = { version = "0.13.0", features = ["full"] }
 iced_widget = "0.14.2"
 midir = "0.10.3"
 num-traits = "0.2.19"
-realfft = "3.5.0"
 rfd = "0.17.1"
 rimd = "0.0.1"
 samplerate = "0.2.4"

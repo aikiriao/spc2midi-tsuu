@@ -886,21 +886,20 @@ impl App {
                     let analyze_duration_64khz_ticks = config.output_duration_msec * 64;
                     let mut cycle_count = 0;
                     let mut tick64khz_count = 0;
-                    let mut signal = vec![];
+                    let mut onset_signal = vec![];
                     while tick64khz_count < analyze_duration_64khz_ticks {
                         cycle_count += spc.execute_step() as u32;
+                        let keyon = spc.dsp.read_register(&[0u8], DSP_ADDRESS_KON);
                         if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
-                            if let Some(pcm) = spc.clock_tick_64k_hz() {
-                                signal.push(
-                                    PCM_NORMALIZE_CONST * 0.5 * (pcm[0] as f32 + pcm[1] as f32),
-                                );
+                            if let Some(_) = spc.clock_tick_64k_hz() {
+                                onset_signal.push(keyon.count_ones() as f32);
                             }
                             cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
                             tick64khz_count += 1;
                         }
                     }
                     // 小数点以下は0.125に丸め込む
-                    let estimated_bpm = estimate_bpm(&signal);
+                    let estimated_bpm = estimate_bpm(&onset_signal);
                     config.beats_per_minute = f32::round(estimated_bpm * 8.0) / 8.0;
                 }
             }
@@ -1024,7 +1023,7 @@ impl App {
         let mut cycle_count = 0;
         let mut tick64khz_count = 0;
         let mut start_address_map = BTreeMap::new();
-        let mut signal = vec![];
+        let mut onset_signal = vec![];
         while tick64khz_count < analyze_duration_64khz_ticks {
             cycle_count += spc.execute_step() as u32;
             let _ = midispc.execute_step();
@@ -1047,8 +1046,9 @@ impl App {
             }
             if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
                 midispc.clock_tick_64k_hz();
-                if let Some(pcm) = spc.clock_tick_64k_hz() {
-                    signal.push(PCM_NORMALIZE_CONST * 0.5 * (pcm[0] as f32 + pcm[1] as f32));
+                // キーオンされていた信号の数をオンセット信号とする
+                if let Some(_) = spc.clock_tick_64k_hz() {
+                    onset_signal.push(keyon.count_ones() as f32);
                 }
                 cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
                 tick64khz_count += 1;
@@ -1058,7 +1058,7 @@ impl App {
         // テンポ推定
         let mut config = self.midi_output_configure.write().unwrap();
         // 小数点以下は0.25に丸め込む
-        let estimated_bpm = estimate_bpm(&signal);
+        let estimated_bpm = estimate_bpm(&onset_signal);
         config.beats_per_minute = f32::round(estimated_bpm * 8.0) / 8.0;
 
         // 波形情報の読み込み
