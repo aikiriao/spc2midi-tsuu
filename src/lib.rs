@@ -120,6 +120,7 @@ pub enum Message {
     MIDIOutputTicksPerQuarterChanged(u16),
     MIDIOutputUpdatePeriodChanged(u8),
     MIDIOutputDurationChanged(u64),
+    MIDIOutputSPC700ClockUpFactorChanged(u32),
     MuteChannel(u8, bool),
     SoloChannel(u8),
     ReceivedBpmAnalyzeRequest,
@@ -291,7 +292,7 @@ impl App {
             Message::MainWindowOpened(_id) => {}
             Message::OpenPreferencesWindow => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(500.0, 500.0),
+                    size: iced::Size::new(500.0, 600.0),
                     ..Default::default()
                 });
                 self.windows.insert(
@@ -810,6 +811,10 @@ impl App {
                 let mut config = self.midi_output_configure.write().unwrap();
                 config.output_duration_msec = duration;
             }
+            Message::MIDIOutputSPC700ClockUpFactorChanged(factor) => {
+                let mut config = self.midi_output_configure.write().unwrap();
+                config.spc_clockup_factor = factor;
+            }
             Message::MuteChannel(ch, flag) => {
                 if let (Some(pcm_spc_ref), Some(midi_spc_ref)) = (&self.pcm_spc, &self.midi_spc) {
                     let (pcm_spc, midi_spc) = (pcm_spc_ref.clone(), midi_spc_ref.clone());
@@ -1128,15 +1133,16 @@ impl App {
             // 出力で決めた時間だけ出力
             let ticks_per_minutes =
                 (config.beats_per_minute as u64) * (config.ticks_per_quarter as u64);
+            let spc_64k_hz_cycle = config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ;
             let mut total_ticks = 0;
             let mut total_elapsed_time_nanosec = 0;
             let mut cycle_count = 0;
             while total_elapsed_time_nanosec < config.output_duration_msec * 1000_000 {
                 // 64kHzタイマーティックするまで処理
-                while cycle_count < CLOCK_TICK_CYCLE_64KHZ {
+                while cycle_count < spc_64k_hz_cycle {
                     cycle_count += spc.execute_step() as u32;
                 }
-                cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                cycle_count -= spc_64k_hz_cycle;
                 // clock_tick_64k_hz実行後に64KHz周期がすぎるので、ここで時間を増加
                 total_elapsed_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
                 // MIDI出力

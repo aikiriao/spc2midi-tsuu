@@ -12,6 +12,8 @@ pub const DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC: u8 = 5;
 pub const DEFAULT_MIDI_BPM: f32 = 120.0;
 /// デフォルトの出力MIDIの四分音符内のティック数
 pub const DEFAULT_MIDI_RESOLUSIONS: u16 = 480;
+/// デフォルトのSPCのクロックアップ倍率
+pub const DEFAULT_SPC_CLOCKUP_FACTOR: u32 = 8;
 
 /// 音源情報
 #[derive(Debug, Clone)]
@@ -69,6 +71,8 @@ pub struct MIDIOutputConfigure {
     pub beats_per_minute: f32,
     /// 四分の一音符当たりのティック数
     pub ticks_per_quarter: u16,
+    /// SPC700のクロックアップ倍率
+    pub spc_clockup_factor: u32,
 }
 
 /// 再生中の状態
@@ -121,6 +125,7 @@ impl MIDIOutputConfigure {
             playback_parameter_update_period: DEFAULT_PLAYBACK_PARAMETER_UPDATE_PERIOD_MSEC,
             beats_per_minute: DEFAULT_MIDI_BPM,
             ticks_per_quarter: DEFAULT_MIDI_RESOLUSIONS,
+            spc_clockup_factor: DEFAULT_SPC_CLOCKUP_FACTOR,
         }
     }
 }
