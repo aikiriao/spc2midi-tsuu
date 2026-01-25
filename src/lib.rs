@@ -793,7 +793,8 @@ impl App {
             }
             Message::MIDIOutputBpmChanged(bpm) => {
                 let mut config = self.midi_output_configure.write().unwrap();
-                config.beats_per_minute = bpm;
+                // 0.25刻みに丸め込む
+                config.beats_per_minute = (bpm * 4.0).round() / 4.0;
             }
             Message::MIDIOutputTicksPerQuarterChanged(ticks) => {
                 let mut config = self.midi_output_configure.write().unwrap();
