@@ -183,7 +183,7 @@ impl SPC2MIDI2Window for MainWindow {
 
         let params = self.source_params.read().unwrap();
         // 音源リスト
-        let mut srn_list: Vec<_> = params
+        let srn_list: Vec<_> = params
             .iter()
             .map(|(key, param)| {
                 row![
@@ -231,7 +231,6 @@ impl SPC2MIDI2Window for MainWindow {
         .spacing(10)
         .width(Length::Fill)
         .align_y(alignment::Alignment::Center);
-        srn_list.insert(0, srn_index.into());
 
         let status = self.playback_status.read().unwrap();
         let channel_mute_flags = self.channel_mute_flags.load(Ordering::Relaxed);
@@ -346,6 +345,7 @@ impl SPC2MIDI2Window for MainWindow {
 
         let c = column![
             r,
+            srn_index,
             scrollable(
                 Column::from_vec(srn_list)
                     .width(Length::Fill)
