@@ -1,3 +1,4 @@
+![Latest GitHub release](https://img.shields.io/github/release/aikiriao/spc2midi-tsuu)
 ![eclint](https://github.com/aikiriao/spc2midi-tsuu/actions/workflows/eclint.yml/badge.svg?branch=main)
 ![Rust CI](https://github.com/aikiriao/spc2midi-tsuu/actions/workflows/rust.yml/badge.svg?branch=main)
 ![Repo size](https://img.shields.io/github/repo-size/aikiriao/spc2midi-tsuu)
