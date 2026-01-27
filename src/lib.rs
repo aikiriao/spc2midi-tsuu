@@ -876,31 +876,15 @@ impl App {
                 }
             }
             Message::ReceivedBpmAnalyzeRequest => {
-                if let Some(spc_file) = &self.spc_file {
-                    let mut config = self.midi_output_configure.write().unwrap();
-                    let mut spc: Box<spc700::spc::SPC<spc700::sdsp::SDSP>> = Box::new(SPC::new(
-                        &spc_file.header.spc_register,
-                        &spc_file.ram,
-                        &spc_file.dsp_register,
-                    ));
-                    let analyze_duration_64khz_ticks = config.output_duration_msec * 64;
-                    let mut cycle_count = 0;
-                    let mut tick64khz_count = 0;
-                    let mut onset_signal = vec![];
-                    while tick64khz_count < analyze_duration_64khz_ticks {
-                        cycle_count += spc.execute_step() as u32;
-                        let keyon = spc.dsp.read_register(&[0u8], DSP_ADDRESS_KON);
-                        if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
-                            if let Some(_) = spc.clock_tick_64k_hz() {
-                                onset_signal.push(keyon.count_ones() as f32);
-                            }
-                            cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
-                            tick64khz_count += 1;
-                        }
+                if let Ok(mut config) = self.midi_output_configure.write() {
+                    if let Some(spc_file) = &self.spc_file {
+                        config.beats_per_minute = Self::bpm_estimation(
+                            spc_file.header.duration as u32,
+                            &spc_file.header.spc_register,
+                            &spc_file.ram,
+                            &spc_file.dsp_register,
+                        );
                     }
-                    // 小数点以下は0.125に丸め込む
-                    let estimated_bpm = estimate_bpm(&onset_signal);
-                    config.beats_per_minute = f32::round(estimated_bpm * 8.0) / 8.0;
                 }
             }
             Message::ReceivedBpmDoubleButtonClicked => {
@@ -999,6 +983,54 @@ impl App {
         }
     }
 
+    /// BPM（テンポ）推定
+    fn bpm_estimation(
+        analyze_duration_sec: u32,
+        register: &SPCRegister,
+        ram: &[u8],
+        dsp_register: &[u8; 128],
+    ) -> f32 {
+        let analyze_duration_64khz_ticks = analyze_duration_sec * 64000;
+
+        let mut midispc: Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>> =
+            Box::new(SPC::new(&register, ram, dsp_register));
+        let mut cycle_count = 0;
+        let mut tick64khz_count = 0;
+
+        let mut onset_signal = vec![];
+        while tick64khz_count < analyze_duration_64khz_ticks {
+            cycle_count += midispc.execute_step() as u32;
+            // 64kHzティック処理
+            if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
+                // ノートオンされていた音のボリュームの和をオンセット信号とする
+                let noteon = midispc.dsp.read_register(ram, DSP_ADDRESS_NOTEON);
+                let mut onset = 0.0;
+                for ch in 0..8 {
+                    if (noteon >> ch) & 0x1 != 0 {
+                        let lvol = midispc
+                            .dsp
+                            .read_register(ram, (ch << 4) | DSP_ADDRESS_V0VOLL)
+                            as f32;
+                        let rvol = midispc
+                            .dsp
+                            .read_register(ram, (ch << 4) | DSP_ADDRESS_V0VOLR)
+                            as f32;
+                        onset += lvol.abs() + rvol.abs();
+                    }
+                }
+                onset_signal.push(onset);
+                // ティック
+                midispc.clock_tick_64k_hz();
+                cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                tick64khz_count += 1;
+            }
+        }
+
+        // 小数点以下は0.25に丸め込む
+        let estimated_bpm = estimate_bpm(&onset_signal, 64_000.0);
+        f32::round(estimated_bpm * 4.0) / 4.0
+    }
+
     /// 音源ソースの解析
     fn analyze_sources(
         &mut self,
@@ -1018,15 +1050,11 @@ impl App {
         // 一定期間シミュレートし、サンプルソース番号とそれに紐づく開始アドレスを取得
         let mut midispc: Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>> =
             Box::new(SPC::new(&register, ram, dsp_register));
-        let mut spc: Box<spc700::spc::SPC<spc700::sdsp::SDSP>> =
-            Box::new(SPC::new(&register, ram, dsp_register));
         let mut cycle_count = 0;
         let mut tick64khz_count = 0;
         let mut start_address_map = BTreeMap::new();
-        let mut onset_signal = vec![];
         while tick64khz_count < analyze_duration_64khz_ticks {
-            cycle_count += spc.execute_step() as u32;
-            let _ = midispc.execute_step();
+            cycle_count += midispc.execute_step() as u32;
             // キーオンが打たれていた時のサンプル番号を取得
             // DSPを動かすとキーオンフラグが落ちることがあるので64kHzティック前に調べる
             let keyon = midispc.dsp.read_register(ram, DSP_ADDRESS_KON);
@@ -1044,22 +1072,18 @@ impl App {
                     }
                 }
             }
+            // 64kHzティック処理
             if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
                 midispc.clock_tick_64k_hz();
-                // キーオンされていた信号の数をオンセット信号とする
-                if let Some(_) = spc.clock_tick_64k_hz() {
-                    onset_signal.push(keyon.count_ones() as f32);
-                }
                 cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
                 tick64khz_count += 1;
             }
         }
 
-        // テンポ推定
+        // BPM（テンポ）推定
+        let bpm = Self::bpm_estimation(analyze_duration_sec, register, ram, dsp_register);
         let mut config = self.midi_output_configure.write().unwrap();
-        // 小数点以下は0.25に丸め込む
-        let estimated_bpm = estimate_bpm(&onset_signal);
-        config.beats_per_minute = f32::round(estimated_bpm * 8.0) / 8.0;
+        config.beats_per_minute = bpm;
 
         // 波形情報の読み込み
         for (srn, dir_address) in start_address_map.iter() {

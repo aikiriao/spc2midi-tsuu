@@ -9,8 +9,6 @@ const SPC_SAMPLING_RATE: f32 = 32000.0;
 const A4_PITCH_HZ: f32 = 440.0;
 /// 有効なピッチ候補と認めるスレッショルド
 const PITCH_PEAK_THRESHOLD: f32 = 0.8;
-/// 有効なビート候補と認めるスレッショルド
-const BPM_PEAK_THRESHOLD: f32 = 0.90;
 
 macro_rules! chirp(
     ($m:expr) => ({
@@ -171,32 +169,18 @@ pub fn estimate_drum_and_note(source_info: &SourceInformation) -> (bool, f32) {
 }
 
 /// 超簡易テンポ推定
-pub fn estimate_bpm(onset_signal: &Vec<f32>) -> f32 {
-    const TEMPO_ESTIMATION_FRAME_SIZE: usize = 128;
-    const MIN_LAG: usize = ((60.0 * SPC_SAMPLING_RATE)
-        / (MAX_BEATS_PER_MINUTE as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32))
-        as usize + 1;
-    const MAX_LAG: usize = ((60.0 * SPC_SAMPLING_RATE)
-        / (MIN_BEATS_PER_MINUTE as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32))
-        as usize;
-
-    // フレームに区切り和をとる
+pub fn estimate_bpm(onset_signal: &Vec<f32>, sampling_rate: f32) -> f32 {
+    // フレームに区切り平均をとる
+    // （この操作は間引きに相当するので間引く前にLPFをかけるとよいが低速なのでやめる）
+    let frame_size: usize = (sampling_rate * 0.001).round() as usize;
     let onset_envelope: Vec<_> = onset_signal
-        .chunks(TEMPO_ESTIMATION_FRAME_SIZE)
-        .map(|c| c.iter().sum::<f32>())
+        .chunks(frame_size)
+        .map(|c| c.iter().sum::<f32>() / frame_size as f32)
         .collect();
 
-    // 前のフレームとの差をとり窓かけ
+    // 窓かけ
     let onset_envelope: Vec<_> = onset_envelope
         .iter()
-        .enumerate()
-        .map(|(i, _)| {
-            if i == 0 {
-                onset_envelope[0]
-            } else {
-                (onset_envelope[i] - onset_envelope[i - 1]).max(0.0)
-            }
-        })
         .enumerate()
         .map(|(i, r)| r * f32::sin((PI * (i as f32)) / (onset_envelope.len() - 1) as f32).pow(2.0))
         .collect();
@@ -214,19 +198,23 @@ pub fn estimate_bpm(onset_signal: &Vec<f32>) -> f32 {
         .collect();
 
     // 候補ラグ内でのピーク
-    let max_lag = MAX_LAG.min(auto_corr.len() - 1);
-    let max = auto_corr[(MIN_LAG as usize)..=(max_lag as usize)]
+    let min_lag =
+        ((60.0 * sampling_rate) / (MAX_BEATS_PER_MINUTE as f32 * frame_size as f32)) as usize;
+    let max_lag =
+        ((60.0 * sampling_rate) / (MIN_BEATS_PER_MINUTE as f32 * frame_size as f32)) as usize;
+    let max_lag = max_lag.min(auto_corr.len() - 1);
+    let max = auto_corr[min_lag..=max_lag]
         .iter()
         .fold(0.0 / 0.0, |m, v| v.max(m));
 
-    // ピークとみなす閾値を超えた最初のピークをBPMとする
-    for i in (MIN_LAG as usize)..=(max_lag as usize) {
-        if auto_corr[i] >= max * BPM_PEAK_THRESHOLD {
-            return (60.0 * SPC_SAMPLING_RATE) / (i as f32 * TEMPO_ESTIMATION_FRAME_SIZE as f32);
+    // ピークを超えた最初のピークをBPMとする
+    for i in min_lag..=max_lag {
+        if auto_corr[i] >= max {
+            return (60.0 * sampling_rate) / (i as f32 * frame_size as f32);
         }
     }
 
-    unreachable!("max peak should be founded!");
+    unreachable!("Failed to find max peak in tempo estimation!");
 }
 
 /// パワースペクトルの計算
