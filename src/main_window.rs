@@ -2,7 +2,9 @@ use crate::types::*;
 use crate::Message;
 use iced::border::Radius;
 use iced::widget::canvas::{self, Canvas, Event, Frame, Geometry};
-use iced::widget::{button, checkbox, column, row, scrollable, space, text, tooltip, Column};
+use iced::widget::{
+    button, checkbox, column, progress_bar, row, scrollable, space, stack, text, tooltip, Column,
+};
 use iced::{
     alignment, mouse, Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer,
     Size, Theme,
@@ -198,12 +200,38 @@ impl SPC2MIDI2Window for MainWindow {
                         })
                         .width(200)
                         .align_x(alignment::Alignment::Start),
-                    text(format!("{:6.2}", param.center_note as f32 / 512.0))
-                        .width(60)
-                        .align_x(alignment::Alignment::End),
-                    text(format!("{}", param.noteon_velocity))
-                        .width(60)
-                        .align_x(alignment::Alignment::End),
+                    stack![
+                        progress_bar(0.0..=127.0, param.center_note as f32 / 512.0).style(
+                            |theme: &Theme| progress_bar::Style {
+                                background: iced::Background::Color(theme.palette().background),
+                                bar: iced::Background::Color(theme.palette().success),
+                                border: Border::default().rounded(0.0)
+                            }
+                        ),
+                        text(format!("{:6.2}", param.center_note as f32 / 512.0))
+                            .size(17.0)
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .align_x(alignment::Alignment::End)
+                            .align_y(alignment::Alignment::Center),
+                    ]
+                    .width(60),
+                    stack![
+                        progress_bar(0.0..=127.0, param.noteon_velocity as f32).style(
+                            |theme: &Theme| progress_bar::Style {
+                                background: iced::Background::Color(theme.palette().background),
+                                bar: iced::Background::Color(theme.palette().success),
+                                border: Border::default().rounded(0.0)
+                            }
+                        ),
+                        text(format!("{}", param.noteon_velocity))
+                            .size(17.0)
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .align_x(alignment::Alignment::End)
+                            .align_y(alignment::Alignment::Center),
+                    ]
+                    .width(60),
                     button("Open")
                         .on_press(Message::OpenSRNWindow(*key))
                         .width(60),
