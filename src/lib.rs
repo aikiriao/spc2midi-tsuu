@@ -36,6 +36,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 use std::{cmp, io};
+use std::time::Instant;
 
 use spc700::decoder::*;
 use spc700::mididsp::*;
@@ -1282,27 +1283,22 @@ impl App {
         let midi_output_bytes = self.midi_output_bytes.clone();
 
         // 再生ストリーム作成
-        let mut cycle_count = 0;
+        let mut spc_cycle_count = 0;
         let mut pcm_buffer = vec![0.0f32; BUFFER_SIZE * NUM_CHANNELS];
         let stream = match stream_device.build_output_stream(
             &stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let mut progress = played_samples.load(Ordering::Relaxed);
-                let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
                 // SPCをロックして獲得
                 let mut spc = pcm_spc.lock().unwrap();
-                let mut midispc = midi_spc.lock().unwrap();
-                // MIDI出力のロック
-                let mut conn_out = midi_out_conn.lock().unwrap();
 
                 // レート変換比を信じ、バッファが一定量埋まるまで出力させる
                 let mut nsamples = prod.available_frames();
                 while nsamples > BUFFER_SIZE / 2 {
                     let cycle = spc.execute_step();
-                    let _ = midispc.execute_step();
-                    cycle_count += cycle as u32;
-                    if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
-                        cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                    spc_cycle_count += cycle as u32;
+                    if spc_cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
+                        spc_cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
                         // PCM出力
                         if let Some(pcm) = spc.clock_tick_64k_hz() {
                             prod.push_interleaved(&[
@@ -1310,14 +1306,6 @@ impl App {
                                 (pcm[1] as f32) * PCM_NORMALIZE_CONST,
                             ]);
                             nsamples = prod.available_frames();
-                        }
-                        // MIDI出力
-                        if let Some(msgs) = midispc.clock_tick_64k_hz() {
-                            for i in 0..msgs.num_messages {
-                                let msg = msgs.messages[i];
-                                conn_out.send(&msg.data[..msg.length]).unwrap();
-                                midi_bytes += msg.length;
-                            }
                         }
                     }
                 }
@@ -1342,7 +1330,6 @@ impl App {
                 // 再生サンプル数増加
                 progress += frames;
                 played_samples.store(progress, Ordering::Relaxed);
-                midi_output_bytes.store(midi_bytes, Ordering::Relaxed);
             },
             |err| eprintln!("[{}] {err}", SPC2MIDI2_TITLE_STR),
             None,
@@ -1350,6 +1337,39 @@ impl App {
             Ok(stream) => stream,
             Err(_) => return Err(PlayStreamError::DeviceNotAvailable),
         };
+
+        // MIDI再生スレッド生成
+        let is_playing = self.stream_is_playing.clone();
+        let mut midi_cycle_count = 0;
+        let _midi_thread = thread::spawn(move || {
+            let interval = Duration::from_nanos(CLOCK_TICK_CYCLE_64KHZ_NANOSEC);
+            let mut next = Instant::now();
+            while is_playing.load(Ordering::Relaxed) {
+                let mut midispc = midi_spc.lock().unwrap();
+                let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
+                // 64kHzタイマーティックするまで処理
+                while midi_cycle_count < CLOCK_TICK_CYCLE_64KHZ {
+                    midi_cycle_count += midispc.execute_step() as u32;
+                }
+                midi_cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                // MIDI出力
+                if let Some(msgs) = midispc.clock_tick_64k_hz() {
+                    // MIDI出力のロック
+                    let mut conn_out = midi_out_conn.lock().unwrap();
+                    for i in 0..msgs.num_messages {
+                        let msg = msgs.messages[i];
+                        conn_out.send(&msg.data[..msg.length]).unwrap();
+                        midi_bytes += msg.length;
+                    }
+                }
+                midi_output_bytes.store(midi_bytes, Ordering::Relaxed);
+                // ビジーループ
+                next += interval;
+                while Instant::now() < next {
+                    thread::yield_now();
+                }
+            }
+        });
 
         // 再生開始
         self.stream_is_playing.store(true, Ordering::Relaxed);
