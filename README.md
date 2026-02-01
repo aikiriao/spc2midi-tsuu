@@ -10,6 +10,8 @@
 
 **spc2midi-tsuu** is a SFC (SNES) music file (SPC) to standard MIDI file converter. It is strongly inspired by [spc2midi](http://gigo.retrogames.com/download.html#spc2midi) and is intended to be its successor.
 
+Application logo ("通") is based on [Madou Futo Maru Gothic Font](https://www.fontspace.com/madou-futo-maru-gothic-font-f76590).
+
 ## License
 
 Apache License Version 2.0
