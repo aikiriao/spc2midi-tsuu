@@ -35,8 +35,8 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
-use std::{cmp, io};
 use std::time::Instant;
+use std::{cmp, io};
 
 use spc700::decoder::*;
 use spc700::mididsp::*;
@@ -1345,25 +1345,27 @@ impl App {
             let interval = Duration::from_nanos(CLOCK_TICK_CYCLE_64KHZ_NANOSEC);
             let mut next = Instant::now();
             while is_playing.load(Ordering::Relaxed) {
-                let mut midispc = midi_spc.lock().unwrap();
-                let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
-                // 64kHzタイマーティックするまで処理
-                while midi_cycle_count < CLOCK_TICK_CYCLE_64KHZ {
-                    midi_cycle_count += midispc.execute_step() as u32;
-                }
-                midi_cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
-                // MIDI出力
-                if let Some(msgs) = midispc.clock_tick_64k_hz() {
-                    // MIDI出力のロック
-                    let mut conn_out = midi_out_conn.lock().unwrap();
-                    for i in 0..msgs.num_messages {
-                        let msg = msgs.messages[i];
-                        conn_out.send(&msg.data[..msg.length]).unwrap();
-                        midi_bytes += msg.length;
+                {
+                    let mut midispc = midi_spc.lock().unwrap();
+                    let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
+                    // 64kHzタイマーティックするまで処理
+                    while midi_cycle_count < CLOCK_TICK_CYCLE_64KHZ {
+                        midi_cycle_count += midispc.execute_step() as u32;
                     }
+                    midi_cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                    // MIDI出力
+                    if let Some(msgs) = midispc.clock_tick_64k_hz() {
+                        // MIDI出力のロック
+                        let mut conn_out = midi_out_conn.lock().unwrap();
+                        for i in 0..msgs.num_messages {
+                            let msg = msgs.messages[i];
+                            conn_out.send(&msg.data[..msg.length]).unwrap();
+                            midi_bytes += msg.length;
+                        }
+                    }
+                    midi_output_bytes.store(midi_bytes, Ordering::Relaxed);
                 }
-                midi_output_bytes.store(midi_bytes, Ordering::Relaxed);
-                // ビジーループ
+                // ビジーループで待つ
                 next += interval;
                 while Instant::now() < next {
                     thread::yield_now();
