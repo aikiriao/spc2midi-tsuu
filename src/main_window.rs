@@ -298,19 +298,19 @@ impl SPC2MIDI2Window for MainWindow {
                     .align_y(alignment::Alignment::Center)
                     .size(14.0)
                     .height(Length::Fill)
-                    .width(120),
+                    .width(Length::FillPortion(12)),
                     Canvas::new(pitch_indicator[ch])
                         .height(Length::Fill)
-                        .width(60),
+                        .width(Length::FillPortion(6)),
                     Canvas::new(expression_indicator[ch])
                         .height(Length::Fill)
-                        .width(50),
+                        .width(Length::FillPortion(5)),
                     Canvas::new(volume_indicator[ch][0])
                         .height(Length::Fill)
-                        .width(40),
+                        .width(Length::FillPortion(4)),
                     Canvas::new(volume_indicator[ch][1])
                         .height(Length::Fill)
-                        .width(40),
+                        .width(Length::FillPortion(4)),
                 ]
                 .spacing(10)
                 .width(Length::Fill)
@@ -323,12 +323,12 @@ impl SPC2MIDI2Window for MainWindow {
             text("Solo").width(50).align_x(alignment::Alignment::Start),
             text("SRN").width(30).align_x(alignment::Alignment::Start),
             text("Program")
-                .width(120)
+                .width(Length::FillPortion(12))
                 .align_x(alignment::Alignment::Start),
-            text("Pitch").width(60).align_x(alignment::Alignment::Start),
-            text("Env.").width(50).align_x(alignment::Alignment::Start),
-            text("Lvol").width(40).align_x(alignment::Alignment::Start),
-            text("Rvol").width(40).align_x(alignment::Alignment::Start),
+            text("Pitch").width(Length::FillPortion(6)).align_x(alignment::Alignment::Start),
+            text("Env.").width(Length::FillPortion(5)).align_x(alignment::Alignment::Start),
+            text("Lvol").width(Length::FillPortion(4)).align_x(alignment::Alignment::Start),
+            text("Rvol").width(Length::FillPortion(4)).align_x(alignment::Alignment::Start),
         ]
         .spacing(10)
         .width(Length::Fill)
