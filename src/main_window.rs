@@ -189,11 +189,8 @@ impl SPC2MIDI2Window for MainWindow {
             .iter()
             .map(|(key, param)| {
                 row![
-                    button("Open")
-                        .on_press(Message::OpenSRNWindow(*key))
-                        .width(60),
                     text(format!("0x{:02X}", key))
-                        .width(Length::FillPortion(3))
+                        .width(30)
                         .align_x(alignment::Alignment::Start),
                     text(format!("{}", param.program))
                         .color(if param.mute {
@@ -235,6 +232,9 @@ impl SPC2MIDI2Window for MainWindow {
                             .align_y(alignment::Alignment::Center),
                     ]
                     .width(Length::FillPortion(6)),
+                    button("Open")
+                        .on_press(Message::OpenSRNWindow(*key))
+                        .width(60),
                 ]
                 .spacing(10)
                 .width(Length::Fill)
@@ -244,10 +244,7 @@ impl SPC2MIDI2Window for MainWindow {
             .collect();
         // 表インデックス
         let srn_index = row![
-            text("Config")
-                .width(60)
-                .align_x(alignment::Alignment::Center),
-            text("SRN").width(Length::FillPortion(3)).align_x(alignment::Alignment::Start),
+            text("SRN").width(30).align_x(alignment::Alignment::Start),
             text("Program")
                 .width(Length::FillPortion(20))
                 .align_x(alignment::Alignment::Start),
@@ -255,6 +252,9 @@ impl SPC2MIDI2Window for MainWindow {
             text("Velocity")
                 .width(Length::FillPortion(6))
                 .align_x(alignment::Alignment::Start),
+            text("Config")
+                .width(60)
+                .align_x(alignment::Alignment::Center),
         ]
         .spacing(10)
         .width(Length::Fill)
