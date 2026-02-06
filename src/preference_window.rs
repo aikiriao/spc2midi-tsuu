@@ -39,12 +39,12 @@ impl SPC2MIDI2Window for PreferencesWindow {
                 )
                 .step(1.0),
                 tooltip(
-                    button("↓").on_press(Message::ReceivedBpmHalfButtonClicked),
+                    button("▼").on_press(Message::ReceivedBpmHalfButtonClicked),
                     "Half BPM",
                     tooltip::Position::Top,
                 ),
                 tooltip(
-                    button("↑").on_press(Message::ReceivedBpmDoubleButtonClicked),
+                    button("▲").on_press(Message::ReceivedBpmDoubleButtonClicked),
                     "Double BPM",
                     tooltip::Position::Top,
                 ),

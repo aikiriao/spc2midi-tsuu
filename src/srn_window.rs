@@ -75,12 +75,12 @@ impl SPC2MIDI2Window for SRNWindow {
                 })
                 .step(1),
                 tooltip(
-                    button("↓").on_press(Message::SRNCenterNoteOctaveDownClicked(self.srn_no)),
+                    button("▼").on_press(Message::SRNCenterNoteOctaveDownClicked(self.srn_no)),
                     "Note Octave Down",
                     tooltip::Position::Bottom,
                 ),
                 tooltip(
-                    button("↑").on_press(Message::SRNCenterNoteOctaveUpClicked(self.srn_no)),
+                    button("▲").on_press(Message::SRNCenterNoteOctaveUpClicked(self.srn_no)),
                     "Note Octave Up",
                     tooltip::Position::Bottom,
                 ),
