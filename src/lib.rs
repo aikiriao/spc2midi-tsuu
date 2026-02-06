@@ -317,7 +317,10 @@ impl App {
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
                     let window = SRNWindow::new(
-                        format!("SRN 0x{:02X}", srn_no),
+                        format!(
+                            "SRN 0x{:02X} 0x{:04X} - 0x{:04X}",
+                            srn_no, source.start_address, source.end_address
+                        ),
                         srn_no,
                         source,
                         self.source_parameter.clone(),
