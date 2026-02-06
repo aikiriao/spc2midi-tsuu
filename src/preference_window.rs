@@ -165,12 +165,15 @@ impl PreferencesWindow {
                     .to_string()
             })
             .collect();
-        let midi_out = MidiOutput::new(SPC2MIDI2_TITLE_STR).unwrap();
-        let port_name_list: Vec<String> = midi_out
-            .ports()
-            .iter()
-            .map(|p| midi_out.port_name(p).unwrap())
-            .collect();
+        let port_name_list = if let Ok(midi_out) = MidiOutput::new(SPC2MIDI2_TITLE_STR) {
+            midi_out
+                .ports()
+                .iter()
+                .map(|p| midi_out.port_name(p).unwrap())
+                .collect()
+        } else {
+            vec![]
+        };
         Self {
             audio_out_device_name: audio_out_device_name,
             audio_out_devices_box: combo_box::State::new(device_name_list),
