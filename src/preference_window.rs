@@ -169,7 +169,7 @@ impl PreferencesWindow {
             midi_out
                 .ports()
                 .iter()
-                .map(|p| midi_out.port_name(p).unwrap())
+                .map(|p| midi_out.port_name(p).expect("Failed to get MIDI port name"))
                 .collect()
         } else {
             vec![]
