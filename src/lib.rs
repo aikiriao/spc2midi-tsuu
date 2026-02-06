@@ -150,8 +150,8 @@ pub struct App {
     midi_out_conn: Option<Arc<Mutex<MidiOutputConnection>>>,
     pcm_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::sdsp::SDSP>>>>>,
     midi_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>>>>>,
-    pcm_spc_mute: Arc<AtomicBool>,
-    midi_spc_mute: Arc<AtomicBool>,
+    pcm_spc_on: Arc<AtomicBool>,
+    midi_spc_on: Arc<AtomicBool>,
     midi_preview: Arc<AtomicBool>,
     preview_loop: Arc<AtomicBool>,
     channel_mute_flags: Arc<AtomicU8>,
@@ -227,8 +227,8 @@ impl Default for App {
             midi_out_conn: midi_out_conn,
             pcm_spc: None,
             midi_spc: None,
-            pcm_spc_mute: Arc::new(AtomicBool::new(false)),
-            midi_spc_mute: Arc::new(AtomicBool::new(false)),
+            pcm_spc_on: Arc::new(AtomicBool::new(true)),
+            midi_spc_on: Arc::new(AtomicBool::new(true)),
             midi_preview: Arc::new(AtomicBool::new(true)),
             preview_loop: Arc::new(AtomicBool::new(true)),
             channel_mute_flags: Arc::new(AtomicU8::new(0)),
@@ -284,8 +284,8 @@ impl App {
                     self.theme.clone(),
                     self.source_parameter.clone(),
                     self.playback_status.clone(),
-                    self.pcm_spc_mute.clone(),
-                    self.midi_spc_mute.clone(),
+                    self.pcm_spc_on.clone(),
+                    self.midi_spc_on.clone(),
                     self.channel_mute_flags.clone(),
                 );
                 self.main_window_id = id;
@@ -531,10 +531,10 @@ impl App {
                     spc.dsp.write_register(
                         &[0u8],
                         DSP_ADDRESS_CHANNEL_MUTE,
-                        if flag { 0xFF } else { flags },
+                        if flag { flags } else { 0xFF },
                     );
                     // フラグ書き換え
-                    self.pcm_spc_mute.clone().store(flag, Ordering::Relaxed);
+                    self.pcm_spc_on.clone().store(flag, Ordering::Relaxed);
                 }
             }
             Message::MIDIMuteFlagToggled(flag) => {
@@ -546,13 +546,13 @@ impl App {
                     spc.dsp.write_register(
                         &[0u8],
                         DSP_ADDRESS_CHANNEL_MUTE,
-                        if flag { 0xFF } else { flags },
+                        if flag { flags } else { 0xFF },
                     );
                     // フラグ書き換え
-                    self.midi_spc_mute.clone().store(flag, Ordering::Relaxed);
+                    self.midi_spc_on.clone().store(flag, Ordering::Relaxed);
                 }
                 // ミュートの時は音を止める
-                if flag {
+                if !flag {
                     self.stop_midi_all_sound();
                 }
             }
@@ -830,19 +830,19 @@ impl App {
                     } else {
                         flags & !(1 << ch)
                     };
-                    let midi_mute = self.midi_spc_mute.load(Ordering::Relaxed);
+                    let midi_on = self.midi_spc_on.load(Ordering::Relaxed);
                     let mut midi_spc = midi_spc.lock().unwrap();
                     midi_spc.dsp.write_register(
                         &[0u8],
                         DSP_ADDRESS_CHANNEL_MUTE,
-                        if midi_mute { 0xFF } else { new_flags },
+                        if midi_on { new_flags } else { 0xFF },
                     );
-                    let pcm_mute = self.pcm_spc_mute.load(Ordering::Relaxed);
+                    let pcm_on = self.pcm_spc_on.load(Ordering::Relaxed);
                     let mut pcm_spc = pcm_spc.lock().unwrap();
                     pcm_spc.dsp.write_register(
                         &[0u8],
                         DSP_ADDRESS_CHANNEL_MUTE,
-                        if pcm_mute { 0xFF } else { new_flags },
+                        if pcm_on { new_flags } else { 0xFF },
                     );
                     self.channel_mute_flags.store(new_flags, Ordering::Relaxed);
                     if flag {
@@ -856,19 +856,19 @@ impl App {
                     let (pcm_spc, midi_spc) = (pcm_spc_ref.clone(), midi_spc_ref.clone());
                     // 指定チャンネル以外をミュート
                     let new_flags = !(1 << ch);
-                    let midi_mute = self.midi_spc_mute.load(Ordering::Relaxed);
+                    let midi_on = self.midi_spc_on.load(Ordering::Relaxed);
                     let mut midi_spc = midi_spc.lock().unwrap();
                     midi_spc.dsp.write_register(
                         &[0u8],
                         DSP_ADDRESS_CHANNEL_MUTE,
-                        if midi_mute { 0xFF } else { new_flags },
+                        if midi_on { new_flags } else { 0xFF },
                     );
-                    let pcm_mute = self.pcm_spc_mute.load(Ordering::Relaxed);
+                    let pcm_on = self.pcm_spc_on.load(Ordering::Relaxed);
                     let mut pcm_spc = pcm_spc.lock().unwrap();
                     pcm_spc.dsp.write_register(
                         &[0u8],
                         DSP_ADDRESS_CHANNEL_MUTE,
-                        if pcm_mute { 0xFF } else { new_flags },
+                        if pcm_on { new_flags } else { 0xFF },
                     );
                     self.channel_mute_flags.store(new_flags, Ordering::Relaxed);
                     // ミュートの場合は音を止める
@@ -1262,19 +1262,19 @@ impl App {
         // SPCのミュートフラグ取得・設定
         {
             let flags = self.channel_mute_flags.load(Ordering::Relaxed);
-            let pcm_mute = self.pcm_spc_mute.load(Ordering::Relaxed);
-            let midi_mute = self.midi_spc_mute.load(Ordering::Relaxed);
+            let pcm_on = self.pcm_spc_on.load(Ordering::Relaxed);
+            let midi_on = self.midi_spc_on.load(Ordering::Relaxed);
             let mut pcm_spc = pcm_spc.lock().unwrap();
             let mut midi_spc = midi_spc.lock().unwrap();
             pcm_spc.dsp.write_register(
                 &[0u8],
                 DSP_ADDRESS_CHANNEL_MUTE,
-                if pcm_mute { 0xFF } else { flags },
+                if pcm_on { flags } else { 0xFF },
             );
             midi_spc.dsp.write_register(
                 &[0u8],
                 DSP_ADDRESS_CHANNEL_MUTE,
-                if midi_mute { 0xFF } else { flags },
+                if midi_on { flags } else { 0xFF },
             );
         }
 

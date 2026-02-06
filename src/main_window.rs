@@ -23,8 +23,8 @@ pub struct MainWindow {
     theme: iced::Theme,
     source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     playback_status: Arc<RwLock<PlaybackStatus>>,
-    pcm_spc_mute: Arc<AtomicBool>,
-    midi_spc_mute: Arc<AtomicBool>,
+    pcm_spc_on: Arc<AtomicBool>,
+    midi_spc_on: Arc<AtomicBool>,
     channel_mute_flags: Arc<AtomicU8>,
     pub playback_time_sec: f32,
     pub midi_bit_rate: f32,
@@ -39,8 +39,8 @@ impl MainWindow {
         theme: iced::Theme,
         source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
-        pcm_spc_mute: Arc<AtomicBool>,
-        midi_spc_mute: Arc<AtomicBool>,
+        pcm_spc_on: Arc<AtomicBool>,
+        midi_spc_on: Arc<AtomicBool>,
         channel_mute_flags: Arc<AtomicU8>,
     ) -> Self {
         Self {
@@ -49,8 +49,8 @@ impl MainWindow {
             theme: theme,
             source_params: source_params,
             playback_status: playback_status,
-            pcm_spc_mute: pcm_spc_mute,
-            midi_spc_mute: midi_spc_mute,
+            pcm_spc_on: pcm_spc_on,
+            midi_spc_on: midi_spc_on,
             channel_mute_flags: channel_mute_flags,
             playback_time_sec: 0.0f32,
             midi_bit_rate: 0.0f32,
@@ -346,10 +346,10 @@ impl SPC2MIDI2Window for MainWindow {
                 "(F4)",
                 tooltip::Position::FollowCursor,
             ),
-            checkbox(self.pcm_spc_mute.clone().load(Ordering::Relaxed))
+            checkbox(self.pcm_spc_on.clone().load(Ordering::Relaxed))
                 .label("SPC")
                 .on_toggle(|flag| Message::SPCMuteFlagToggled(flag)),
-            checkbox(self.midi_spc_mute.clone().load(Ordering::Relaxed))
+            checkbox(self.midi_spc_on.clone().load(Ordering::Relaxed))
                 .label("MIDI")
                 .on_toggle(|flag| Message::MIDIMuteFlagToggled(flag)),
             text(format!("{:8.02}sec", self.playback_time_sec))
