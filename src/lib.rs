@@ -1343,6 +1343,7 @@ impl App {
 
         // MIDI再生スレッド生成
         let is_playing = self.stream_is_playing.clone();
+        let midi_output_configure = self.midi_output_configure.clone();
         let mut midi_cycle_count = 0;
         let _midi_thread = thread::spawn(move || {
             let interval = Duration::from_nanos(CLOCK_TICK_CYCLE_64KHZ_NANOSEC);
@@ -1351,11 +1352,17 @@ impl App {
                 {
                     let mut midispc = midi_spc.lock().unwrap();
                     let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
+                    // 64kHzのサイクル数
+                    let spc_64k_hz_cycle = if let Ok(config) = midi_output_configure.read() {
+                        config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ
+                    } else {
+                        CLOCK_TICK_CYCLE_64KHZ
+                    };
                     // 64kHzタイマーティックするまで処理
-                    while midi_cycle_count < CLOCK_TICK_CYCLE_64KHZ {
+                    while midi_cycle_count < spc_64k_hz_cycle {
                         midi_cycle_count += midispc.execute_step() as u32;
                     }
-                    midi_cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                    midi_cycle_count -= spc_64k_hz_cycle;
                     // MIDI出力
                     if let Some(msgs) = midispc.clock_tick_64k_hz() {
                         // MIDI出力のロック
