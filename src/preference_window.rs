@@ -15,7 +15,6 @@ pub struct PreferencesWindow {
     midi_out_port_name: Arc<RwLock<Option<String>>>,
     midi_ports_box: combo_box::State<String>,
     ticks_per_quarter_box: combo_box::State<u16>,
-    spc_clockup_factor_box: combo_box::State<u32>,
     midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
 }
 
@@ -96,12 +95,11 @@ impl SPC2MIDI2Window for PreferencesWindow {
             .width(Length::Fill),
             row![
                 text("SPC700 Clock-Up Factor"),
-                combo_box(
-                    &self.spc_clockup_factor_box,
-                    "SPC700 Clock-Up Factor",
-                    Some(&midi_output_configure.spc_clockup_factor),
+                number_input(
+                    &midi_output_configure.spc_clockup_factor,
+                    1..=32,
                     move |factor| { Message::MIDIOutputSPC700ClockUpFactorChanged(factor) },
-                ),
+                )
             ]
             .spacing(10)
             .padding(10)
@@ -183,7 +181,6 @@ impl PreferencesWindow {
             ticks_per_quarter_box: combo_box::State::new(vec![
                 24, 30, 48, 60, 96, 120, 192, 240, 384, 480, 960,
             ]),
-            spc_clockup_factor_box: combo_box::State::new(vec![1, 2, 4, 8, 16, 32]),
         }
     }
 }
