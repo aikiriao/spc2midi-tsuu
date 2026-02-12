@@ -855,14 +855,15 @@ impl App {
                 if let (Some(pcm_spc_ref), Some(midi_spc_ref)) = (&self.pcm_spc, &self.midi_spc) {
                     let (pcm_spc, midi_spc) = (pcm_spc_ref.clone(), midi_spc_ref.clone());
                     // 指定チャンネル以外をミュート
-                    let new_flags = !(1 << ch);
-                    let midi_on = self.midi_spc_on.load(Ordering::Relaxed);
-                    let mut midi_spc = midi_spc.lock().unwrap();
-                    midi_spc.dsp.write_register(
-                        &[0u8],
-                        DSP_ADDRESS_CHANNEL_MUTE,
-                        if midi_on { new_flags } else { 0xFF },
-                    );
+                    let solo_flags = !(1 << ch);
+                    let new_flags = if solo_flags != self.channel_mute_flags.load(Ordering::Relaxed)
+                    {
+                        solo_flags
+                    } else {
+                        // Soloの状態でもう一度同じチャンネルのSoloが押されたときは
+                        // 全チャンネルのミュートを解除
+                        0x00
+                    };
                     let pcm_on = self.pcm_spc_on.load(Ordering::Relaxed);
                     let mut pcm_spc = pcm_spc.lock().unwrap();
                     pcm_spc.dsp.write_register(
@@ -870,13 +871,22 @@ impl App {
                         DSP_ADDRESS_CHANNEL_MUTE,
                         if pcm_on { new_flags } else { 0xFF },
                     );
-                    self.channel_mute_flags.store(new_flags, Ordering::Relaxed);
+                    let midi_on = self.midi_spc_on.load(Ordering::Relaxed);
+                    let mut midi_spc = midi_spc.lock().unwrap();
+                    midi_spc.dsp.write_register(
+                        &[0u8],
+                        DSP_ADDRESS_CHANNEL_MUTE,
+                        if midi_on { new_flags } else { 0xFF },
+                    );
                     // ミュートの場合は音を止める
-                    for mute_ch in 0..8 {
-                        if mute_ch != ch {
-                            self.stop_midi_channel_sound(mute_ch);
+                    if new_flags != 0 {
+                        for mute_ch in 0..8 {
+                            if mute_ch != ch {
+                                self.stop_midi_channel_sound(mute_ch);
+                            }
                         }
                     }
+                    self.channel_mute_flags.store(new_flags, Ordering::Relaxed);
                 }
             }
             Message::ReceivedBpmAnalyzeRequest => {
