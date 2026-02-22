@@ -92,6 +92,7 @@ pub enum Message {
     EventOccurred(iced::Event),
     ReceivedSRNPlayStartRequest(u8),
     SRNPlayLoopFlagToggled(bool),
+    SRNPlayVolumeChanged(u8),
     ReceivedPlayStartRequest,
     ReceivedPlayStopRequest,
     SPCMuteFlagToggled(bool),
@@ -154,6 +155,7 @@ pub struct App {
     midi_spc_on: Arc<AtomicBool>,
     midi_preview: Arc<AtomicBool>,
     preview_loop: Arc<AtomicBool>,
+    preview_volume: Arc<AtomicU8>,
     channel_mute_flags: Arc<AtomicU8>,
     audio_out_device_name: Arc<RwLock<Option<String>>>,
     midi_out_port_name: Arc<RwLock<Option<String>>>,
@@ -231,6 +233,7 @@ impl Default for App {
             midi_spc_on: Arc::new(AtomicBool::new(true)),
             midi_preview: Arc::new(AtomicBool::new(true)),
             preview_loop: Arc::new(AtomicBool::new(true)),
+            preview_volume: Arc::new(AtomicU8::new(40)),
             channel_mute_flags: Arc::new(AtomicU8::new(0)),
             audio_out_device_name: Arc::new(RwLock::new(if let Some(device) = device {
                 Some(
@@ -326,6 +329,7 @@ impl App {
                         self.source_parameter.clone(),
                         self.midi_preview.clone(),
                         self.preview_loop.clone(),
+                        self.preview_volume.clone(),
                     );
                     self.windows.insert(id, Box::new(window));
                     return open.map(Message::SRNWindowOpened);
@@ -485,6 +489,9 @@ impl App {
             }
             Message::SRNPlayLoopFlagToggled(flag) => {
                 self.preview_loop.store(flag, Ordering::Relaxed);
+            }
+            Message::SRNPlayVolumeChanged(volume) => {
+                self.preview_volume.store(volume, Ordering::Relaxed);
             }
             Message::SRNMIDIPreviewFlagToggled(flag) => {
                 self.midi_preview.store(flag, Ordering::Relaxed);
@@ -1446,8 +1453,10 @@ impl App {
         // ループ開始位置は出力サンプル数で上限をかける
         let loop_start_progress = cmp::min(num_channels * loop_start_sample, output.len() - 1);
 
-        // ループフラグ
+        // ループフラグ・プレビューボリューム
         let preview_loop = self.preview_loop.clone();
+        let preview_volume = self.preview_volume.clone();
+        const PREVIEW_VOLUME_NORMALIZE_VALUE: f32 = 1.0 / 128.0;
 
         // 再生サンプル数（ワンショットのプレビュー再生なので再生サンプルはselfに保持しない）
         let mut progress = 0;
@@ -1460,8 +1469,12 @@ impl App {
                 buffer.fill(0.0);
                 // バッファにコピー
                 let num_copy_samples = cmp::min(output.len() - progress, buffer.len());
-                buffer[..num_copy_samples]
-                    .copy_from_slice(&output[progress..(progress + num_copy_samples)]);
+                // 出力ボリュームを適用しながらバッファにコピー
+                let volume =
+                    preview_volume.load(Ordering::Relaxed) as f32 * PREVIEW_VOLUME_NORMALIZE_VALUE;
+                for smpl in 0..num_copy_samples {
+                    buffer[smpl] = volume * output[progress + smpl];
+                }
                 progress += num_copy_samples;
                 // 端点に来た時の処理
                 if progress >= output.len() {
@@ -1472,8 +1485,12 @@ impl App {
                         while buffer_pos < buffer.len() {
                             let num_copy_samples =
                                 cmp::min(output.len() - progress, buffer.len() - buffer_pos);
-                            buffer[buffer_pos..(buffer_pos + num_copy_samples)]
-                                .copy_from_slice(&output[progress..(progress + num_copy_samples)]);
+                            // 出力ボリュームを適用しながらバッファにコピー
+                            let volume = preview_volume.load(Ordering::Relaxed) as f32
+                                * PREVIEW_VOLUME_NORMALIZE_VALUE;
+                            for smpl in 0..num_copy_samples {
+                                buffer[buffer_pos + smpl] = volume * output[progress + smpl];
+                            }
                             buffer_pos += num_copy_samples;
                             progress += num_copy_samples;
                             if progress >= output.len() {

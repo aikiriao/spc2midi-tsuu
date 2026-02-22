@@ -4,7 +4,7 @@ use crate::Message;
 use crate::SPC_SAMPLING_RATE;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
-use iced::widget::{button, checkbox, column, combo_box, row, text, tooltip};
+use iced::widget::{button, checkbox, column, combo_box, row, slider, text, tooltip};
 use iced::{
     alignment, mouse, Color, Element, Font, Length, Point, Rectangle, Renderer, Size, Theme,
 };
@@ -12,7 +12,7 @@ use iced_aw::number_input;
 use num_traits::pow::Pow;
 use std::cmp;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug)]
@@ -23,6 +23,7 @@ pub struct SRNWindow {
     source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     midi_preview: Arc<AtomicBool>,
     preview_loop: Arc<AtomicBool>,
+    preview_volume: Arc<AtomicU8>,
     program_box: combo_box::State<Program>,
     cache: Cache,
 }
@@ -189,6 +190,18 @@ impl SPC2MIDI2Window for SRNWindow {
             checkbox(self.preview_loop.load(Ordering::Relaxed))
                 .label("Loop")
                 .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(flag)),
+            text(format!(
+                "Volume {:<3}",
+                self.preview_volume.load(Ordering::Relaxed)
+            ))
+            .width(85)
+            .align_x(alignment::Alignment::Start),
+            slider(
+                0..=127,
+                self.preview_volume.load(Ordering::Relaxed),
+                Message::SRNPlayVolumeChanged
+            )
+            .width(100),
             checkbox(self.midi_preview.load(Ordering::Relaxed))
                 .label("MIDI Update Preview")
                 .on_toggle(|flag| Message::SRNMIDIPreviewFlagToggled(flag)),
@@ -228,6 +241,7 @@ impl SRNWindow {
         source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
         midi_preview: Arc<AtomicBool>,
         preview_loop: Arc<AtomicBool>,
+        preview_volume: Arc<AtomicU8>,
     ) -> Self {
         Self {
             title: title,
@@ -236,6 +250,7 @@ impl SRNWindow {
             source_parameter: source_parameter,
             midi_preview: midi_preview,
             preview_loop: preview_loop,
+            preview_volume: preview_volume,
             program_box: combo_box::State::new(Program::ALL.to_vec()),
             cache: Cache::default(),
         }
