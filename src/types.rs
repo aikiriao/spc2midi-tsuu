@@ -19,6 +19,17 @@ pub const MIN_BEATS_PER_MINUTE: u32 = 30;
 /// 最大のBPM（テンポ）
 pub const MAX_BEATS_PER_MINUTE: u32 = 240;
 
+/// ボリュームカーブ
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum VolumeCurve {
+    /// 平方根
+    SquareRoot,
+    /// 対数
+    Log, 
+    /// 線形
+    Linear,
+}
+
 /// 音源情報
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -76,7 +87,9 @@ pub struct MIDIOutputConfigure {
     /// 四分の一音符当たりのティック数
     pub ticks_per_quarter: u16,
     /// SPC700のクロックアップ倍率
-    pub spc_clockup_factor: u32,
+    pub spc_clockup_factor: u32, 
+    /// ボリュームカーブ
+    pub volume_curve: VolumeCurve,
 }
 
 /// 再生中の状態
@@ -130,6 +143,7 @@ impl MIDIOutputConfigure {
             beats_per_minute: DEFAULT_MIDI_BPM,
             ticks_per_quarter: DEFAULT_MIDI_RESOLUSIONS,
             spc_clockup_factor: DEFAULT_SPC_CLOCKUP_FACTOR,
+            volume_curve: VolumeCurve::SquareRoot,
         }
     }
 }

@@ -120,6 +120,7 @@ pub enum Message {
     MIDIOutputPortSelected(String),
     MIDIOutputBpmChanged(f32),
     MIDIOutputTicksPerQuarterChanged(u16),
+    MIDIVolumeCurveChanged(VolumeCurve),
     MIDIOutputUpdatePeriodChanged(u8),
     MIDIOutputDurationChanged(u64),
     MIDIOutputSPC700ClockUpFactorChanged(u32),
@@ -298,7 +299,7 @@ impl App {
             Message::MainWindowOpened(_id) => {}
             Message::OpenPreferencesWindow => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(500.0, 600.0),
+                    size: iced::Size::new(500.0, 650.0),
                     ..Default::default()
                 });
                 self.windows.insert(
@@ -813,6 +814,12 @@ impl App {
             Message::MIDIOutputTicksPerQuarterChanged(ticks) => {
                 let mut config = self.midi_output_configure.write().unwrap();
                 config.ticks_per_quarter = ticks;
+            }
+            Message::MIDIVolumeCurveChanged(curve) => {
+                let mut config = self.midi_output_configure.write().unwrap();
+                config.volume_curve = curve;
+                // 再生にかかわることなのでパラメータ反映
+                return Task::perform(async {}, move |_| Message::ReceivedSourceParameterUpdate);
             }
             Message::MIDIOutputUpdatePeriodChanged(period) => {
                 let mut config = self.midi_output_configure.write().unwrap();
@@ -1676,6 +1683,17 @@ fn apply_source_parameter(
         ram,
         DSP_ADDRESS_PLAYBACK_PARAMETER_UPDATE_PERIOD,
         config.playback_parameter_update_period,
+    );
+    let mut flag = 0;
+    match config.volume_curve {
+        VolumeCurve::SquareRoot => { flag |= 0x00 },
+        VolumeCurve::Log => { flag |= 0x40 },
+        VolumeCurve::Linear => { flag |= 0x80 },
+    }
+    spc.dsp.write_register(
+        ram,
+        DSP_ADDRESS_CONFIGURE_FLAG,
+        flag,
     );
 }
 

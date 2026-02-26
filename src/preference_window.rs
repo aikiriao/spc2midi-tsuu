@@ -15,7 +15,22 @@ pub struct PreferencesWindow {
     midi_out_port_name: Arc<RwLock<Option<String>>>,
     midi_ports_box: combo_box::State<String>,
     ticks_per_quarter_box: combo_box::State<u16>,
+    volume_curve_box: combo_box::State<VolumeCurve>,
     midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
+}
+
+impl VolumeCurve {
+    pub const ALL: [VolumeCurve; 3] = [Self::SquareRoot, Self::Log, Self::Linear];
+}
+
+impl std::fmt::Display for VolumeCurve {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::SquareRoot => "Square Root",
+            Self::Log => "Log",
+            Self::Linear => "Linear",
+        })
+    }
 }
 
 impl SPC2MIDI2Window for PreferencesWindow {
@@ -60,6 +75,19 @@ impl SPC2MIDI2Window for PreferencesWindow {
                     "Ticks per quarter (resolution)",
                     Some(&midi_output_configure.ticks_per_quarter),
                     move |ticks| { Message::MIDIOutputTicksPerQuarterChanged(ticks) },
+                ),
+            ]
+            .spacing(10)
+            .padding(10)
+            .align_y(alignment::Alignment::Center)
+            .width(Length::Fill),
+            row![
+                text("Volume Curve"),
+                combo_box(
+                    &self.volume_curve_box,
+                    "Volume Curve",
+                    Some(&midi_output_configure.volume_curve),
+                    move |curve| { Message::MIDIVolumeCurveChanged(curve) },
                 ),
             ]
             .spacing(10)
@@ -181,6 +209,7 @@ impl PreferencesWindow {
             ticks_per_quarter_box: combo_box::State::new(vec![
                 24, 30, 48, 60, 96, 120, 192, 240, 384, 480, 960,
             ]),
+            volume_curve_box: combo_box::State::new(VolumeCurve::ALL.to_vec()),
         }
     }
 }
