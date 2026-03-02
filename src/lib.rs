@@ -1685,15 +1685,12 @@ fn apply_source_parameter(
     );
     let mut flag = 0;
     match config.volume_curve {
-        VolumeCurve::SquareRoot => { flag |= 0x00 },
-        VolumeCurve::Log => { flag |= 0x40 },
-        VolumeCurve::Linear => { flag |= 0x80 },
+        VolumeCurve::SquareRoot => flag |= 0x00,
+        VolumeCurve::Log => flag |= 0x40,
+        VolumeCurve::Linear => flag |= 0x80,
     }
-    spc.dsp.write_register(
-        ram,
-        DSP_ADDRESS_CONFIGURE_FLAG,
-        flag,
-    );
+    spc.dsp
+        .write_register(ram, DSP_ADDRESS_CONFIGURE_FLAG, flag);
 }
 
 #[derive(Debug, Clone)]
