@@ -1252,7 +1252,6 @@ impl App {
     // 再生開始
     fn play_start(&mut self) -> Result<(), PlayStreamError> {
         const NUM_CHANNELS: usize = 2;
-        const BUFFER_SIZE: usize = 2048;
 
         // SPCの参照をクローン
         let (pcm_spc, midi_spc) =
@@ -1311,51 +1310,51 @@ impl App {
 
         // 再生ストリーム作成
         let mut spc_cycle_count = 0;
-        let mut pcm_buffer = vec![0.0f32; BUFFER_SIZE * NUM_CHANNELS];
         let stream = match stream_device.build_output_stream(
             &stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let mut progress = played_samples.load(Ordering::Relaxed);
-                // SPCをロックして獲得
-                let mut spc = pcm_spc.lock().unwrap();
+                let buffer_num_samples = buffer.len() / NUM_CHANNELS;
 
-                // レート変換比を信じ、バッファが一定量埋まるまで出力させる
-                let mut nsamples = prod.available_frames();
-                while nsamples > BUFFER_SIZE / 2 {
-                    let cycle = spc.execute_step();
-                    spc_cycle_count += cycle as u32;
-                    if spc_cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
-                        spc_cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
-                        // PCM出力
-                        if let Some(pcm) = spc.clock_tick_64k_hz() {
-                            prod.push_interleaved(&[
-                                (pcm[0] as f32) * PCM_NORMALIZE_CONST,
-                                (pcm[1] as f32) * PCM_NORMALIZE_CONST,
-                            ]);
-                            nsamples = prod.available_frames();
+                // バッファを出力サンプルで埋める
+                buffer.fill(0.0);
+                let mut buffer_progress = 0;
+                while buffer_progress < buffer_num_samples {
+                    // 入力キューがいっぱいになるまで出力計算
+                    if let Ok(mut spc) = pcm_spc.lock() {
+                        let nsamples = prod.available_frames();
+                        for _ in 0..nsamples {
+                            spc_cycle_count += spc.execute_step() as u32;
+                            if spc_cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
+                                spc_cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
+                                // PCM出力
+                                if let Some(pcm) = spc.clock_tick_64k_hz() {
+                                    prod.push_interleaved(&[
+                                        (pcm[0] as f32) * PCM_NORMALIZE_CONST,
+                                        (pcm[1] as f32) * PCM_NORMALIZE_CONST,
+                                    ]);
+                                }
+                            }
                         }
                     }
-                }
 
-                // リサンプラー出力の取り出し
-                let frames = buffer.len() / NUM_CHANNELS;
-                let status = cons.read_interleaved(&mut pcm_buffer[..frames * NUM_CHANNELS]);
-                if let ReadStatus::UnderflowOccurred { .. } = status {
-                    eprintln!("input stream fell behind: try increasing channel latency");
-                }
-
-                buffer.fill(0.0);
-                for ch in 0..NUM_CHANNELS {
-                    for (out_chunk, in_chunk) in buffer
-                        .chunks_exact_mut(NUM_CHANNELS)
-                        .zip(pcm_buffer.chunks_exact(NUM_CHANNELS))
-                    {
-                        out_chunk[ch] = in_chunk[ch];
+                    // リサンプラー出力を取り出してバッファに書き出し
+                    let num_outputs = (buffer_num_samples - buffer_progress)
+                        .min(cons.available_frames())
+                        .max(0);
+                    let status = cons.read_interleaved(
+                        &mut buffer[buffer_progress * NUM_CHANNELS
+                            ..(buffer_progress + num_outputs) * NUM_CHANNELS],
+                    );
+                    if let ReadStatus::UnderflowOccurred { .. } = status {
+                        eprintln!("input stream fell behind: try increasing channel latency");
                     }
+
+                    buffer_progress += num_outputs;
                 }
 
                 // 再生サンプル数増加
-                progress += frames;
+                progress += buffer_num_samples;
                 played_samples.store(progress, Ordering::Relaxed);
             },
             |err| eprintln!("[{}] {err}", SPC2MIDI2_TITLE_STR),
