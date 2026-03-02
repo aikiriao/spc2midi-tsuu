@@ -1,6 +1,6 @@
 mod main_window;
 mod preference_window;
-pub mod program;
+mod program;
 mod source_estimation;
 mod srn_window;
 mod types;
