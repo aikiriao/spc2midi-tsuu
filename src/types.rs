@@ -73,6 +73,10 @@ pub struct SourceParameter {
     pub enable_pitch_bend: bool,
     /// エコーをエフェクト1デプスとして出力するか
     pub echo_as_effect1: bool,
+    /// 出力チャンネルをSPCボイスと同じにするか
+    pub auto_output_channel: bool,
+    /// 出力チャンネル
+    pub fixed_output_channel: u8,
 }
 
 /// MIDI出力設定

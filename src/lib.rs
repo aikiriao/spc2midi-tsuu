@@ -112,6 +112,8 @@ pub enum Message {
     FixedVolumeChanged(u8, u8),
     EnvelopeAsExpressionFlagToggled(u8, bool),
     EchoAsEffect1FlagToggled(u8, bool),
+    AutoOutputChannelFlagToggled(u8, bool),
+    FixedOutputChannelChanged(u8, u8),
     SRNCenterNoteOctaveUpClicked(u8),
     SRNCenterNoteOctaveDownClicked(u8),
     SRNNoteEstimationClicked(u8),
@@ -315,7 +317,7 @@ impl App {
             Message::PreferencesWindowOpened(_id) => {}
             Message::OpenSRNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(800.0, 600.0),
+                    size: iced::Size::new(800.0, 700.0),
                     ..Default::default()
                 });
                 let infos = self.source_infos.read().unwrap();
@@ -576,6 +578,14 @@ impl App {
             Message::ProgramSelected(srn_no, program) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
+                    // 出力チャンネルを設定前がドラムであれば0に、設定後にドラムであれば9に
+                    let prev_is_drum = (param.program.clone() as u8) >= 0x80;
+                    let curr_is_drum = (program.clone() as u8) >= 0x80;
+                    if prev_is_drum && !curr_is_drum {
+                        param.fixed_output_channel = 0;
+                    } else if !prev_is_drum && curr_is_drum {
+                        param.fixed_output_channel = 9;
+                    }
                     param.program = program.clone();
                 }
                 let mut tasks = vec![];
@@ -680,6 +690,25 @@ impl App {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
                     param.fixed_volume = volume;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
+                }
+            }
+            Message::AutoOutputChannelFlagToggled(srn_no, flag) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.auto_output_channel = flag;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
+                }
+            }
+            Message::FixedOutputChannelChanged(srn_no, channel) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    // チャンネル変更ができるのはドラム以外のみ
+                    param.fixed_output_channel = channel;
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
                     });
@@ -1161,6 +1190,8 @@ impl App {
                     fixed_volume: 100,
                     enable_pitch_bend: !is_drum,
                     echo_as_effect1: true,
+                    auto_output_channel: true,
+                    fixed_output_channel: if is_drum { 9 } else { 0 },
                 },
             );
         }
@@ -1675,6 +1706,15 @@ fn apply_source_parameter(
             ram,
             DSP_ADDRESS_SRN_PITCHBEND_SENSITIVITY,
             if param.enable_pitch_bend { 0x80 } else { 0x00 } | param.pitch_bend_width,
+        );
+        spc.dsp.write_register(
+            ram,
+            DSP_ADDRESS_SRN_OUTPUT_CHANNEL,
+            if param.auto_output_channel {
+                0x80
+            } else {
+                0x00
+            } | param.fixed_output_channel,
         );
     }
     // 音源に依存しないパラメータ

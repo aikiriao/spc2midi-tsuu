@@ -4,7 +4,7 @@ use crate::Message;
 use crate::SPC_SAMPLING_RATE;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
-use iced::widget::{button, checkbox, column, combo_box, row, slider, text, tooltip};
+use iced::widget::{button, checkbox, column, combo_box, pick_list, row, slider, text, tooltip};
 use iced::{
     alignment, mouse, Color, Element, Font, Length, Point, Rectangle, Renderer, Size, Theme,
 };
@@ -51,6 +51,13 @@ impl SPC2MIDI2Window for SRNWindow {
         let param = params.get(&self.srn_no).unwrap();
         let center_note_int = (param.center_note >> 9) as u8;
         let center_note_fraction = (param.center_note & 0x1FF) as f32 / 512.0;
+        let output_midi_channel_list = if (param.program.clone() as u8) >= 0x80 {
+            vec![9]
+        } else if param.auto_output_channel {
+            vec![]
+        } else {
+            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15]
+        };
         let parameter_controller = column![
             row![checkbox(param.mute)
                 .label("Mute")
@@ -141,6 +148,11 @@ impl SPC2MIDI2Window for SRNWindow {
                     move |pan| { Message::FixedPanChanged(srn_no, pan) }
                 )
                 .step(1),
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center),
+            row![
                 text("Volume")
                     .width(90)
                     .align_x(alignment::Alignment::Start),
@@ -157,6 +169,22 @@ impl SPC2MIDI2Window for SRNWindow {
                     move |volume| { Message::FixedVolumeChanged(srn_no, volume) }
                 )
                 .step(1),
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center),
+            row![
+                text("Channel")
+                    .width(90)
+                    .align_x(alignment::Alignment::Start),
+                checkbox(param.auto_output_channel)
+                    .label("Use SPC Channel")
+                    .on_toggle(move |flag| Message::AutoOutputChannelFlagToggled(srn_no, flag)),
+                pick_list(
+                    output_midi_channel_list,
+                    Some(param.fixed_output_channel),
+                    move |channel| { Message::FixedOutputChannelChanged(srn_no, channel) }
+                )
             ]
             .spacing(10)
             .width(Length::Fill)
