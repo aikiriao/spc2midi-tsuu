@@ -317,7 +317,7 @@ impl App {
             Message::PreferencesWindowOpened(_id) => {}
             Message::OpenSRNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(800.0, 700.0),
+                    size: iced::Size::new(1000.0, 800.0),
                     ..Default::default()
                 });
                 let infos = self.source_infos.read().unwrap();
