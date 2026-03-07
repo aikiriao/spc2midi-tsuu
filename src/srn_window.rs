@@ -52,11 +52,11 @@ impl SPC2MIDI2Window for SRNWindow {
         let center_note_int = (param.center_note >> 9) as u8;
         let center_note_fraction = (param.center_note & 0x1FF) as f32 / 512.0;
         let output_midi_channel_list = if (param.program.clone() as u8) >= 0x80 {
-            vec![9]
+            vec![10]
         } else if param.auto_output_channel {
             vec![]
         } else {
-            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16]
         };
         let parameter_controller = column![
             row![checkbox(param.mute)
@@ -239,14 +239,14 @@ impl SPC2MIDI2Window for SRNWindow {
             tooltip(
                 Canvas::new(self)
                     .width(Length::Fill)
-                    .height(Length::FillPortion(2)),
+                    .height(Length::FillPortion(15)),
                 "Click to toggle time / frequency view",
                 tooltip::Position::Bottom,
             ),
             parameter_controller
                 .spacing(10)
                 .width(Length::Fill)
-                .height(Length::FillPortion(2)),
+                .height(Length::FillPortion(20)),
             preview_controller
                 .spacing(10)
                 .width(Length::Fill)

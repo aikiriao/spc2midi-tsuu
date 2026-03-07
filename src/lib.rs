@@ -317,7 +317,7 @@ impl App {
             Message::PreferencesWindowOpened(_id) => {}
             Message::OpenSRNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(1000.0, 800.0),
+                    size: iced::Size::new(800.0, 800.0),
                     ..Default::default()
                 });
                 let infos = self.source_infos.read().unwrap();
@@ -582,9 +582,9 @@ impl App {
                     let prev_is_drum = (param.program.clone() as u8) >= 0x80;
                     let curr_is_drum = (program.clone() as u8) >= 0x80;
                     if prev_is_drum && !curr_is_drum {
-                        param.fixed_output_channel = 0;
+                        param.fixed_output_channel = 1;
                     } else if !prev_is_drum && curr_is_drum {
-                        param.fixed_output_channel = 9;
+                        param.fixed_output_channel = 10;
                     }
                     param.program = program.clone();
                 }
@@ -707,7 +707,6 @@ impl App {
             Message::FixedOutputChannelChanged(srn_no, channel) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
-                    // チャンネル変更ができるのはドラム以外のみ
                     param.fixed_output_channel = channel;
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
@@ -1191,7 +1190,7 @@ impl App {
                     enable_pitch_bend: !is_drum,
                     echo_as_effect1: true,
                     auto_output_channel: true,
-                    fixed_output_channel: if is_drum { 9 } else { 0 },
+                    fixed_output_channel: if is_drum { 10 } else { 1 },
                 },
             );
         }
@@ -1714,7 +1713,7 @@ fn apply_source_parameter(
                 0x80
             } else {
                 0x00
-            } | param.fixed_output_channel,
+            } | (param.fixed_output_channel - 1), // 表示値は1オリジンのため
         );
     }
     // 音源に依存しないパラメータ
