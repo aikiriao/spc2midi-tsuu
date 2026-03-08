@@ -114,6 +114,7 @@ pub enum Message {
     EchoAsEffect1FlagToggled(u8, bool),
     AutoOutputChannelFlagToggled(u8, bool),
     FixedOutputChannelChanged(u8, u8),
+    InstrumentNameChanged(u8, String),
     SRNCenterNoteOctaveUpClicked(u8),
     SRNCenterNoteOctaveDownClicked(u8),
     SRNNoteEstimationClicked(u8),
@@ -317,7 +318,7 @@ impl App {
             Message::PreferencesWindowOpened(_id) => {}
             Message::OpenSRNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(800.0, 800.0),
+                    size: iced::Size::new(800.0, 700.0),
                     ..Default::default()
                 });
                 let infos = self.source_infos.read().unwrap();
@@ -708,6 +709,15 @@ impl App {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
                     param.fixed_output_channel = channel;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
+                }
+            }
+            Message::InstrumentNameChanged(srn_no, name) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.instrument_name = name;
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
                     });
@@ -1191,8 +1201,50 @@ impl App {
                     echo_as_effect1: true,
                     auto_output_channel: true,
                     fixed_output_channel: if is_drum { 10 } else { 1 },
+                    instrument_name: "".to_string(),
                 },
             );
+        }
+    }
+
+    // トラックに指定時間分のMIDIイベントを出力
+    fn dump_midi_events_to_track(
+        track: &mut rimd::Track,
+        spc: &mut spc700::spc::SPC<spc700::mididsp::MIDIDSP>,
+        config: &MIDIOutputConfigure,
+    ) {
+        let ticks_per_minutes =
+            (config.beats_per_minute as u64) * (config.ticks_per_quarter as u64);
+        let spc_64k_hz_cycle = config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ;
+        let mut total_ticks = 0;
+        let mut total_elapsed_time_nanosec = 0;
+        let mut cycle_count = 0;
+
+        while total_elapsed_time_nanosec < config.output_duration_msec * 1000_000 {
+            // 64kHzタイマーティックするまで処理
+            while cycle_count < spc_64k_hz_cycle {
+                cycle_count += spc.execute_step() as u32;
+            }
+            cycle_count -= spc_64k_hz_cycle;
+            // clock_tick_64k_hz実行後に64KHz周期がすぎるので、ここで時間を増加
+            total_elapsed_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
+            // MIDI出力
+            if let Some(out) = spc.clock_tick_64k_hz() {
+                // ティック数：経過ティック数（現時刻までの総ティック数とこれまでのティック数の差）
+                let ticks =
+                    (total_elapsed_time_nanosec * ticks_per_minutes) / 60_000_000_000 - total_ticks;
+                // メッセージ追記
+                for i in 0..out.num_messages {
+                    let msg = out.messages[i];
+                    track.events.push(TrackEvent {
+                        vtime: if i == 0 { ticks } else { 0 },
+                        event: MidiEvent::Midi(MidiMessage {
+                            data: msg.data[..msg.length].to_vec(),
+                        }),
+                    });
+                }
+                total_ticks += ticks;
+            }
         }
     }
 
@@ -1200,65 +1252,138 @@ impl App {
     fn create_smf(&self) -> Option<SMF> {
         if let Some(spc_file) = &self.spc_file {
             let config = self.midi_output_configure.read().unwrap();
+            let params = self.source_parameter.read().unwrap();
+
             let mut smf = SMF {
-                format: SMFFormat::Single,
-                tracks: vec![Track {
-                    copyright: Some("".to_string()),
-                    name: Some(String::from_utf8_lossy(&spc_file.header.music_title).to_string()),
-                    events: Vec::new(),
-                }],
+                format: SMFFormat::MultiTrack,
+                tracks: Vec::new(),
                 division: config.ticks_per_quarter as i16,
             };
 
-            // SPCの作成
-            let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new(
-                &spc_file.header.spc_register,
-                &spc_file.ram,
-                &spc_file.dsp_register,
-            );
-
-            // パラメータ適用
-            let params = self.source_parameter.read().unwrap();
-            apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
+            smf.tracks.push(Track {
+                copyright: Some("".to_string()),
+                name: Some(String::from_utf8_lossy(&spc_file.header.music_title).to_string()),
+                events: Vec::new(),
+            });
 
             // メタイベントの設定
+            // テンポ
             let quarter_usec = (60_000_000.0 / config.beats_per_minute) as u32;
             smf.tracks[0].events.push(TrackEvent {
                 vtime: 0,
                 event: MidiEvent::Meta(MetaEvent::tempo_setting(quarter_usec)),
             });
 
-            // 出力で決めた時間だけ出力
-            let ticks_per_minutes =
-                (config.beats_per_minute as u64) * (config.ticks_per_quarter as u64);
-            let spc_64k_hz_cycle = config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ;
-            let mut total_ticks = 0;
-            let mut total_elapsed_time_nanosec = 0;
-            let mut cycle_count = 0;
-            while total_elapsed_time_nanosec < config.output_duration_msec * 1000_000 {
-                // 64kHzタイマーティックするまで処理
-                while cycle_count < spc_64k_hz_cycle {
-                    cycle_count += spc.execute_step() as u32;
-                }
-                cycle_count -= spc_64k_hz_cycle;
-                // clock_tick_64k_hz実行後に64KHz周期がすぎるので、ここで時間を増加
-                total_elapsed_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
-                // MIDI出力
-                if let Some(out) = spc.clock_tick_64k_hz() {
-                    // ティック数：経過ティック数（現時刻までの総ティック数とこれまでのティック数の差）
-                    let ticks = (total_elapsed_time_nanosec * ticks_per_minutes) / 60_000_000_000
-                        - total_ticks;
-                    // メッセージ追記
-                    for i in 0..out.num_messages {
-                        let msg = out.messages[i];
-                        smf.tracks[0].events.push(TrackEvent {
-                            vtime: if i == 0 { ticks } else { 0 },
-                            event: MidiEvent::Midi(MidiMessage {
-                                data: msg.data[..msg.length].to_vec(),
-                            }),
-                        });
+            // MIDIDSPのドラム以外の音源を出力
+            for ch in 0..8 {
+                let mut track = Track {
+                    copyright: Some("".to_string()),
+                    name: Some("".to_string()),
+                    events: Vec::new(),
+                };
+
+                // SPCの作成
+                let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new(
+                    &spc_file.header.spc_register,
+                    &spc_file.ram,
+                    &spc_file.dsp_register,
+                );
+
+                // パラメータ適用
+                apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
+
+                // ドラムまたはチャンネル設定している音源をミュート（別途別トラックに出力）
+                for (srn_no, param) in params.iter() {
+                    if (param.program.clone() as u8) >= 0x80 || !param.auto_output_channel {
+                        spc.dsp
+                            .write_register(&[0u8], DSP_ADDRESS_SRN_TARGET, *srn_no);
+                        spc.dsp.write_register(&[0u8], DSP_ADDRESS_SRN_FLAG, 0x80);
                     }
-                    total_ticks += ticks;
+                }
+
+                // 指定チャンネル以外をミュート
+                spc.dsp
+                    .write_register(&[0u8], DSP_ADDRESS_CHANNEL_MUTE, !(1 << ch));
+
+                // トラックに出力
+                Self::dump_midi_events_to_track(&mut track, &mut spc, &config);
+
+                smf.tracks.push(track);
+            }
+
+            // ドラムかつ出力チャンネルが指定されていない音源を別トラックに出力
+            {
+                let mut track = Track {
+                    copyright: Some("".to_string()),
+                    name: Some("".to_string()),
+                    events: Vec::new(),
+                };
+
+                // SPCの作成
+                let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new(
+                    &spc_file.header.spc_register,
+                    &spc_file.ram,
+                    &spc_file.dsp_register,
+                );
+
+                // パラメータ適用
+                apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
+
+                // ドラム以外もしくは出力チャンネルが指定されている音源をミュート
+                for (srn_no, param) in params.iter() {
+                    if (param.program.clone() as u8) < 0x80 || !param.auto_output_channel {
+                        spc.dsp
+                            .write_register(&[0u8], DSP_ADDRESS_SRN_TARGET, *srn_no);
+                        spc.dsp.write_register(&[0u8], DSP_ADDRESS_SRN_FLAG, 0x80);
+                    }
+                }
+
+                // トラックに出力
+                Self::dump_midi_events_to_track(&mut track, &mut spc, &config);
+
+                smf.tracks.push(track);
+            }
+
+            // チャンネル出力先が指定された音源を別トラックに出力
+            for (srn_no, param) in params.iter() {
+                if !param.auto_output_channel {
+                    let mut track = Track {
+                        copyright: Some("".to_string()),
+                        name: Some("".to_string()),
+                        events: Vec::new(),
+                    };
+
+                    // SPCの作成
+                    let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new(
+                        &spc_file.header.spc_register,
+                        &spc_file.ram,
+                        &spc_file.dsp_register,
+                    );
+
+                    // パラメータ適用
+                    apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
+
+                    // 注目している音源 "以外" をミュート
+                    for (another_ch, _) in params.iter() {
+                        if another_ch != srn_no {
+                            spc.dsp
+                                .write_register(&[0u8], DSP_ADDRESS_SRN_TARGET, *another_ch);
+                            spc.dsp.write_register(&[0u8], DSP_ADDRESS_SRN_FLAG, 0x80);
+                        }
+                    }
+
+                    // トラック名を楽器名とする
+                    track.events.push(TrackEvent {
+                        vtime: 0,
+                        event: MidiEvent::Meta(MetaEvent::sequence_or_track_name(
+                            param.instrument_name.clone(),
+                        )),
+                    });
+
+                    // トラックに出力
+                    Self::dump_midi_events_to_track(&mut track, &mut spc, &config);
+
+                    smf.tracks.push(track);
                 }
             }
 

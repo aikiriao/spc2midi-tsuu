@@ -77,6 +77,8 @@ pub struct SourceParameter {
     pub auto_output_channel: bool,
     /// 出力チャンネル
     pub fixed_output_channel: u8,
+    /// 楽器名
+    pub instrument_name: String,
 }
 
 /// MIDI出力設定

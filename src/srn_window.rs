@@ -4,7 +4,9 @@ use crate::Message;
 use crate::SPC_SAMPLING_RATE;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
-use iced::widget::{button, checkbox, column, combo_box, pick_list, row, slider, text, tooltip};
+use iced::widget::{
+    button, checkbox, column, combo_box, pick_list, row, slider, text, text_input, tooltip,
+};
 use iced::{
     alignment, mouse, Color, Element, Font, Length, Point, Rectangle, Renderer, Size, Theme,
 };
@@ -184,6 +186,16 @@ impl SPC2MIDI2Window for SRNWindow {
                     output_midi_channel_list,
                     Some(param.fixed_output_channel),
                     move |channel| { Message::FixedOutputChannelChanged(srn_no, channel) }
+                ),
+                text("Inst. Name")
+                    .width(90)
+                    .align_x(alignment::Alignment::Start),
+                text_input("Instrument Name", &param.instrument_name).on_input_maybe(
+                    if param.auto_output_channel {
+                        None
+                    } else {
+                        Some(move |name| Message::InstrumentNameChanged(srn_no, name))
+                    }
                 )
             ]
             .spacing(10)
