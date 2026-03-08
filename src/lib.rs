@@ -1308,7 +1308,9 @@ impl App {
                 // トラックに出力
                 Self::dump_midi_events_to_track(&mut track, &mut spc, &config);
 
-                smf.tracks.push(track);
+                if track.events.len() > 0 {
+                    smf.tracks.push(track);
+                }
             }
 
             // ドラムかつ出力チャンネルが指定されていない音源を別トラックに出力
@@ -1341,7 +1343,9 @@ impl App {
                 // トラックに出力
                 Self::dump_midi_events_to_track(&mut track, &mut spc, &config);
 
-                smf.tracks.push(track);
+                if track.events.len() > 0 {
+                    smf.tracks.push(track);
+                }
             }
 
             // チャンネル出力先が指定された音源を別トラックに出力
