@@ -1261,7 +1261,7 @@ impl App {
             };
 
             smf.tracks.push(Track {
-                copyright: Some("".to_string()),
+                copyright: None,
                 name: Some(String::from_utf8_lossy(&spc_file.header.music_title).to_string()),
                 events: Vec::new(),
             });
@@ -1277,8 +1277,8 @@ impl App {
             // MIDIDSPのドラム以外の音源を出力
             for ch in 0..8 {
                 let mut track = Track {
-                    copyright: Some("".to_string()),
-                    name: Some("".to_string()),
+                    copyright: None,
+                    name: None,
                     events: Vec::new(),
                 };
 
@@ -1314,8 +1314,8 @@ impl App {
             // ドラムかつ出力チャンネルが指定されていない音源を別トラックに出力
             {
                 let mut track = Track {
-                    copyright: Some("".to_string()),
-                    name: Some("".to_string()),
+                    copyright: None,
+                    name: None,
                     events: Vec::new(),
                 };
 
@@ -1348,8 +1348,8 @@ impl App {
             for (srn_no, param) in params.iter() {
                 if !param.auto_output_channel {
                     let mut track = Track {
-                        copyright: Some("".to_string()),
-                        name: Some("".to_string()),
+                        copyright: None,
+                        name: None,
                         events: Vec::new(),
                     };
 
