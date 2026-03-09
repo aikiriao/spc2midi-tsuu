@@ -188,7 +188,7 @@ impl SPC2MIDI2Window for SRNWindow {
                     move |channel| { Message::FixedOutputChannelChanged(srn_no, channel) }
                 ),
                 text("Inst. Name")
-                    .width(90)
+                    .width(80)
                     .align_x(alignment::Alignment::Start),
                 text_input("Instrument Name", &param.instrument_name).on_input_maybe(
                     if param.auto_output_channel {
