@@ -192,14 +192,21 @@ impl SPC2MIDI2Window for MainWindow {
                     text(format!("0x{:02X}", key))
                         .width(30)
                         .align_x(alignment::Alignment::Start),
-                    text(format!("{}", param.program))
-                        .color(if param.mute {
-                            self.theme.palette().warning
+                    text(format!(
+                        "{}",
+                        if !param.auto_output_channel && param.instrument_name != "" {
+                            param.instrument_name.clone()
                         } else {
-                            self.theme.palette().text
-                        })
-                        .width(Length::FillPortion(17))
-                        .align_x(alignment::Alignment::Start),
+                            param.program.to_string()
+                        }
+                    ))
+                    .color(if param.mute {
+                        self.theme.palette().warning
+                    } else {
+                        self.theme.palette().text
+                    })
+                    .width(Length::FillPortion(17))
+                    .align_x(alignment::Alignment::Start),
                     stack![
                         progress_bar(0.0..=127.0, param.center_note as f32 / 512.0).style(
                             |theme: &Theme| progress_bar::Style {
@@ -232,13 +239,11 @@ impl SPC2MIDI2Window for MainWindow {
                             .align_y(alignment::Alignment::Center),
                     ]
                     .width(Length::FillPortion(6)),
-                    text(
-                        if param.auto_output_channel {
-                            format!("Auto")
-                        } else {
-                            format!("{}", param.fixed_output_channel)
-                        }
-                    )
+                    text(if param.auto_output_channel {
+                        format!("Auto")
+                    } else {
+                        format!("{}", param.fixed_output_channel)
+                    })
                     .width(Length::FillPortion(3))
                     .align_x(alignment::Alignment::Start),
                     button("Open")
@@ -300,7 +305,15 @@ impl SPC2MIDI2Window for MainWindow {
                         .width(30),
                     {
                         if let Some(param) = params.get(&status.srn_no[ch]) {
-                            text(format!("{}", param.program)).color(if param.mute {
+                            text(format!(
+                                "{}",
+                                if !param.auto_output_channel && param.instrument_name != "" {
+                                    param.instrument_name.clone()
+                                } else {
+                                    param.program.to_string()
+                                }
+                            ))
+                            .color(if param.mute {
                                 self.theme.palette().warning
                             } else {
                                 self.theme.palette().text
