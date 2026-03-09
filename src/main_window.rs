@@ -198,7 +198,7 @@ impl SPC2MIDI2Window for MainWindow {
                         } else {
                             self.theme.palette().text
                         })
-                        .width(Length::FillPortion(20))
+                        .width(Length::FillPortion(17))
                         .align_x(alignment::Alignment::Start),
                     stack![
                         progress_bar(0.0..=127.0, param.center_note as f32 / 512.0).style(
@@ -232,6 +232,15 @@ impl SPC2MIDI2Window for MainWindow {
                             .align_y(alignment::Alignment::Center),
                     ]
                     .width(Length::FillPortion(6)),
+                    text(
+                        if param.auto_output_channel {
+                            format!("Auto")
+                        } else {
+                            format!("{}", param.fixed_output_channel)
+                        }
+                    )
+                    .width(Length::FillPortion(3))
+                    .align_x(alignment::Alignment::Start),
                     button("Open")
                         .on_press(Message::OpenSRNWindow(*key))
                         .width(60),
@@ -246,11 +255,16 @@ impl SPC2MIDI2Window for MainWindow {
         let srn_index = row![
             text("SRN").width(30).align_x(alignment::Alignment::Start),
             text("Program")
-                .width(Length::FillPortion(20))
+                .width(Length::FillPortion(17))
                 .align_x(alignment::Alignment::Start),
-            text("C.Note").width(Length::FillPortion(6)).align_x(alignment::Alignment::Start),
+            text("C.Note")
+                .width(Length::FillPortion(6))
+                .align_x(alignment::Alignment::Start),
             text("Velocity")
                 .width(Length::FillPortion(6))
+                .align_x(alignment::Alignment::Start),
+            text("CH")
+                .width(Length::FillPortion(3))
                 .align_x(alignment::Alignment::Start),
             text("Config")
                 .width(60)
@@ -325,10 +339,18 @@ impl SPC2MIDI2Window for MainWindow {
             text("Program")
                 .width(Length::FillPortion(12))
                 .align_x(alignment::Alignment::Start),
-            text("Pitch").width(Length::FillPortion(6)).align_x(alignment::Alignment::Start),
-            text("Env.").width(Length::FillPortion(5)).align_x(alignment::Alignment::Start),
-            text("Lvol").width(Length::FillPortion(4)).align_x(alignment::Alignment::Start),
-            text("Rvol").width(Length::FillPortion(4)).align_x(alignment::Alignment::Start),
+            text("Pitch")
+                .width(Length::FillPortion(6))
+                .align_x(alignment::Alignment::Start),
+            text("Env.")
+                .width(Length::FillPortion(5))
+                .align_x(alignment::Alignment::Start),
+            text("Lvol")
+                .width(Length::FillPortion(4))
+                .align_x(alignment::Alignment::Start),
+            text("Rvol")
+                .width(Length::FillPortion(4))
+                .align_x(alignment::Alignment::Start),
         ]
         .spacing(10)
         .width(Length::Fill)
