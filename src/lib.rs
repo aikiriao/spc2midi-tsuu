@@ -1209,9 +1209,9 @@ impl App {
 
     // トラックに指定時間分のMIDIイベントを出力
     fn dump_midi_events_to_track(
-        track: &mut rimd::Track,
-        spc: &mut spc700::spc::SPC<spc700::mididsp::MIDIDSP>,
         config: &MIDIOutputConfigure,
+        spc: &mut spc700::spc::SPC<spc700::mididsp::MIDIDSP>,
+        track: &mut rimd::Track,
     ) {
         // ナノ秒当たりのティック数
         let ticks_per_nanosec =
@@ -1308,7 +1308,7 @@ impl App {
                     .write_register(&[0u8], DSP_ADDRESS_CHANNEL_MUTE, !(1 << ch));
 
                 // トラックに出力
-                Self::dump_midi_events_to_track(&mut track, &mut spc, &config);
+                Self::dump_midi_events_to_track(&config, &mut spc, &mut track);
 
                 if track.events.len() > 0 {
                     smf.tracks.push(track);
@@ -1343,7 +1343,7 @@ impl App {
                 }
 
                 // トラックに出力
-                Self::dump_midi_events_to_track(&mut track, &mut spc, &config);
+                Self::dump_midi_events_to_track(&config, &mut spc, &mut track);
 
                 if track.events.len() > 0 {
                     smf.tracks.push(track);
@@ -1387,7 +1387,7 @@ impl App {
                     });
 
                     // トラックに出力
-                    Self::dump_midi_events_to_track(&mut track, &mut spc, &config);
+                    Self::dump_midi_events_to_track(&config, &mut spc, &mut track);
 
                     smf.tracks.push(track);
                 }
