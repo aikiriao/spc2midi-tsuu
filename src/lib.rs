@@ -1213,11 +1213,12 @@ impl App {
         spc: &mut spc700::spc::SPC<spc700::mididsp::MIDIDSP>,
         config: &MIDIOutputConfigure,
     ) {
-        let ticks_per_minutes =
-            (config.beats_per_minute as u64) * (config.ticks_per_quarter as u64);
+        // ナノ秒当たりのティック数
+        let ticks_per_nanosec =
+            (config.beats_per_minute as f64) * (config.ticks_per_quarter as f64) / 60_000_000_000.0;
         let spc_64k_hz_cycle = config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ;
-        let mut total_ticks = 0;
         let mut total_elapsed_time_nanosec = 0;
+        let mut previous_elapsed_ticks = 0;
         let mut cycle_count = 0;
 
         while total_elapsed_time_nanosec < config.output_duration_msec * 1000_000 {
@@ -1230,20 +1231,21 @@ impl App {
             total_elapsed_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
             // MIDI出力
             if let Some(out) = spc.clock_tick_64k_hz() {
-                // ティック数：経過ティック数（現時刻までの総ティック数とこれまでのティック数の差）
-                let ticks =
-                    (total_elapsed_time_nanosec * ticks_per_minutes) / 60_000_000_000 - total_ticks;
+                // 開始時刻からの累計ティック数と前回のティック数から差分計算
+                let total_elapsed_ticks =
+                    ((total_elapsed_time_nanosec as f64) * ticks_per_nanosec).round() as u64;
+                let delta_ticks = total_elapsed_ticks - previous_elapsed_ticks;
                 // メッセージ追記
                 for i in 0..out.num_messages {
                     let msg = out.messages[i];
                     track.events.push(TrackEvent {
-                        vtime: if i == 0 { ticks } else { 0 },
+                        vtime: if i == 0 { delta_ticks } else { 0 },
                         event: MidiEvent::Midi(MidiMessage {
                             data: msg.data[..msg.length].to_vec(),
                         }),
                     });
                 }
-                total_ticks += ticks;
+                previous_elapsed_ticks = total_elapsed_ticks;
             }
         }
     }
