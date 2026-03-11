@@ -51,7 +51,7 @@ impl SPC2MIDI2Window for PreferencesWindow {
                     (MIN_BEATS_PER_MINUTE as f32)..=(MAX_BEATS_PER_MINUTE as f32),
                     move |bpm| { Message::MIDIOutputBpmChanged(bpm) },
                 )
-                .step(1.0),
+                .step(0.01),
                 tooltip(
                     button("▼").on_press(Message::ReceivedBpmHalfButtonClicked),
                     "Half BPM",

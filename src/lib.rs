@@ -72,6 +72,8 @@ const MIDI_PREVIEW_DURATION_MSEC: u64 = 500;
 const DEFAULT_ANALYZING_TIME_SEC: u32 = 120;
 /// 1オクターブに相当するノート(9bit小数部の固定小数)
 const OCTAVE_NOTE: u16 = 12 << 9;
+/// 8kHzタイマーの分間ティック数=(60 / (1 / 8000))
+const TICK_PER_MINUTES_8KHZ: u32 = 480000;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -846,8 +848,7 @@ impl App {
             }
             Message::MIDIOutputBpmChanged(bpm) => {
                 let mut config = self.midi_output_configure.write().unwrap();
-                // 0.125刻みに丸め込む
-                config.beats_per_minute = (bpm * 8.0).round() / 8.0;
+                config.beats_per_minute = Self::update_bpm(config.beats_per_minute, bpm);
             }
             Message::MIDIOutputTicksPerQuarterChanged(ticks) => {
                 let mut config = self.midi_output_configure.write().unwrap();
@@ -1049,6 +1050,30 @@ impl App {
         }
     }
 
+    /// BPMをSPC700の8kHzタイマーの倍数BPMに丸め込む
+    fn round_bpm(bpm: f32) -> (u16, f32) {
+        // 8kHzがティックする回数に丸め込む
+        let clock_factor = ((TICK_PER_MINUTES_8KHZ as f32) / bpm).round() as u16;
+        // その値からBPMを逆算
+        (
+            clock_factor,
+            (TICK_PER_MINUTES_8KHZ as f32) / (clock_factor as f32),
+        )
+    }
+
+    /// BPMを8kHzタイマーの最小解像度で更新
+    fn update_bpm(current_bpm: f32, new_bpm: f32) -> f32 {
+        let (factor, _) = Self::round_bpm(current_bpm);
+        let factor = if new_bpm > current_bpm {
+            factor - 1
+        } else if new_bpm < current_bpm {
+            factor + 1
+        } else {
+            factor
+        };
+        (TICK_PER_MINUTES_8KHZ as f32) / (factor as f32)
+    }
+
     /// BPM（テンポ）推定
     fn bpm_estimation(
         analyze_duration_sec: u32,
@@ -1092,9 +1117,9 @@ impl App {
             }
         }
 
-        // 小数点以下は0.25に丸め込む
-        let estimated_bpm = estimate_bpm(&onset_signal, 64_000.0);
-        f32::round(estimated_bpm * 4.0) / 4.0
+        let bpm = estimate_bpm(&onset_signal, 64_000.0);
+        let (_, bpm) = Self::round_bpm(bpm);
+        bpm
     }
 
     /// 音源ソースの解析
