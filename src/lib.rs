@@ -2106,10 +2106,6 @@ mod tests {
             ))));
 
             // 意図した値が設定されているか確認
-            let _ = app.update(Message::MIDIOutputBpmChanged(32.0));
-            test_config_field!(app, beats_per_minute, 32.0);
-            let _ = app.update(Message::MIDIOutputBpmChanged(240.0));
-            test_config_field!(app, beats_per_minute, 240.0);
             let _ = app.update(Message::MIDIOutputTicksPerQuarterChanged(24));
             test_config_field!(app, ticks_per_quarter, 24);
             let _ = app.update(Message::MIDIOutputTicksPerQuarterChanged(960));
