@@ -2978,9 +2978,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.21.3"
+version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "orbclient"
@@ -3921,7 +3921,7 @@ dependencies = [
 
 [[package]]
 name = "spc2midi-tsuu"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "cpal",
  "czt",
@@ -3943,7 +3943,7 @@ dependencies = [
 [[package]]
 name = "spc700"
 version = "0.1.0"
-source = "git+https://github.com/aikiriao/spc700.git#2ceb5c3a4532a2793f6eb3715f190916d6c0d9f4"
+source = "git+https://github.com/aikiriao/spc700.git#fa52b41493078212f5f37399b738fa5ad2d35509"
 dependencies = [
  "libm",
  "log",
