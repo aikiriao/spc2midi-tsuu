@@ -169,7 +169,7 @@ pub fn estimate_drum_and_note(source_info: &SourceInformation) -> (bool, f32) {
 }
 
 /// 超簡易テンポ推定
-pub fn estimate_bpm(onset_signal: &Vec<f32>, sampling_rate: f32) -> f32 {
+pub fn estimate_bpm(onset_signal: &[f32], sampling_rate: f32) -> f32 {
     // フレームに区切り平均をとる
     // （この操作は間引きに相当するので間引く前にLPFをかけるとよいが低速なのでやめる）
     let frame_size: usize = (sampling_rate * 0.001).round() as usize;
