@@ -172,17 +172,10 @@ pub fn estimate_drum_and_note(source_info: &SourceInformation) -> (bool, f32) {
 pub fn estimate_bpm(onset_signal: &[f32], sampling_rate: f32) -> f32 {
     // フレームに区切り平均をとる
     // （この操作は間引きに相当するので間引く前にLPFをかけるとよいが低速なのでやめる）
-    let frame_size: usize = (sampling_rate * 0.001).round() as usize;
+    let frame_size: usize = (sampling_rate * 0.01).round() as usize;
     let onset_envelope: Vec<_> = onset_signal
         .chunks(frame_size)
         .map(|c| c.iter().sum::<f32>() / frame_size as f32)
-        .collect();
-
-    // 窓かけ
-    let onset_envelope: Vec<_> = onset_envelope
-        .iter()
-        .enumerate()
-        .map(|(i, r)| r * f32::sin((PI * (i as f32)) / (onset_envelope.len() - 1) as f32).pow(2.0))
         .collect();
 
     // 自己相関計算
