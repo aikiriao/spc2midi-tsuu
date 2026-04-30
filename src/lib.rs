@@ -379,16 +379,24 @@ impl App {
                                     &spc_file.dsp_register,
                                 );
                                 // SPCを生成
-                                self.pcm_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
-                                    &spc_file.header.spc_register,
-                                    &spc_file.ram,
-                                    &spc_file.dsp_register,
-                                )))));
-                                self.midi_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
-                                    &spc_file.header.spc_register,
-                                    &spc_file.ram,
-                                    &spc_file.dsp_register,
-                                )))));
+                                self.pcm_spc = Some(Arc::new(Mutex::new(Box::new({
+                                    let mut spc = SPC::new();
+                                    spc.initialize(
+                                        &spc_file.header.spc_register,
+                                        &spc_file.ram,
+                                        &spc_file.dsp_register,
+                                    );
+                                    spc
+                                }))));
+                                self.midi_spc = Some(Arc::new(Mutex::new(Box::new({
+                                    let mut spc = SPC::new();
+                                    spc.initialize(
+                                        &spc_file.header.spc_register,
+                                        &spc_file.ram,
+                                        &spc_file.dsp_register,
+                                    );
+                                    spc
+                                }))));
                                 // 再生サンプル数・MIDI出力サイズをリセット
                                 self.stream_played_samples.store(0, Ordering::Relaxed);
                                 self.midi_output_bytes.store(0, Ordering::Relaxed);
@@ -520,16 +528,24 @@ impl App {
                 }
                 // DSPをリセット
                 if let Some(spc_file) = &self.spc_file {
-                    self.pcm_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
-                        &spc_file.header.spc_register,
-                        &spc_file.ram,
-                        &spc_file.dsp_register,
-                    )))));
-                    self.midi_spc = Some(Arc::new(Mutex::new(Box::new(SPC::new(
-                        &spc_file.header.spc_register,
-                        &spc_file.ram,
-                        &spc_file.dsp_register,
-                    )))));
+                    if let Some(pcm_spc_ref) = &self.pcm_spc {
+                        let pcm_spc = pcm_spc_ref.clone();
+                        let mut pcm_spc = pcm_spc.lock().unwrap();
+                        pcm_spc.initialize(
+                            &spc_file.header.spc_register,
+                            &spc_file.ram,
+                            &spc_file.dsp_register,
+                        );
+                    }
+                    if let Some(midi_spc_ref) = &self.midi_spc {
+                        let midi_spc = midi_spc_ref.clone();
+                        let mut midi_spc = midi_spc.lock().unwrap();
+                        midi_spc.initialize(
+                            &spc_file.header.spc_register,
+                            &spc_file.ram,
+                            &spc_file.dsp_register,
+                        );
+                    }
                 }
                 // Stopの場合は再生サンプル数をリセット
                 self.stream_played_samples.store(0, Ordering::Relaxed);
@@ -1083,8 +1099,11 @@ impl App {
     ) -> f32 {
         let analyze_duration_64khz_ticks = analyze_duration_sec * 64000;
 
-        let mut midispc: Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>> =
-            Box::new(SPC::new(&register, ram, dsp_register));
+        let mut midispc: Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>> = Box::new({
+            let mut spc = SPC::new();
+            spc.initialize(&register, ram, dsp_register);
+            spc
+        });
         let mut cycle_count = 0;
         let mut tick64khz_count = 0;
 
@@ -1139,8 +1158,11 @@ impl App {
         *params = BTreeMap::new();
 
         // 一定期間シミュレートし、サンプルソース番号とそれに紐づく開始アドレスを取得
-        let mut midispc: Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>> =
-            Box::new(SPC::new(&register, ram, dsp_register));
+        let mut midispc: Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>> = Box::new({
+            let mut spc = SPC::new();
+            spc.initialize(&register, ram, dsp_register);
+            spc
+        });
         let mut cycle_count = 0;
         let mut tick64khz_count = 0;
         let mut start_address_map = BTreeMap::new();
@@ -1310,7 +1332,8 @@ impl App {
                 };
 
                 // SPCの作成
-                let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new(
+                let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new();
+                spc.initialize(
                     &spc_file.header.spc_register,
                     &spc_file.ram,
                     &spc_file.dsp_register,
@@ -1349,7 +1372,8 @@ impl App {
                 };
 
                 // SPCの作成
-                let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new(
+                let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new();
+                spc.initialize(
                     &spc_file.header.spc_register,
                     &spc_file.ram,
                     &spc_file.dsp_register,
@@ -1385,7 +1409,8 @@ impl App {
                     };
 
                     // SPCの作成
-                    let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new(
+                    let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new();
+                    spc.initialize(
                         &spc_file.header.spc_register,
                         &spc_file.ram,
                         &spc_file.dsp_register,
