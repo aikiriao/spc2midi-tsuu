@@ -1,3 +1,4 @@
+pub mod cli;
 mod main_window;
 mod preference_window;
 mod program;
@@ -1340,7 +1341,7 @@ impl App {
     }
 
     // SMFを作成
-    fn create_smf(&self) -> Option<SMF> {
+    pub fn create_smf(&self) -> Option<SMF> {
         if let Some(spc_file) = &self.spc_file {
             let config = self.midi_output_configure.read().unwrap();
             let params = self.source_parameter.read().unwrap();
@@ -1420,7 +1421,7 @@ impl App {
     }
 
     // JSON生成
-    fn create_json(&self) -> serde_json::Value {
+    pub fn create_json(&self) -> serde_json::Value {
         let config = self.midi_output_configure.read().unwrap();
         let params = self.source_parameter.read().unwrap();
         json!(ExportInformation {
