@@ -1388,25 +1388,40 @@ impl App {
                 apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
 
                 // 出力先チャンネルがmidi_ch以外になっているルーティングをミュート
-                let mut exist_events = false;
+                let mut track_names = vec![];
+                let mut exist_routing_in_track = false;
                 for (srn_no, param) in params.iter() {
+                    let mut exist_routing = false;
                     for ch in 0..8 {
-                        if (param.program.clone() as u8) >= 0x80
-                            || param.channel_routing[ch] != midi_ch
-                        {
+                        if param.channel_routing[ch] != midi_ch {
                             let value = 0x80 | ((ch << 4) as u8) | (midi_ch as u8);
                             spc.dsp
                                 .write_register(&[0u8], DSP_ADDRESS_SRN_TARGET, *srn_no);
                             spc.dsp
                                 .write_register(&[0u8], DSP_ADDRESS_SRN_CHANNEL_ROUTING, value);
                         } else {
-                            exist_events = true;
+                            exist_routing = true;
+                        }
+                    }
+                    if exist_routing {
+                        exist_routing_in_track = true;
+                        if param.instrument_name != "" {
+                            track_names.push(param.instrument_name.clone());
                         }
                     }
                 }
 
                 // トラックに出力
-                if exist_events {
+                if exist_routing_in_track {
+                    // トラックに含まれる名前を連結してメタイベントに登録
+                    if track_names.len() > 0 {
+                        track.events.push(TrackEvent {
+                            vtime: 0,
+                            event: MidiEvent::Meta(MetaEvent::sequence_or_track_name(
+                                track_names.join("/"),
+                            )),
+                        });
+                    }
                     Self::dump_midi_events_to_track(&config, &mut spc, &mut track);
                     if track.events.len() > 0 {
                         smf.tracks.push(track);
