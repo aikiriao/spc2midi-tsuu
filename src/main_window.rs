@@ -194,7 +194,7 @@ impl SPC2MIDI2Window for MainWindow {
                         .align_x(alignment::Alignment::Start),
                     text(format!(
                         "{}",
-                        if !param.auto_output_channel && param.instrument_name != "" {
+                        if param.instrument_name != "" {
                             param.instrument_name.clone()
                         } else {
                             param.program.to_string()
@@ -239,13 +239,6 @@ impl SPC2MIDI2Window for MainWindow {
                             .align_y(alignment::Alignment::Center),
                     ]
                     .width(Length::FillPortion(6)),
-                    text(if param.auto_output_channel {
-                        format!("Auto")
-                    } else {
-                        format!("{}", param.fixed_output_channel)
-                    })
-                    .width(Length::FillPortion(3))
-                    .align_x(alignment::Alignment::Start),
                     button("Open")
                         .on_press(Message::OpenSRNWindow(*key))
                         .width(60),
@@ -267,9 +260,6 @@ impl SPC2MIDI2Window for MainWindow {
                 .align_x(alignment::Alignment::Start),
             text("Velocity")
                 .width(Length::FillPortion(6))
-                .align_x(alignment::Alignment::Start),
-            text("CH")
-                .width(Length::FillPortion(3))
                 .align_x(alignment::Alignment::Start),
             text("Config")
                 .width(60)
@@ -302,12 +292,13 @@ impl SPC2MIDI2Window for MainWindow {
                     text(format!("0x{:02X}", status.srn_no[ch]))
                         .align_y(alignment::Alignment::Center)
                         .height(Length::Fill)
+                        .size(14.0)
                         .width(30),
                     {
                         if let Some(param) = params.get(&status.srn_no[ch]) {
                             text(format!(
                                 "{}",
-                                if !param.auto_output_channel && param.instrument_name != "" {
+                                if param.instrument_name != "" {
                                     param.instrument_name.clone()
                                 } else {
                                     param.program.to_string()
@@ -326,6 +317,23 @@ impl SPC2MIDI2Window for MainWindow {
                     .size(14.0)
                     .height(Length::Fill)
                     .width(Length::FillPortion(12)),
+                    {
+                        if let Some(param) = params.get(&status.srn_no[ch]) {
+                            text(format!("{}", param.channel_routing[ch])).color(
+                                if param.channel_mute[ch] {
+                                    self.theme.palette().warning
+                                } else {
+                                    self.theme.palette().text
+                                },
+                            )
+                        } else {
+                            text(format!(""))
+                        }
+                    }
+                    .align_x(alignment::Alignment::Center)
+                    .align_y(alignment::Alignment::Center)
+                    .height(Length::Fill)
+                    .width(Length::FillPortion(2)),
                     Canvas::new(pitch_indicator[ch])
                         .height(Length::Fill)
                         .width(Length::FillPortion(6)),
@@ -351,6 +359,9 @@ impl SPC2MIDI2Window for MainWindow {
             text("SRN").width(30).align_x(alignment::Alignment::Start),
             text("Program")
                 .width(Length::FillPortion(12))
+                .align_x(alignment::Alignment::Start),
+            text("CH")
+                .width(Length::FillPortion(2))
                 .align_x(alignment::Alignment::Start),
             text("Pitch")
                 .width(Length::FillPortion(6))

@@ -2,6 +2,7 @@ mod main_window;
 mod preference_window;
 mod program;
 mod source_estimation;
+mod srn_ch_routing_window;
 mod srn_window;
 mod types;
 
@@ -9,6 +10,7 @@ use crate::main_window::*;
 use crate::preference_window::*;
 use crate::program::*;
 use crate::source_estimation::*;
+use crate::srn_ch_routing_window::*;
 use crate::srn_window::*;
 use crate::types::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -83,6 +85,8 @@ pub enum Message {
     PreferencesWindowOpened(window::Id),
     OpenSRNWindow(u8),
     SRNWindowOpened(window::Id),
+    OpenSRNChannelRoutingWindow(u8),
+    SRNChannelRoutingWindowOpened(window::Id),
     WindowClosed(window::Id),
     OpenFile,
     FileOpened(Result<(PathBuf, LoadedFile), Error>),
@@ -114,8 +118,9 @@ pub enum Message {
     FixedVolumeChanged(u8, u8),
     EnvelopeAsExpressionFlagToggled(u8, bool),
     EchoAsEffect1FlagToggled(u8, bool),
-    AutoOutputChannelFlagToggled(u8, bool),
-    FixedOutputChannelChanged(u8, u8),
+    ChannelRoutingMuteChanged(u8, u8, bool),
+    ChannelRoutingChanged(u8, u8, u8),
+    ChannelRoutingReseted(u8),
     InstrumentNameChanged(u8, String),
     SRNCenterNoteOctaveUpClicked(u8),
     SRNCenterNoteOctaveDownClicked(u8),
@@ -320,7 +325,7 @@ impl App {
             Message::PreferencesWindowOpened(_id) => {}
             Message::OpenSRNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(800.0, 700.0),
+                    size: iced::Size::new(800.0, 750.0),
                     ..Default::default()
                 });
                 let infos = self.source_infos.read().unwrap();
@@ -342,6 +347,20 @@ impl App {
                 }
             }
             Message::SRNWindowOpened(_id) => {}
+            Message::OpenSRNChannelRoutingWindow(srn_no) => {
+                let (id, open) = window::open(window::Settings {
+                    size: iced::Size::new(350.0, 300.0),
+                    ..Default::default()
+                });
+                let window = SRNChannelRoutingWindow::new(
+                    format!("SRN 0x{:02X} Channel Routing", srn_no),
+                    srn_no,
+                    self.source_parameter.clone(),
+                );
+                self.windows.insert(id, Box::new(window));
+                return open.map(Message::SRNChannelRoutingWindowOpened);
+            }
+            Message::SRNChannelRoutingWindowOpened(_id) => {}
             Message::WindowClosed(id) => {
                 if id == self.main_window_id {
                     return iced::exit();
@@ -597,13 +616,17 @@ impl App {
             Message::ProgramSelected(srn_no, program) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
-                    // 出力チャンネルを設定前がドラムであれば0に、設定後にドラムであれば9に
+                    // 出力チャンネルを設定前がドラムであればSPCと同じに、設定後にドラムであれば9に
                     let prev_is_drum = (param.program.clone() as u8) >= 0x80;
                     let curr_is_drum = (program.clone() as u8) >= 0x80;
                     if prev_is_drum && !curr_is_drum {
-                        param.fixed_output_channel = 1;
+                        for ch in 0..8 {
+                            param.channel_routing[ch] = ch as u8;
+                        }
                     } else if !prev_is_drum && curr_is_drum {
-                        param.fixed_output_channel = 10;
+                        for ch in 0..8 {
+                            param.channel_routing[ch] = 9u8;
+                        }
                     }
                     param.program = program.clone();
                 }
@@ -714,19 +737,34 @@ impl App {
                     });
                 }
             }
-            Message::AutoOutputChannelFlagToggled(srn_no, flag) => {
+            Message::ChannelRoutingMuteChanged(srn_no, channel, flag) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
-                    param.auto_output_channel = flag;
+                    param.channel_mute[channel as usize] = flag;
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
                     });
                 }
             }
-            Message::FixedOutputChannelChanged(srn_no, channel) => {
+            Message::ChannelRoutingChanged(srn_no, src_ch, dst_ch) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
-                    param.fixed_output_channel = channel;
+                    param.channel_routing[src_ch as usize] = dst_ch;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
+                }
+            }
+            Message::ChannelRoutingReseted(srn_no) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    for ch in 0..8 {
+                        param.channel_routing[ch] = if (param.program.clone() as u8) >= 0x80 {
+                            9u8
+                        } else {
+                            ch as u8
+                        };
+                    }
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
                     });
@@ -1246,8 +1284,12 @@ impl App {
                     fixed_volume: 100,
                     enable_pitch_bend: !is_drum,
                     echo_as_effect1: true,
-                    auto_output_channel: true,
-                    fixed_output_channel: if is_drum { 10 } else { 1 },
+                    channel_routing: if is_drum {
+                        [9; 8]
+                    } else {
+                        [0, 1, 2, 3, 4, 5, 6, 7]
+                    },
+                    channel_mute: [false; 8],
                     instrument_name: "".to_string(),
                 },
             );
@@ -1309,6 +1351,9 @@ impl App {
                 division: config.ticks_per_quarter as i16,
             };
 
+            // SPCの作成
+            let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new();
+
             smf.tracks.push(Track {
                 copyright: None,
                 name: Some(String::from_utf8_lossy(&spc_file.header.music_title).to_string()),
@@ -1323,16 +1368,15 @@ impl App {
                 event: MidiEvent::Meta(MetaEvent::tempo_setting(quarter_usec)),
             });
 
-            // MIDIDSPのドラム以外の音源を出力
-            for ch in 0..8 {
+            // MIDIチャンネルごとに出力
+            for midi_ch in 0..16 {
                 let mut track = Track {
                     copyright: None,
                     name: None,
                     events: Vec::new(),
                 };
 
-                // SPCの作成
-                let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new();
+                // SPC初期化
                 spc.initialize(
                     &spc_file.header.spc_register,
                     &spc_file.ram,
@@ -1342,104 +1386,30 @@ impl App {
                 // パラメータ適用
                 apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
 
-                // ドラムまたはチャンネル設定している音源をミュート（別途別トラックに出力）
+                // 出力先チャンネルがmidi_ch以外になっているルーティングをミュート
+                let mut exist_events = false;
                 for (srn_no, param) in params.iter() {
-                    if (param.program.clone() as u8) >= 0x80 || !param.auto_output_channel {
-                        spc.dsp
-                            .write_register(&[0u8], DSP_ADDRESS_SRN_TARGET, *srn_no);
-                        spc.dsp.write_register(&[0u8], DSP_ADDRESS_SRN_FLAG, 0x80);
-                    }
-                }
-
-                // 指定チャンネル以外をミュート
-                spc.dsp
-                    .write_register(&[0u8], DSP_ADDRESS_CHANNEL_MUTE, !(1 << ch));
-
-                // トラックに出力
-                Self::dump_midi_events_to_track(&config, &mut spc, &mut track);
-
-                if track.events.len() > 0 {
-                    smf.tracks.push(track);
-                }
-            }
-
-            // ドラムかつ出力チャンネルが指定されていない音源を別トラックに出力
-            {
-                let mut track = Track {
-                    copyright: None,
-                    name: None,
-                    events: Vec::new(),
-                };
-
-                // SPCの作成
-                let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new();
-                spc.initialize(
-                    &spc_file.header.spc_register,
-                    &spc_file.ram,
-                    &spc_file.dsp_register,
-                );
-
-                // パラメータ適用
-                apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
-
-                // ドラム以外もしくは出力チャンネルが指定されている音源をミュート
-                for (srn_no, param) in params.iter() {
-                    if (param.program.clone() as u8) < 0x80 || !param.auto_output_channel {
-                        spc.dsp
-                            .write_register(&[0u8], DSP_ADDRESS_SRN_TARGET, *srn_no);
-                        spc.dsp.write_register(&[0u8], DSP_ADDRESS_SRN_FLAG, 0x80);
-                    }
-                }
-
-                // トラックに出力
-                Self::dump_midi_events_to_track(&config, &mut spc, &mut track);
-
-                if track.events.len() > 0 {
-                    smf.tracks.push(track);
-                }
-            }
-
-            // チャンネル出力先が指定された音源を別トラックに出力
-            for (srn_no, param) in params.iter() {
-                if !param.auto_output_channel {
-                    let mut track = Track {
-                        copyright: None,
-                        name: None,
-                        events: Vec::new(),
-                    };
-
-                    // SPCの作成
-                    let mut spc: spc700::spc::SPC<spc700::mididsp::MIDIDSP> = SPC::new();
-                    spc.initialize(
-                        &spc_file.header.spc_register,
-                        &spc_file.ram,
-                        &spc_file.dsp_register,
-                    );
-
-                    // パラメータ適用
-                    apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
-
-                    // 注目している音源 "以外" をミュート
-                    for (another_ch, _) in params.iter() {
-                        if another_ch != srn_no {
+                    for ch in 0..8 {
+                        if (param.program.clone() as u8) >= 0x80
+                            || param.channel_routing[ch] != midi_ch
+                        {
+                            let value = 0x80 | ((ch << 4) as u8) | (midi_ch as u8);
                             spc.dsp
-                                .write_register(&[0u8], DSP_ADDRESS_SRN_TARGET, *another_ch);
-                            spc.dsp.write_register(&[0u8], DSP_ADDRESS_SRN_FLAG, 0x80);
+                                .write_register(&[0u8], DSP_ADDRESS_SRN_TARGET, *srn_no);
+                            spc.dsp
+                                .write_register(&[0u8], DSP_ADDRESS_SRN_CHANNEL_ROUTING, value);
+                        } else {
+                            exist_events = true;
                         }
                     }
+                }
 
-                    // トラック名を楽器名とする
-                    track.events.push(TrackEvent {
-                        vtime: 0,
-                        event: MidiEvent::Meta(MetaEvent::sequence_or_track_name(
-                            param.instrument_name.clone(),
-                        )),
-                    });
-
-                    // トラックに出力
+                // トラックに出力
+                if exist_events {
                     Self::dump_midi_events_to_track(&config, &mut spc, &mut track);
-
-                    smf.tracks.push(track);
+                    if track.events.len() > 0 {
+                        smf.tracks.push(track);
+                    }
                 }
             }
 
@@ -1887,15 +1857,13 @@ fn apply_source_parameter(
             DSP_ADDRESS_SRN_PITCHBEND_SENSITIVITY,
             if param.enable_pitch_bend { 0x80 } else { 0x00 } | param.pitch_bend_width,
         );
-        spc.dsp.write_register(
-            ram,
-            DSP_ADDRESS_SRN_OUTPUT_CHANNEL,
-            if param.auto_output_channel {
-                0x80
-            } else {
-                0x00
-            } | (param.fixed_output_channel - 1), // 表示値は1オリジンのため
-        );
+        for ch in 0..8 {
+            let value = if param.channel_mute[ch] { 0x80 } else { 0x00 }
+                | (ch << 4) as u8
+                | param.channel_routing[ch];
+            spc.dsp
+                .write_register(ram, DSP_ADDRESS_SRN_CHANNEL_ROUTING, value);
+        }
     }
     // 音源に依存しないパラメータ
     spc.dsp.write_register(

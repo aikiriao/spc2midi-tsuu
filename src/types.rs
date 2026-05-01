@@ -73,10 +73,10 @@ pub struct SourceParameter {
     pub enable_pitch_bend: bool,
     /// エコーをエフェクト1デプスとして出力するか
     pub echo_as_effect1: bool,
-    /// 出力チャンネルをSPCボイスと同じにするか
-    pub auto_output_channel: bool,
-    /// 出力チャンネル
-    pub fixed_output_channel: u8,
+    /// 出力チャンネル（SPCの出力チャンネルをインデックス、出力先MIDIチャンネルが値）
+    pub channel_routing: [u8; 8],
+    /// 出力チャンネルミュート（各SPCの出力チャンネルでのミュートフラグ）
+    pub channel_mute: [bool; 8],
     /// 楽器名
     pub instrument_name: String,
 }

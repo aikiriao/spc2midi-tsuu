@@ -5,7 +5,7 @@ use crate::SPC_SAMPLING_RATE;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{
-    button, checkbox, column, combo_box, pick_list, row, slider, text, text_input, tooltip,
+    button, checkbox, column, combo_box, row, slider, text, text_input, tooltip,
 };
 use iced::{
     alignment, mouse, Color, Element, Font, Length, Point, Rectangle, Renderer, Size, Theme,
@@ -53,13 +53,6 @@ impl SPC2MIDI2Window for SRNWindow {
         let param = params.get(&self.srn_no).unwrap();
         let center_note_int = (param.center_note >> 9) as u8;
         let center_note_fraction = (param.center_note & 0x1FF) as f32 / 512.0;
-        let output_midi_channel_list = if (param.program.clone() as u8) >= 0x80 {
-            vec![10]
-        } else if param.auto_output_channel {
-            vec![]
-        } else {
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16]
-        };
         let parameter_controller = column![
             row![checkbox(param.mute)
                 .label("Mute")
@@ -179,24 +172,35 @@ impl SPC2MIDI2Window for SRNWindow {
                 text("Channel")
                     .width(90)
                     .align_x(alignment::Alignment::Start),
-                checkbox(param.auto_output_channel)
-                    .label("Use SPC Channel")
-                    .on_toggle(move |flag| Message::AutoOutputChannelFlagToggled(srn_no, flag)),
-                pick_list(
-                    output_midi_channel_list,
-                    Some(param.fixed_output_channel),
-                    move |channel| { Message::FixedOutputChannelChanged(srn_no, channel) }
-                ),
-                text("Inst. Name")
-                    .width(80)
-                    .align_x(alignment::Alignment::Start),
-                text_input("Instrument Name", &param.instrument_name).on_input_maybe(
-                    if param.auto_output_channel {
-                        None
-                    } else {
-                        Some(move |name| Message::InstrumentNameChanged(srn_no, name))
+                button("Edit Channel Routing")
+                    .on_press(Message::OpenSRNChannelRoutingWindow(srn_no))
+                    .width(170),
+                {
+                    let mut ch_route_text = "".to_string();
+                    for ch in 0..8 {
+                        ch_route_text += &format!(
+                            "{}→{} ",
+                            ch,
+                            if param.channel_mute[ch] {
+                                format!("M")
+                            } else {
+                                format!("{}", param.channel_routing[ch])
+                            }
+                        ).to_string();
                     }
-                )
+                    text(ch_route_text)
+                        .width(400)
+                        .align_x(alignment::Alignment::Start)
+                },
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center),
+            row![
+                text("Name").width(90).align_x(alignment::Alignment::Start),
+                text_input("Instrument Name", &param.instrument_name).on_input_maybe(Some(
+                    move |name| Message::InstrumentNameChanged(srn_no, name)
+                ))
             ]
             .spacing(10)
             .width(Length::Fill)
