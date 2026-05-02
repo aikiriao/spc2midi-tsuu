@@ -1394,7 +1394,7 @@ impl App {
                     let mut exist_routing = false;
                     for ch in 0..8 {
                         if param.channel_routing[ch] != midi_ch {
-                            let value = 0x80 | ((ch << 4) as u8) | (midi_ch as u8);
+                            let value = 0x80 | ((ch << 4) as u8) | param.channel_routing[ch];
                             spc.dsp
                                 .write_register(&[0u8], DSP_ADDRESS_SRN_TARGET, *srn_no);
                             spc.dsp
