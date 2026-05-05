@@ -135,6 +135,7 @@ pub enum Message {
     MIDIOutputUpdatePeriodChanged(u8),
     MIDIOutputDurationChanged(u64),
     MIDIOutputSPC700ClockUpFactorChanged(u32),
+    MIDIOutputSplitDrumIntoSeparateTracksChanged(bool),
     MuteChannel(u8, bool),
     SoloChannel(u8),
     ReceivedBpmAnalyzeRequest,
@@ -929,6 +930,10 @@ impl App {
                 let mut config = self.midi_output_configure.write().unwrap();
                 config.spc_clockup_factor = factor;
             }
+            Message::MIDIOutputSplitDrumIntoSeparateTracksChanged(flag) => {
+                let mut config = self.midi_output_configure.write().unwrap();
+                config.split_drum_into_separate_tracks = flag;
+            }
             Message::MuteChannel(ch, flag) => {
                 if let (Some(pcm_spc_ref), Some(midi_spc_ref)) = (&self.pcm_spc, &self.midi_spc) {
                     let (pcm_spc, midi_spc) = (pcm_spc_ref.clone(), midi_spc_ref.clone());
@@ -1371,6 +1376,11 @@ impl App {
 
             // MIDIチャンネルごとに出力
             for midi_ch in 0..16 {
+                // ドラム音色をトラックに分ける場合はいったんスキップ
+                if midi_ch == 9 && config.split_drum_into_separate_tracks {
+                    continue;
+                }
+
                 let mut track = Track {
                     copyright: None,
                     name: None,
@@ -1425,6 +1435,57 @@ impl App {
                     Self::dump_midi_events_to_track(&config, &mut spc, &mut track);
                     if track.events.len() > 0 {
                         smf.tracks.push(track);
+                    }
+                }
+            }
+
+            // ドラム音色をサンプル単位でトラックに分割
+            if config.split_drum_into_separate_tracks {
+                for (srn_no, param) in params.iter() {
+                    if (param.program.clone() as u8) >= 0x80 {
+                        let mut track = Track {
+                            copyright: None,
+                            name: None,
+                            events: Vec::new(),
+                        };
+
+                        // SPC初期化
+                        spc.initialize(
+                            &spc_file.header.spc_register,
+                            &spc_file.ram,
+                            &spc_file.dsp_register,
+                        );
+
+                        // パラメータ適用
+                        apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
+
+                        // srn_no以外を全てミュート
+                        for (another_srn_no, _) in params.iter() {
+                            if another_srn_no != srn_no {
+                                spc.dsp.write_register(
+                                    &[0u8],
+                                    DSP_ADDRESS_SRN_TARGET,
+                                    *another_srn_no,
+                                );
+                                spc.dsp.write_register(&[0u8], DSP_ADDRESS_SRN_FLAG, 0x80);
+                            }
+                        }
+
+                        // トラック名があれば追加
+                        if param.instrument_name != "" {
+                            track.events.push(TrackEvent {
+                                vtime: 0,
+                                event: MidiEvent::Meta(MetaEvent::sequence_or_track_name(
+                                    param.instrument_name.clone(),
+                                )),
+                            });
+                        }
+
+                        // トラック生成
+                        Self::dump_midi_events_to_track(&config, &mut spc, &mut track);
+                        if track.events.len() > 0 {
+                            smf.tracks.push(track);
+                        }
                     }
                 }
             }

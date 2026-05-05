@@ -96,6 +96,8 @@ pub struct MIDIOutputConfigure {
     pub spc_clockup_factor: u32, 
     /// ボリュームカーブ
     pub volume_curve: VolumeCurve,
+    /// ドラム音色をサンプル単位でトラックに分割するか
+    pub split_drum_into_separate_tracks: bool,
 }
 
 /// 再生中の状態
@@ -150,6 +152,7 @@ impl MIDIOutputConfigure {
             ticks_per_quarter: DEFAULT_MIDI_RESOLUSIONS,
             spc_clockup_factor: DEFAULT_SPC_CLOCKUP_FACTOR,
             volume_curve: VolumeCurve::SquareRoot,
+            split_drum_into_separate_tracks: false,
         }
     }
 }

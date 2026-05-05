@@ -2,7 +2,7 @@ use crate::types::*;
 use crate::Message;
 use crate::SPC2MIDI2_TITLE_STR;
 use cpal::traits::{DeviceTrait, HostTrait};
-use iced::widget::{button, column, combo_box, row, text, tooltip};
+use iced::widget::{button, column, combo_box, checkbox, row, text, tooltip};
 use iced::{alignment, Element, Length};
 use iced_aw::number_input;
 use midir::MidiOutput;
@@ -128,6 +128,15 @@ impl SPC2MIDI2Window for PreferencesWindow {
                     1..=32,
                     move |factor| { Message::MIDIOutputSPC700ClockUpFactorChanged(factor) },
                 )
+            ]
+            .spacing(10)
+            .padding(10)
+            .align_y(alignment::Alignment::Center)
+            .width(Length::Fill),
+            row![
+                text("Split Drum Notes Into Separate Tracks"),
+                checkbox(midi_output_configure.split_drum_into_separate_tracks)
+                    .on_toggle(move |flag| Message::MIDIOutputSplitDrumIntoSeparateTracksChanged(flag))
             ]
             .spacing(10)
             .padding(10)
