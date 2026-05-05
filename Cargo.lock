@@ -4136,7 +4136,7 @@ dependencies = [
 
 [[package]]
 name = "spc2midi-tsuu"
-version = "0.2.13"
+version = "0.2.14"
 dependencies = [
  "clap",
  "cpal",
@@ -4160,7 +4160,7 @@ dependencies = [
 [[package]]
 name = "spc700"
 version = "0.1.0"
-source = "git+https://github.com/aikiriao/spc700.git#e54b9defd2353b3b7af1ec0736d1fe01983e9704"
+source = "git+https://github.com/aikiriao/spc700.git#2c61fc2fbf401909d725e2deb444b5af29549f77"
 dependencies = [
  "libm",
  "log",
