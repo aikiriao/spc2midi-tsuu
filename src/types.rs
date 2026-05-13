@@ -19,7 +19,7 @@ pub const MIN_BEATS_PER_MINUTE: u32 = 30;
 /// 最大のBPM（テンポ）
 pub const MAX_BEATS_PER_MINUTE: u32 = 240;
 /// BPMの最小解像度
-pub const BPM_RESOLUTION: f32 = 1.0 / 128.0;
+pub const BPM_RESOLUTION: f32 = 1.0 / 256.0;
 
 /// ボリュームカーブ
 #[derive(Debug, Clone, Serialize, Deserialize)]
