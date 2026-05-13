@@ -75,8 +75,6 @@ const MIDI_PREVIEW_DURATION_MSEC: u64 = 500;
 const DEFAULT_ANALYZING_TIME_SEC: u32 = 120;
 /// 1オクターブに相当するノート(9bit小数部の固定小数)
 const OCTAVE_NOTE: u16 = 12 << 9;
-/// 8kHzタイマーの分間ティック数=(60 / (1 / 8000))
-const TICK_PER_MINUTES_8KHZ: u32 = 480000;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -904,7 +902,7 @@ impl App {
             }
             Message::MIDIOutputBpmChanged(bpm) => {
                 let mut config = self.midi_output_configure.write().unwrap();
-                config.beats_per_minute = Self::update_bpm(config.beats_per_minute, bpm);
+                config.beats_per_minute = Self::round_bpm(bpm);
             }
             Message::MIDIOutputTicksPerQuarterChanged(ticks) => {
                 let mut config = self.midi_output_configure.write().unwrap();
@@ -1005,8 +1003,10 @@ impl App {
             Message::ReceivedBpmAnalyzeRequest => {
                 if let Ok(mut config) = self.midi_output_configure.write() {
                     if let Some(spc_file) = &self.spc_file {
-                        config.beats_per_minute = Self::bpm_estimation(
+                        let channel_mute_flags = self.channel_mute_flags.load(Ordering::Relaxed);
+                        config.beats_per_minute = Self::estimate_bpm(
                             spc_file.header.duration as u32,
+                            channel_mute_flags,
                             &spc_file.header.spc_register,
                             &spc_file.ram,
                             &spc_file.dsp_register,
@@ -1110,33 +1110,15 @@ impl App {
         }
     }
 
-    /// BPMをSPC700の8kHzタイマーの倍数BPMに丸め込む
-    fn round_bpm(bpm: f32) -> (u16, f32) {
-        // 8kHzがティックする回数に丸め込む
-        let clock_factor = ((TICK_PER_MINUTES_8KHZ as f32) / bpm).round() as u16;
-        // その値からBPMを逆算
-        (
-            clock_factor,
-            (TICK_PER_MINUTES_8KHZ as f32) / (clock_factor as f32),
-        )
-    }
-
-    /// BPMを8kHzタイマーの最小解像度で更新
-    fn update_bpm(current_bpm: f32, new_bpm: f32) -> f32 {
-        let (factor, _) = Self::round_bpm(current_bpm);
-        let factor = if new_bpm > current_bpm {
-            factor - 1
-        } else if new_bpm < current_bpm {
-            factor + 1
-        } else {
-            factor
-        };
-        (TICK_PER_MINUTES_8KHZ as f32) / (factor as f32)
+    /// BPMを最小解像度の倍数に丸め込む
+    fn round_bpm(bpm: f32) -> f32 {
+        (bpm / BPM_RESOLUTION).round() * BPM_RESOLUTION
     }
 
     /// BPM（テンポ）推定
-    fn bpm_estimation(
+    fn estimate_bpm(
         analyze_duration_sec: u32,
+        channel_mute_flags: u8,
         register: &SPCRegister,
         ram: &[u8],
         dsp_register: &[u8; 128],
@@ -1160,7 +1142,7 @@ impl App {
                 let noteon = midispc.dsp.read_register(ram, DSP_ADDRESS_NOTEON);
                 let mut onset = 0.0;
                 for ch in 0..8 {
-                    if (noteon >> ch) & 0x1 != 0 {
+                    if ((channel_mute_flags >> ch) & 0x1) == 0 && ((noteon >> ch) & 0x1) != 0 {
                         let lvol = midispc
                             .dsp
                             .read_register(ram, (ch << 4) | DSP_ADDRESS_V0VOLL)
@@ -1180,9 +1162,7 @@ impl App {
             }
         }
 
-        let bpm = estimate_bpm(&onset_signal, 64_000.0);
-        let (_, bpm) = Self::round_bpm(bpm);
-        bpm
+        Self::round_bpm(estimate_bpm(&onset_signal, 64_000.0))
     }
 
     /// 音源ソースの解析
@@ -1238,9 +1218,18 @@ impl App {
         }
 
         // BPM（テンポ）推定
-        let bpm = Self::bpm_estimation(analyze_duration_sec, register, ram, dsp_register);
-        let mut config = self.midi_output_configure.write().unwrap();
-        config.beats_per_minute = bpm;
+        {
+            let channel_mute_flags = self.channel_mute_flags.load(Ordering::Relaxed);
+            let bpm = Self::estimate_bpm(
+                analyze_duration_sec,
+                channel_mute_flags,
+                register,
+                ram,
+                dsp_register,
+            );
+            let mut config = self.midi_output_configure.write().unwrap();
+            config.beats_per_minute = Self::round_bpm(bpm);
+        }
 
         // 波形情報の読み込み
         for (srn, dir_address) in start_address_map.iter() {

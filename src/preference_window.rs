@@ -51,7 +51,7 @@ impl SPC2MIDI2Window for PreferencesWindow {
                     (MIN_BEATS_PER_MINUTE as f32)..=(MAX_BEATS_PER_MINUTE as f32),
                     move |bpm| { Message::MIDIOutputBpmChanged(bpm) },
                 )
-                .step(0.01),
+                .step(BPM_RESOLUTION),
                 tooltip(
                     button("▼").on_press(Message::ReceivedBpmHalfButtonClicked),
                     "Half BPM",
@@ -62,7 +62,11 @@ impl SPC2MIDI2Window for PreferencesWindow {
                     "Double BPM",
                     tooltip::Position::Top,
                 ),
-                button("Reset BPM").on_press(Message::ReceivedBpmAnalyzeRequest),
+                tooltip(
+                    button("Re-analyze").on_press(Message::ReceivedBpmAnalyzeRequest),
+                    "Analyzing with Channel Mute",
+                    tooltip::Position::Top,
+                ),
             ]
             .spacing(10)
             .padding(10)
