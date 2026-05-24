@@ -146,6 +146,15 @@ impl SPC2MIDI2Window for PreferencesWindow {
             .padding(10)
             .align_y(alignment::Alignment::Center)
             .width(Length::Fill),
+            row![
+                text("Trim Leading Non-Event Period"),
+                checkbox(midi_output_configure.trim_leading_nonevents_period)
+                    .on_toggle(move |flag| Message::MIDIOutputTrimLeadingNonEventsPeriodChanged(flag))
+            ]
+            .spacing(10)
+            .padding(10)
+            .align_y(alignment::Alignment::Center)
+            .width(Length::Fill),
         ];
         let content = column![
             column![

@@ -134,6 +134,7 @@ pub enum Message {
     MIDIOutputDurationChanged(u64),
     MIDIOutputSPC700ClockUpFactorChanged(u32),
     MIDIOutputSplitDrumIntoSeparateTracksChanged(bool),
+    MIDIOutputTrimLeadingNonEventsPeriodChanged(bool),
     MuteChannel(u8, bool),
     SoloChannel(u8),
     ReceivedBpmAnalyzeRequest,
@@ -309,7 +310,7 @@ impl App {
             Message::MainWindowOpened(_id) => {}
             Message::OpenPreferencesWindow => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(500.0, 650.0),
+                    size: iced::Size::new(500.0, 700.0),
                     ..Default::default()
                 });
                 self.windows.insert(
@@ -932,6 +933,10 @@ impl App {
                 let mut config = self.midi_output_configure.write().unwrap();
                 config.split_drum_into_separate_tracks = flag;
             }
+            Message::MIDIOutputTrimLeadingNonEventsPeriodChanged(flag) => {
+                let mut config = self.midi_output_configure.write().unwrap();
+                config.trim_leading_nonevents_period = flag;
+            }
             Message::MuteChannel(ch, flag) => {
                 if let (Some(pcm_spc_ref), Some(midi_spc_ref)) = (&self.pcm_spc, &self.midi_spc) {
                     let (pcm_spc, midi_spc) = (pcm_spc_ref.clone(), midi_spc_ref.clone());
@@ -1291,9 +1296,35 @@ impl App {
         }
     }
 
+    // 最初のMIDIイベントが発生する時刻をサーチ
+    fn find_first_midi_event_time(
+        config: &MIDIOutputConfigure,
+        spc: &mut spc700::spc::SPC<spc700::mididsp::MIDIDSP>,
+    ) -> u64 {
+        let spc_64k_hz_cycle = config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ;
+        let mut first_event_time_nanosec = 0;
+        let mut cycle_count = 0;
+
+        while first_event_time_nanosec < config.output_duration_msec * 1000_000 {
+            // 64kHzタイマーティックするまで処理
+            while cycle_count < spc_64k_hz_cycle {
+                cycle_count += spc.execute_step() as u32;
+            }
+            cycle_count -= spc_64k_hz_cycle;
+            if let Some(_) = spc.clock_tick_64k_hz() {
+                return first_event_time_nanosec;
+            }
+            // 先に時間を進めると最初のイベントを見逃すのでここで時間を増加
+            first_event_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
+        }
+
+        first_event_time_nanosec
+    }
+
     // トラックに指定時間分のMIDIイベントを出力
     fn dump_midi_events_to_track(
         config: &MIDIOutputConfigure,
+        first_event_time_nanosec: u64,
         spc: &mut spc700::spc::SPC<spc700::mididsp::MIDIDSP>,
         track: &mut rimd::Track,
     ) {
@@ -1301,10 +1332,23 @@ impl App {
         let ticks_per_nanosec =
             (config.beats_per_minute as f64) * (config.ticks_per_quarter as f64) / 60_000_000_000.0;
         let spc_64k_hz_cycle = config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ;
-        let mut total_elapsed_time_nanosec = 0;
         let mut previous_elapsed_ticks = 0;
         let mut cycle_count = 0;
 
+        // 最初のイベント発生時刻まで空回し
+        let mut total_elapsed_time_nanosec = 0;
+        while total_elapsed_time_nanosec < first_event_time_nanosec {
+            // 64kHzタイマーティックするまで処理
+            while cycle_count < spc_64k_hz_cycle {
+                cycle_count += spc.execute_step() as u32;
+            }
+            cycle_count -= spc_64k_hz_cycle;
+            let _ = spc.clock_tick_64k_hz();
+            // clock_tick_64k_hz実行後に64KHz周期がすぎるので、ここで時間を増加
+            total_elapsed_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
+        }
+
+        total_elapsed_time_nanosec = 0;
         while total_elapsed_time_nanosec < config.output_duration_msec * 1000_000 {
             // 64kHzタイマーティックするまで処理
             while cycle_count < spc_64k_hz_cycle {
@@ -1362,6 +1406,21 @@ impl App {
                 vtime: 0,
                 event: MidiEvent::Meta(MetaEvent::tempo_setting(quarter_usec)),
             });
+
+            // トラック全体で発生する最初のイベント時刻を探索
+            let first_event_time_nanosec = if config.trim_leading_nonevents_period {
+                // SPC初期化・パラメータ設定
+                spc.initialize(
+                    &spc_file.header.spc_register,
+                    &spc_file.ram,
+                    &spc_file.dsp_register,
+                );
+                apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
+
+                Self::find_first_midi_event_time(&config, &mut spc)
+            } else {
+                0
+            };
 
             // MIDIチャンネルごとに出力
             for midi_ch in 0..16 {
@@ -1421,7 +1480,12 @@ impl App {
                             )),
                         });
                     }
-                    Self::dump_midi_events_to_track(&config, &mut spc, &mut track);
+                    Self::dump_midi_events_to_track(
+                        &config,
+                        first_event_time_nanosec,
+                        &mut spc,
+                        &mut track,
+                    );
                     if track.events.len() > 0 {
                         smf.tracks.push(track);
                     }
@@ -1471,7 +1535,12 @@ impl App {
                         }
 
                         // トラック生成
-                        Self::dump_midi_events_to_track(&config, &mut spc, &mut track);
+                        Self::dump_midi_events_to_track(
+                            &config,
+                            first_event_time_nanosec,
+                            &mut spc,
+                            &mut track,
+                        );
                         if track.events.len() > 0 {
                             smf.tracks.push(track);
                         }
