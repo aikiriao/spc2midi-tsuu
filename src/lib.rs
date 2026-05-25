@@ -1376,6 +1376,56 @@ impl App {
                 previous_elapsed_ticks = total_elapsed_ticks;
             }
         }
+
+        // 終端でノートオフが漏れているチャンネルにノートオフを送信
+        {
+            /// MIDIメッセージ：ノートオン
+            const MIDIMSG_NOTE_ON: u8 = 0x90;
+            /// MIDIメッセージ：ノートオフ
+            const MIDIMSG_NOTE_OFF: u8 = 0x80;
+
+            // ノートオンで終わっているノートリスト
+            let mut noteon_ch_notes = vec![];
+            let mut status_byte = 0;
+            for e in &track.events {
+                match &e.event {
+                    MidiEvent::Midi(msg) => {
+                        // ランニングステータスの更新
+                        if msg.data.len() == 3 {
+                            status_byte = msg.data[0];
+                        }
+                        // チャンネルとノート番号の組
+                        let ch_note = if msg.data.len() == 3 {
+                            (status_byte & 0xF, msg.data[1])
+                        } else {
+                            (status_byte & 0xF, msg.data[0])
+                        };
+                        // ステータスバイトからノートオン・ノートオフ判定
+                        match status_byte & 0xF0 {
+                            MIDIMSG_NOTE_ON => {
+                                noteon_ch_notes.push(ch_note);
+                            }
+                            MIDIMSG_NOTE_OFF => {
+                                // ノートオフが打たれたら除外
+                                noteon_ch_notes.retain(|&x| x != ch_note);
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // ノートオンが送信されて終わっているチャンネルにノートオフを送信
+            for (ch, note) in noteon_ch_notes {
+                track.events.push(TrackEvent {
+                    vtime: 0,
+                    event: MidiEvent::Midi(MidiMessage {
+                        data: [MIDIMSG_NOTE_OFF | ch as u8, note, 0].to_vec(),
+                    }),
+                });
+            }
+        }
     }
 
     // SMFを作成
