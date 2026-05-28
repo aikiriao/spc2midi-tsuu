@@ -4,9 +4,7 @@ use crate::Message;
 use crate::SPC_SAMPLING_RATE;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
-use iced::widget::{
-    button, checkbox, column, combo_box, row, slider, text, text_input, tooltip,
-};
+use iced::widget::{button, checkbox, column, combo_box, row, slider, text, text_input, tooltip};
 use iced::{
     alignment, mouse, Color, Element, Font, Length, Point, Rectangle, Renderer, Size, Theme,
 };
@@ -178,15 +176,18 @@ impl SPC2MIDI2Window for SRNWindow {
                 {
                     let mut ch_route_text = "".to_string();
                     for ch in 0..8 {
-                        ch_route_text += &format!(
-                            "{}→{} ",
-                            ch,
-                            if param.channel_mute[ch] {
-                                format!("M")
-                            } else {
-                                format!("{}", param.channel_routing[ch])
-                            }
-                        ).to_string();
+                        if self.source_info.using_channel[ch] {
+                            ch_route_text += &format!(
+                                "{}→{} ",
+                                ch,
+                                if param.channel_mute[ch] {
+                                    format!("M")
+                                } else {
+                                    format!("{}", param.channel_routing[ch])
+                                }
+                            )
+                            .to_string()
+                        }
                     }
                     text(ch_route_text)
                         .width(400)

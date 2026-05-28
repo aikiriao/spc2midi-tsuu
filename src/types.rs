@@ -46,6 +46,8 @@ pub struct SourceInformation {
     pub end_address: usize,
     /// ループ開始サンプル
     pub loop_start_sample: usize,
+    /// チャンネルを使っているか？（8チャンネル分）
+    pub using_channel: [bool; 8],
 }
 
 /// 1音源のパラメータ

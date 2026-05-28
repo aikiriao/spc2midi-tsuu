@@ -353,13 +353,17 @@ impl App {
                     size: iced::Size::new(350.0, 300.0),
                     ..Default::default()
                 });
-                let window = SRNChannelRoutingWindow::new(
-                    format!("SRN 0x{:02X} Channel Routing", srn_no),
-                    srn_no,
-                    self.source_parameter.clone(),
-                );
-                self.windows.insert(id, Box::new(window));
-                return open.map(Message::SRNChannelRoutingWindowOpened);
+                let infos = self.source_infos.read().unwrap();
+                if let Some(source) = infos.get(&srn_no) {
+                    let window = SRNChannelRoutingWindow::new(
+                        format!("SRN 0x{:02X} Channel Routing", srn_no),
+                        srn_no,
+                        source,
+                        self.source_parameter.clone(),
+                    );
+                    self.windows.insert(id, Box::new(window));
+                    return open.map(Message::SRNChannelRoutingWindowOpened);
+                }
             }
             Message::SRNChannelRoutingWindowOpened(_id) => {}
             Message::WindowClosed(id) => {
@@ -1186,7 +1190,7 @@ impl App {
         let mut params = self.source_parameter.write().unwrap();
         *params = BTreeMap::new();
 
-        // 一定期間シミュレートし、サンプルソース番号とそれに紐づく開始アドレスを取得
+        // 一定期間シミュレートし、サンプルソース番号とそれに紐づく開始アドレスとキーオンされたチャンネルを取得
         let mut midispc: Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>> = Box::new({
             let mut spc = SPC::new();
             spc.initialize(&register, ram, dsp_register);
@@ -1195,6 +1199,7 @@ impl App {
         let mut cycle_count = 0;
         let mut tick64khz_count = 0;
         let mut start_address_map = BTreeMap::new();
+        let mut using_channel_map = BTreeMap::new();
         while tick64khz_count < analyze_duration_64khz_ticks {
             cycle_count += midispc.execute_step() as u32;
             // キーオンが打たれていた時のサンプル番号を取得
@@ -1211,6 +1216,10 @@ impl App {
                         let dir_address =
                             (brr_dir_base_address + 4 * (sample_source as u16)) as usize;
                         start_address_map.insert(sample_source, dir_address);
+                        using_channel_map
+                            .entry(sample_source)
+                            .and_modify(|keyon_ch| *keyon_ch |= 1 << ch)
+                            .or_insert(1 << ch);
                     }
                 }
             }
@@ -1255,12 +1264,20 @@ impl App {
                 make_u16_from_u8(&ram[(*dir_address + 0)..(*dir_address + 2)]) as usize;
             let loop_address =
                 make_u16_from_u8(&ram[(*dir_address + 2)..(*dir_address + 4)]) as usize;
+            let using_channel_flags = using_channel_map.get(srn).unwrap();
+            let using_channel: [bool; 8] = (0..8)
+                .into_iter()
+                .map(|ch| ((using_channel_flags >> ch) & 1) != 0)
+                .collect::<Vec<bool>>()
+                .try_into()
+                .unwrap();
             let source_info = SourceInformation {
                 signal: signal.clone(),
                 power_spectrum: compute_power_spectrum(&signal),
                 start_address: start_address,
                 end_address: start_address + (signal.len() * 9) / 16,
                 loop_start_sample: ((loop_address - start_address) * 16) / 9,
+                using_channel: using_channel,
             };
             infos.insert(*srn, source_info.clone());
             // ドラム音とピッチの推定

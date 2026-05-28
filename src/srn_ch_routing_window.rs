@@ -1,7 +1,7 @@
 use crate::types::*;
 use crate::Message;
 use iced::widget::{button, checkbox, column, pick_list, row, text, tooltip, Column};
-use iced::{alignment, Element, Length};
+use iced::{alignment, Color, Element, Length};
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 pub struct SRNChannelRoutingWindow {
     title: String,
     srn_no: u8,
+    source_info: Arc<SourceInformation>,
     source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
 }
 
@@ -36,11 +37,15 @@ impl SPC2MIDI2Window for SRNChannelRoutingWindow {
                             flag
                         ))
                         .width(20),
-                    text(format!("{}", ch))
-                        .align_x(alignment::Alignment::Center)
-                        .align_y(alignment::Alignment::Center)
-                        .height(Length::Fill)
-                        .width(Length::FillPortion(1)),
+                    if self.source_info.using_channel[ch] {
+                        text(format!("{}", ch)).color(Color::from_rgb(1.0, 1.0, 1.0))
+                    } else {
+                        text(format!("{} (not use)", ch)).color(Color::from_rgb(1.0, 0.0, 0.0))
+                    }
+                    .align_x(alignment::Alignment::Center)
+                    .align_y(alignment::Alignment::Center)
+                    .height(Length::Fill)
+                    .width(Length::FillPortion(1)),
                     text("→").width(10),
                     pick_list(
                         output_midi_channel_list.clone(),
@@ -94,11 +99,13 @@ impl SRNChannelRoutingWindow {
     pub fn new(
         title: String,
         srn_no: u8,
+        source_info: &SourceInformation,
         source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     ) -> Self {
         Self {
             title: title,
             srn_no: srn_no,
+            source_info: source_info.clone().into(),
             source_parameter: source_parameter,
         }
     }
