@@ -297,6 +297,7 @@ impl App {
                 let window = MainWindow::new(
                     format!("{} {}", SPC2MIDI2_TITLE_STR, env!("CARGO_PKG_VERSION")),
                     self.theme.clone(),
+                    self.source_infos.clone(),
                     self.source_parameter.clone(),
                     self.playback_status.clone(),
                     self.pcm_spc_on.clone(),

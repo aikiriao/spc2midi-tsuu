@@ -21,6 +21,7 @@ pub struct MainWindow {
     pub title: String,
     pub base_title: String,
     theme: iced::Theme,
+    source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
     source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
     playback_status: Arc<RwLock<PlaybackStatus>>,
     pcm_spc_on: Arc<AtomicBool>,
@@ -37,6 +38,7 @@ impl MainWindow {
     pub fn new(
         title: String,
         theme: iced::Theme,
+        source_infos: Arc<RwLock<BTreeMap<u8, SourceInformation>>>,
         source_params: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
         playback_status: Arc<RwLock<PlaybackStatus>>,
         pcm_spc_on: Arc<AtomicBool>,
@@ -47,6 +49,7 @@ impl MainWindow {
             title: title.clone(),
             base_title: title.clone(),
             theme: theme,
+            source_infos: source_infos,
             source_params: source_params,
             playback_status: playback_status,
             pcm_spc_on: pcm_spc_on,
@@ -184,71 +187,94 @@ impl SPC2MIDI2Window for MainWindow {
         });
 
         let params = self.source_params.read().unwrap();
+        let infos = self.source_infos.read().unwrap();
         // 音源リスト
-        let srn_list: Vec<_> = params
-            .iter()
-            .map(|(key, param)| {
-                row![
-                    text(format!("0x{:02X}", key))
-                        .width(30)
-                        .align_x(alignment::Alignment::Start),
-                    text(format!(
-                        "{}",
-                        if param.instrument_name != "" {
-                            param.instrument_name.clone()
+        let mut srn_list = vec![];
+        for spc_ch in 0..8 {
+            // spc_chで発音されているSRNを集める
+            let mut srns = vec![];
+            for (srn, info) in infos.iter() {
+                if info.using_channel[spc_ch] {
+                    srns.push(srn);
+                }
+            }
+            // チャンネルヘッダ行
+            if srns.len() > 0 {
+                srn_list.push(
+                    row![text(format!("Channel {}", spc_ch))
+                        .size(14.0)
+                        .align_x(alignment::Alignment::Start)]
+                    .width(Length::Fill)
+                    .align_y(alignment::Alignment::Center)
+                    .into(),
+                );
+            }
+            // spc_chで発音されているSRNの情報表示
+            for srn in srns {
+                let param = params.get(srn).unwrap();
+                srn_list.push(
+                    row![
+                        text(format!("0x{:02X}", *srn))
+                            .width(30)
+                            .align_x(alignment::Alignment::Start),
+                        text(format!(
+                            "{}",
+                            if param.instrument_name != "" {
+                                param.instrument_name.clone()
+                            } else {
+                                param.program.to_string()
+                            }
+                        ))
+                        .color(if param.mute {
+                            self.theme.palette().warning
                         } else {
-                            param.program.to_string()
-                        }
-                    ))
-                    .color(if param.mute {
-                        self.theme.palette().warning
-                    } else {
-                        self.theme.palette().text
-                    })
-                    .width(Length::FillPortion(17))
-                    .align_x(alignment::Alignment::Start),
-                    stack![
-                        progress_bar(0.0..=127.0, param.center_note as f32 / 512.0).style(
-                            |theme: &Theme| progress_bar::Style {
-                                background: iced::Background::Color(theme.palette().background),
-                                bar: iced::Background::Color(theme.palette().success),
-                                border: Border::default().rounded(0.0)
-                            }
-                        ),
-                        text(format!("{:6.2}", param.center_note as f32 / 512.0))
-                            .size(17.0)
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .align_x(alignment::Alignment::End)
-                            .align_y(alignment::Alignment::Center),
+                            self.theme.palette().text
+                        })
+                        .width(Length::FillPortion(17))
+                        .align_x(alignment::Alignment::Start),
+                        stack![
+                            progress_bar(0.0..=127.0, param.center_note as f32 / 512.0).style(
+                                |theme: &Theme| progress_bar::Style {
+                                    background: iced::Background::Color(theme.palette().background),
+                                    bar: iced::Background::Color(theme.palette().success),
+                                    border: Border::default().rounded(0.0)
+                                }
+                            ),
+                            text(format!("{:6.2}", param.center_note as f32 / 512.0))
+                                .size(17.0)
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .align_x(alignment::Alignment::End)
+                                .align_y(alignment::Alignment::Center),
+                        ]
+                        .width(Length::FillPortion(6)),
+                        stack![
+                            progress_bar(0.0..=127.0, param.noteon_velocity as f32).style(
+                                |theme: &Theme| progress_bar::Style {
+                                    background: iced::Background::Color(theme.palette().background),
+                                    bar: iced::Background::Color(theme.palette().success),
+                                    border: Border::default().rounded(0.0)
+                                }
+                            ),
+                            text(format!("{}", param.noteon_velocity))
+                                .size(17.0)
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .align_x(alignment::Alignment::End)
+                                .align_y(alignment::Alignment::Center),
+                        ]
+                        .width(Length::FillPortion(6)),
+                        button("Open")
+                            .on_press(Message::OpenSRNWindow(*srn))
+                            .width(60),
                     ]
-                    .width(Length::FillPortion(6)),
-                    stack![
-                        progress_bar(0.0..=127.0, param.noteon_velocity as f32).style(
-                            |theme: &Theme| progress_bar::Style {
-                                background: iced::Background::Color(theme.palette().background),
-                                bar: iced::Background::Color(theme.palette().success),
-                                border: Border::default().rounded(0.0)
-                            }
-                        ),
-                        text(format!("{}", param.noteon_velocity))
-                            .size(17.0)
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .align_x(alignment::Alignment::End)
-                            .align_y(alignment::Alignment::Center),
-                    ]
-                    .width(Length::FillPortion(6)),
-                    button("Open")
-                        .on_press(Message::OpenSRNWindow(*key))
-                        .width(60),
-                ]
-                .spacing(10)
-                .width(Length::Fill)
-                .align_y(alignment::Alignment::Center)
-                .into()
-            })
-            .collect();
+                    .spacing(10)
+                    .width(Length::Fill)
+                    .align_y(alignment::Alignment::Center)
+                    .into(),
+                );
+            }
+        }
         // 表インデックス
         let srn_index = row![
             text("SRN").width(30).align_x(alignment::Alignment::Start),
