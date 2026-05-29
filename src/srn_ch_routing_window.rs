@@ -40,7 +40,7 @@ impl SPC2MIDI2Window for SRNChannelRoutingWindow {
                     if self.source_info.using_channel[ch] {
                         text(format!("{}", ch)).color(Color::from_rgb(1.0, 1.0, 1.0))
                     } else {
-                        text(format!("{} (not use)", ch)).color(Color::from_rgb(1.0, 0.0, 0.0))
+                        text(format!("{} (not use)", ch)).color(Color::from_rgb(0.5, 0.5, 0.5))
                     }
                     .align_x(alignment::Alignment::Center)
                     .align_y(alignment::Alignment::Center)
