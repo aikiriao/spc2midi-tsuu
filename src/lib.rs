@@ -393,6 +393,10 @@ impl App {
                     match data {
                         LoadedFile::SPCFile(data) => {
                             if let Some(spc_file) = parse_spc_file(&data) {
+                                // 再生中の場合は止める
+                                if self.stream_is_playing.load(Ordering::Relaxed) {
+                                    self.stream_play_stop().expect("Failed to stop play");
+                                }
                                 self.spc_file = Some(Box::new(spc_file.clone()));
                                 self.analyze_sources(
                                     if spc_file.header.duration > 0 {
