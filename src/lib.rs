@@ -100,6 +100,7 @@ pub enum Message {
     SRNPlayVolumeChanged(u8),
     ReceivedPlayStartRequest,
     ReceivedPlayStopRequest,
+    SRNChannelListFlagToggled(usize, bool),
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
     SRNMuteFlagToggled(u8, bool),
@@ -425,15 +426,18 @@ impl App {
                                 // 再生サンプル数・MIDI出力サイズをリセット
                                 self.stream_played_samples.store(0, Ordering::Relaxed);
                                 self.midi_output_bytes.store(0, Ordering::Relaxed);
-                                // ウィンドウタイトルに開いたファイル名を追記
+                                // メインウィンドウの表示更新
                                 if let Some(window) = self.windows.get_mut(&self.main_window_id) {
                                     let main_window: &mut MainWindow =
                                         window.as_mut().as_any_mut().downcast_mut().unwrap();
+                                    // ウィンドウタイトルに開いたファイル名を追記
                                     main_window.title = format!(
                                         "{} - {}",
                                         main_window.base_title,
                                         path.file_name().unwrap().to_str().unwrap()
                                     );
+                                    // 全てのSRNを表示
+                                    main_window.showing_channel_srn_list = [true; 8];
                                 }
                                 // 出力時間をSPCの情報を元に設定
                                 let mut config = self.midi_output_configure.write().unwrap();
@@ -575,6 +579,13 @@ impl App {
                 // Stopの場合は再生サンプル数をリセット
                 self.stream_played_samples.store(0, Ordering::Relaxed);
                 self.midi_output_bytes.store(0, Ordering::Relaxed);
+            }
+            Message::SRNChannelListFlagToggled(spc_ch, flag) => {
+                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                    let main_win: &mut MainWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    main_win.showing_channel_srn_list[spc_ch] = flag;
+                }
             }
             Message::SPCMuteFlagToggled(flag) => {
                 if let Some(pcm_spc_ref) = &self.pcm_spc {
