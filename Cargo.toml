@@ -1,6 +1,6 @@
 [package]
 name = "spc2midi-tsuu"
-version = "0.2.27"
+version = "0.2.28"
 edition = "2024"
 
 [dependencies]
@@ -23,3 +23,9 @@ windows-sys = "0.61.2"
 
 [build-dependencies]
 winresource = "0.1.30"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
