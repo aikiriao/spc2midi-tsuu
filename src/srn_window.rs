@@ -212,7 +212,7 @@ impl SPC2MIDI2Window for SRNWindow {
                     .align_x(alignment::Alignment::Start),
                 tooltip(
                     checkbox(param.update_parameter_after_noteon)
-                        .label("Update Paramter after NoteOn")
+                        .label("Update Paramters after NoteOn")
                         .on_toggle(move |flag| Message::UpdateParameterAfterNoteOnFlagToggled(
                             srn_no, flag
                         )),
