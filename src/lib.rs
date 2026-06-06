@@ -118,6 +118,7 @@ pub enum Message {
     FixedVolumeChanged(u8, u8),
     EnvelopeAsExpressionFlagToggled(u8, bool),
     EchoAsEffect1FlagToggled(u8, bool),
+    UpdateParameterAfterNoteOnFlagToggled(u8, bool),
     ChannelRoutingMuteChanged(u8, u8, bool),
     ChannelRoutingChanged(u8, u8, u8),
     ChannelRoutingReseted(u8),
@@ -818,6 +819,15 @@ impl App {
                     });
                 }
             }
+            Message::UpdateParameterAfterNoteOnFlagToggled(srn_no, flag) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.update_parameter_after_noteon = flag;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
+                }
+            }
             Message::SRNCenterNoteOctaveUpClicked(srn_no) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
@@ -1317,6 +1327,7 @@ impl App {
                     fixed_volume: 100,
                     enable_pitch_bend: !is_drum,
                     echo_as_effect1: true,
+                    update_parameter_after_noteon: true,
                     channel_routing: if is_drum {
                         [9; 8]
                     } else {
@@ -2044,6 +2055,9 @@ fn apply_source_parameter(
         }
         if param.echo_as_effect1 {
             flag |= 0x20;
+        }
+        if param.update_parameter_after_noteon {
+            flag |= 0x10;
         }
         spc.dsp.write_register(ram, DSP_ADDRESS_SRN_FLAG, flag);
         spc.dsp

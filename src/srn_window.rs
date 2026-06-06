@@ -210,6 +210,15 @@ impl SPC2MIDI2Window for SRNWindow {
                 text("Others")
                     .width(90)
                     .align_x(alignment::Alignment::Start),
+                tooltip(
+                    checkbox(param.update_parameter_after_noteon)
+                        .label("Update Paramter after NoteOn")
+                        .on_toggle(move |flag| Message::UpdateParameterAfterNoteOnFlagToggled(
+                            srn_no, flag
+                        )),
+                    "Update Expression/Volume/Pan/PitchBend after NoteOn",
+                    tooltip::Position::Top,
+                ),
                 checkbox(param.envelope_as_expression)
                     .label("Envelope as Expression")
                     .on_toggle(move |flag| Message::EnvelopeAsExpressionFlagToggled(srn_no, flag)),

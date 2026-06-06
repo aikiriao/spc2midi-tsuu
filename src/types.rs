@@ -77,6 +77,8 @@ pub struct SourceParameter {
     pub enable_pitch_bend: bool,
     /// エコーをエフェクト1デプスとして出力するか
     pub echo_as_effect1: bool,
+    /// ノートオン後に再生パラメータを更新するか
+    pub update_parameter_after_noteon: bool,
     /// 出力チャンネル（SPCの出力チャンネルをインデックス、出力先MIDIチャンネルが値）
     pub channel_routing: [u8; 8],
     /// 出力チャンネルミュート（各SPCの出力チャンネルでのミュートフラグ）
