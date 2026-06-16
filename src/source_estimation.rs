@@ -97,7 +97,7 @@ fn detect_drum(source_info: &SourceInformation) -> bool {
     // ドラム音判定
 
     // ショートループ（1波形分だけのループ）
-    if nsmpls < (SPC_SAMPLING_RATE / 500.0) as usize {
+    if nsmpls < (SPC_SAMPLING_RATE / 100.0) as usize {
         return false;
     }
 
