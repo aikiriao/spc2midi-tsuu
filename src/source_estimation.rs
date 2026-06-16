@@ -44,11 +44,8 @@ fn detect_drum(source_info: &SourceInformation) -> bool {
         return false;
     }
 
-    // ループ位置が末尾にあればワンショット音源
-    let one_shot = source_info.loop_start_sample == nsmpls;
-
-    // ループ位置が先頭にある場合
-    let head_loop = source_info.loop_start_sample == 0;
+    // ループ位置が端点にあればワンショット音源
+    let one_shot = source_info.loop_start_sample == nsmpls || source_info.loop_start_sample == 0;
 
     // 最初の1/8と最後の1/8のパワーの比
     let power_ratio = {
@@ -100,12 +97,12 @@ fn detect_drum(source_info: &SourceInformation) -> bool {
     // ドラム音判定
 
     // ショートループ（1波形分だけのループ）
-    if head_loop && nsmpls < (SPC_SAMPLING_RATE / 100.0) as usize {
+    if nsmpls < (SPC_SAMPLING_RATE / 500.0) as usize {
         return false;
     }
 
     // ワンショット音源 or 波形全体ループ音源
-    if one_shot || head_loop {
+    if one_shot {
         return true;
     }
 
