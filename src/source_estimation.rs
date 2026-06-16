@@ -126,6 +126,19 @@ fn detect_drum(source_info: &SourceInformation) -> bool {
 
 /// センターノートの推定
 fn center_note_estimation(source_info: &SourceInformation) -> f32 {
+    // ループ長からの周期推定
+    let nsmpls = source_info.signal.len();
+    if nsmpls > source_info.loop_start_sample {
+        // ショートループのサンプル数が小さく、かつ波形全体に対するループが大きければ
+        // ループ部分が1周期分の波形になっていると思って推定
+        let loop_length = nsmpls - source_info.loop_start_sample;
+        if loop_length < (SPC_SAMPLING_RATE / 100.0) as usize && nsmpls < 5 * loop_length {
+            let freq = SPC_SAMPLING_RATE / loop_length as f32;
+            let estimated_note = 12.0 * f32::log2(freq / A4_PITCH_HZ) + 69.0;
+            return estimated_note.clamp(0.0, 127.0);
+        }
+    }
+
     let power_spec = &source_info.power_spectrum;
     // 対数パワースペクトルに変換
     let log_spec: Vec<f32> = power_spec.iter().map(|p| 10.0 * f32::log10(*p)).collect();
