@@ -44,30 +44,31 @@ fn detect_drum(source_info: &SourceInformation) -> bool {
         return false;
     }
 
-    // ループ位置が端点にあればワンショット音源
-    let one_shot =
-        (source_info.loop_start_sample == 0) || (source_info.loop_start_sample == nsmpls);
+    // ループ位置が末尾にあればワンショット音源
+    let one_shot = source_info.loop_start_sample == nsmpls;
+
+    // ループ位置が先頭にある場合
+    let head_loop = source_info.loop_start_sample == 0;
 
     // 最初の1/8と最後の1/8のパワーの比
-    let power_ratio;
-    {
-        let mut first_power = 0.0;
-        let mut last_power = 0.0;
+    let power_ratio = {
         let div_num_samples = nsmpls / NUM_DIVISIONS;
+        let mut first_power = 0.0;
         for i in 0..div_num_samples {
             first_power += signal[i] * signal[i];
         }
+        let mut last_power = 0.0;
         for i in (nsmpls - div_num_samples)..nsmpls {
             last_power += signal[i] * signal[i];
         }
-        power_ratio = if (first_power > 0.0) && (last_power > 0.0) {
+        if (first_power > 0.0) && (last_power > 0.0) {
             10.0 * (first_power / last_power).log10()
         } else if first_power > 0.0 {
             120.0
         } else {
             -120.0
-        };
-    }
+        }
+    };
 
     let sum_power = power_spec.iter().sum::<f32>();
     let density: Vec<_> = power_spec.iter().map(|p| *p / sum_power).collect();
@@ -98,8 +99,13 @@ fn detect_drum(source_info: &SourceInformation) -> bool {
 
     // ドラム音判定
 
-    // ワンショット音源
-    if one_shot {
+    // ショートループ（1波形分だけのループ）
+    if head_loop && nsmpls < (SPC_SAMPLING_RATE / 100.0) as usize {
+        return false;
+    }
+
+    // ワンショット音源 or 波形全体ループ音源
+    if one_shot || head_loop {
         return true;
     }
 
