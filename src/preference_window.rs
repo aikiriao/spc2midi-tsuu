@@ -49,7 +49,7 @@ impl SPC2MIDI2Window for PreferencesWindow {
                 number_input(
                     &midi_output_configure.beats_per_minute,
                     (MIN_BEATS_PER_MINUTE as f32)..=(MAX_BEATS_PER_MINUTE as f32),
-                    move |bpm| { Message::MIDIOutputBpmChanged(bpm) },
+                    Message::MIDIOutputBpmChanged,
                 )
                 .step(BPM_RESOLUTION),
                 tooltip(

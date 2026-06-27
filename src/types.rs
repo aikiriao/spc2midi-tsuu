@@ -15,9 +15,9 @@ pub const DEFAULT_MIDI_RESOLUSIONS: u16 = 480;
 /// デフォルトのSPCのクロックアップ倍率
 pub const DEFAULT_SPC_CLOCKUP_FACTOR: u32 = 1;
 /// 最小のBPM（テンポ）
-pub const MIN_BEATS_PER_MINUTE: u32 = 30;
+pub const MIN_BEATS_PER_MINUTE: u32 = 4;
 /// 最大のBPM（テンポ）
-pub const MAX_BEATS_PER_MINUTE: u32 = 240;
+pub const MAX_BEATS_PER_MINUTE: u32 = 1920;
 /// BPMの最小解像度
 pub const BPM_RESOLUTION: f32 = 1.0 / 256.0;
 

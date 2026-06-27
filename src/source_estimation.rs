@@ -186,6 +186,10 @@ pub fn estimate_drum_and_note(source_info: &SourceInformation) -> (bool, f32) {
 
 /// 超簡易テンポ推定
 pub fn estimate_bpm(onset_signal: &[f32], sampling_rate: f32) -> f32 {
+    // 推定テンポの範囲
+    const MIN_ESTIMATED_BPM: f32 = 30.0;
+    const MAX_ESTIMATED_BPM: f32 = 240.0;
+
     // フレームに区切り平均をとる
     // （この操作は間引きに相当するので間引く前にLPFをかけるとよいが低速なのでやめる）
     let frame_size: usize = (sampling_rate * 0.01).round() as usize;
@@ -208,9 +212,9 @@ pub fn estimate_bpm(onset_signal: &[f32], sampling_rate: f32) -> f32 {
 
     // 候補ラグ内でのピーク
     let min_lag =
-        ((60.0 * sampling_rate) / (MAX_BEATS_PER_MINUTE as f32 * frame_size as f32)) as usize;
+        ((60.0 * sampling_rate) / (MAX_ESTIMATED_BPM * frame_size as f32)) as usize;
     let max_lag =
-        ((60.0 * sampling_rate) / (MIN_BEATS_PER_MINUTE as f32 * frame_size as f32)) as usize;
+        ((60.0 * sampling_rate) / (MIN_ESTIMATED_BPM * frame_size as f32)) as usize;
     let max_lag = max_lag.min(auto_corr.len() - 1);
     let max = auto_corr[min_lag..=max_lag]
         .iter()
