@@ -158,15 +158,23 @@ impl SPC2MIDI2Window for MainWindow {
                 {
                     menu_tuple(menu_items!(
                         (menu_button(
-                            text("Preferences...")
+                            text("Device Setting...")
                                 .height(Length::Shrink)
                                 .align_y(alignment::Vertical::Center),
-                            Message::OpenPreferencesWindow,
+                            Message::OpenDeviceSettingWindow,
+                        )
+                        .width(Length::Fill)
+                        .height(Length::Shrink)),
+                        (menu_button(
+                            text("MIDI Output Configuration...")
+                                .height(Length::Shrink)
+                                .align_y(alignment::Vertical::Center),
+                            Message::OpenMIDIOutpoutConfigurationWindow,
                         )
                         .width(Length::Fill)
                         .height(Length::Shrink)),
                     ))
-                    .width(140.0)
+                    .width(240.0)
                 }
             ),
         )

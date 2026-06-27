@@ -1,6 +1,7 @@
 pub mod cli;
 mod main_window;
-mod preference_window;
+mod midi_output_configuration_window;
+mod device_setting_window;
 mod program;
 mod source_estimation;
 mod srn_ch_routing_window;
@@ -8,7 +9,8 @@ mod srn_window;
 mod types;
 
 use crate::main_window::*;
-use crate::preference_window::*;
+use crate:: midi_output_configuration_window::*;
+use crate::device_setting_window::*;
 use crate::program::*;
 use crate::source_estimation::*;
 use crate::srn_ch_routing_window::*;
@@ -80,8 +82,10 @@ const OCTAVE_NOTE: u16 = 12 << 9;
 pub enum Message {
     OpenMainWindow,
     MainWindowOpened(window::Id),
-    OpenPreferencesWindow,
-    PreferencesWindowOpened(window::Id),
+    OpenMIDIOutpoutConfigurationWindow,
+    MIDIOutpoutConfigurationWindowOpened(window::Id),
+    OpenDeviceSettingWindow,
+    DeviceWindowOpened(window::Id),
     OpenSRNWindow(u8),
     SRNWindowOpened(window::Id),
     OpenSRNChannelRoutingWindow(u8),
@@ -311,22 +315,35 @@ impl App {
                 return open.map(Message::MainWindowOpened);
             }
             Message::MainWindowOpened(_id) => {}
-            Message::OpenPreferencesWindow => {
+            Message::OpenMIDIOutpoutConfigurationWindow => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(500.0, 700.0),
+                    size: iced::Size::new(500.0, 500.0),
                     ..Default::default()
                 });
                 self.windows.insert(
                     id,
-                    Box::new(PreferencesWindow::new(
-                        self.audio_out_device_name.clone(),
-                        self.midi_out_port_name.clone(),
+                    Box::new(MIDIOutputConfigurationWindow::new(
                         self.midi_output_configure.clone(),
                     )),
                 );
-                return open.map(Message::PreferencesWindowOpened);
+                return open.map(Message::MIDIOutpoutConfigurationWindowOpened);
             }
-            Message::PreferencesWindowOpened(_id) => {}
+            Message::MIDIOutpoutConfigurationWindowOpened(_id) => {}
+            Message::OpenDeviceSettingWindow => {
+                let (id, open) = window::open(window::Settings {
+                    size: iced::Size::new(500.0, 200.0),
+                    ..Default::default()
+                });
+                self.windows.insert(
+                    id,
+                    Box::new(DeviceSettingWindow::new(
+                        self.audio_out_device_name.clone(),
+                        self.midi_out_port_name.clone(),
+                    )),
+                );
+                return open.map(Message::DeviceWindowOpened);
+            }
+            Message::DeviceWindowOpened(_id) => {},
             Message::OpenSRNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
                     size: iced::Size::new(800.0, 750.0),

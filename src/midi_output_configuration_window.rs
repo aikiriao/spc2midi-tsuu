@@ -1,19 +1,12 @@
 use crate::types::*;
 use crate::Message;
-use crate::SPC2MIDI2_TITLE_STR;
-use cpal::traits::{DeviceTrait, HostTrait};
-use iced::widget::{button, column, combo_box, checkbox, row, text, tooltip};
+use iced::widget::{button, checkbox, column, combo_box, row, text, tooltip};
 use iced::{alignment, Element, Length};
 use iced_aw::number_input;
-use midir::MidiOutput;
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug)]
-pub struct PreferencesWindow {
-    audio_out_device_name: Arc<RwLock<Option<String>>>,
-    audio_out_devices_box: combo_box::State<String>,
-    midi_out_port_name: Arc<RwLock<Option<String>>>,
-    midi_ports_box: combo_box::State<String>,
+pub struct MIDIOutputConfigurationWindow {
     ticks_per_quarter_box: combo_box::State<u16>,
     volume_curve_box: combo_box::State<VolumeCurve>,
     midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
@@ -33,17 +26,14 @@ impl std::fmt::Display for VolumeCurve {
     }
 }
 
-impl SPC2MIDI2Window for PreferencesWindow {
+impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
     fn title(&self) -> String {
-        "Preferences".to_string()
+        "MIDI Output Configuration".to_string()
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let audio_device_name = self.audio_out_device_name.read().unwrap();
-        let midi_port_name = self.midi_out_port_name.read().unwrap();
         let midi_output_configure = self.midi_output_configure.read().unwrap();
-        let midi_output_configure_view = column![
-            text("MIDI Output Configuration"),
+        let content = column![
             row![
                 text("Tempo (BPM)"),
                 number_input(
@@ -139,8 +129,9 @@ impl SPC2MIDI2Window for PreferencesWindow {
             .width(Length::Fill),
             row![
                 text("Split Drum Notes Into Separate Tracks"),
-                checkbox(midi_output_configure.split_drum_into_separate_tracks)
-                    .on_toggle(move |flag| Message::MIDIOutputSplitDrumIntoSeparateTracksChanged(flag))
+                checkbox(midi_output_configure.split_drum_into_separate_tracks).on_toggle(
+                    move |flag| Message::MIDIOutputSplitDrumIntoSeparateTracksChanged(flag)
+                )
             ]
             .spacing(10)
             .padding(10)
@@ -148,46 +139,14 @@ impl SPC2MIDI2Window for PreferencesWindow {
             .width(Length::Fill),
             row![
                 text("Trim Leading Non-Event Period"),
-                checkbox(midi_output_configure.trim_leading_nonevents_period)
-                    .on_toggle(move |flag| Message::MIDIOutputTrimLeadingNonEventsPeriodChanged(flag))
+                checkbox(midi_output_configure.trim_leading_nonevents_period).on_toggle(
+                    move |flag| Message::MIDIOutputTrimLeadingNonEventsPeriodChanged(flag)
+                )
             ]
             .spacing(10)
             .padding(10)
             .align_y(alignment::Alignment::Center)
             .width(Length::Fill),
-        ];
-        let content = column![
-            column![
-                text("Audio Output Device"),
-                combo_box(
-                    &self.audio_out_devices_box,
-                    "Audio Output Device",
-                    audio_device_name.as_ref(),
-                    move |device_name| Message::AudioOutputDeviceSelected(device_name),
-                ),
-            ]
-            .spacing(10)
-            .padding(10)
-            .width(Length::Fill)
-            .align_x(alignment::Alignment::Start),
-            column![
-                text("MIDI Output Port"),
-                combo_box(
-                    &self.midi_ports_box,
-                    "MIDI Output Port",
-                    midi_port_name.as_ref(),
-                    move |port_name| Message::MIDIOutputPortSelected(port_name),
-                )
-            ]
-            .spacing(10)
-            .padding(10)
-            .width(Length::Fill)
-            .align_x(alignment::Alignment::Start),
-            midi_output_configure_view
-                .spacing(10)
-                .padding(10)
-                .width(Length::Fill)
-                .align_x(alignment::Alignment::Start),
         ]
         .spacing(10)
         .padding(10)
@@ -197,36 +156,9 @@ impl SPC2MIDI2Window for PreferencesWindow {
     }
 }
 
-impl PreferencesWindow {
-    pub fn new(
-        audio_out_device_name: Arc<RwLock<Option<String>>>,
-        midi_out_port_name: Arc<RwLock<Option<String>>>,
-        midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
-    ) -> Self {
-        let device_name_list: Vec<String> = cpal::default_host()
-            .devices()
-            .unwrap()
-            .filter(|d| d.supports_output())
-            .map(|d| {
-                d.description()
-                    .expect("Failed to get device name")
-                    .to_string()
-            })
-            .collect();
-        let port_name_list = if let Ok(midi_out) = MidiOutput::new(SPC2MIDI2_TITLE_STR) {
-            midi_out
-                .ports()
-                .iter()
-                .map(|p| midi_out.port_name(p).expect("Failed to get MIDI port name"))
-                .collect()
-        } else {
-            vec![]
-        };
+impl MIDIOutputConfigurationWindow {
+    pub fn new(midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>) -> Self {
         Self {
-            audio_out_device_name: audio_out_device_name,
-            audio_out_devices_box: combo_box::State::new(device_name_list),
-            midi_out_port_name: midi_out_port_name,
-            midi_ports_box: combo_box::State::new(port_name_list),
             midi_output_configure: midi_output_configure,
             ticks_per_quarter_box: combo_box::State::new(vec![
                 24, 30, 48, 60, 96, 120, 192, 240, 384, 480, 960,
