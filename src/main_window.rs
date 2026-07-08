@@ -4,6 +4,7 @@ use iced::border::Radius;
 use iced::widget::canvas::{self, Canvas, Event, Frame, Geometry};
 use iced::widget::{
     button, checkbox, column, progress_bar, row, scrollable, space, stack, text, tooltip, Column,
+    Text,
 };
 use iced::{
     alignment, mouse, Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer,
@@ -346,27 +347,36 @@ impl SPC2MIDI2Window for MainWindow {
                         .width(30),
                     {
                         if let Some(param) = params.get(&status.srn_no[ch]) {
-                            text(format!(
-                                "{}",
-                                if param.instrument_name != "" {
-                                    param.instrument_name.clone()
+                            button(
+                                Text::new(format!(
+                                    "{}",
+                                    if param.instrument_name != "" {
+                                        param.instrument_name.clone()
+                                    } else {
+                                        param.program.to_string()
+                                    }
+                                ))
+                                .color(if param.mute {
+                                    self.theme.palette().warning
                                 } else {
-                                    param.program.to_string()
-                                }
-                            ))
-                            .color(if param.mute {
-                                self.theme.palette().warning
-                            } else {
-                                self.theme.palette().text
-                            })
+                                    self.theme.palette().text
+                                })
+                                .size(14.0)
+                                .align_x(alignment::Alignment::Start)
+                                .align_y(alignment::Alignment::Center),
+                            )
+                            .on_press(Message::OpenSRNWindow(status.srn_no[ch]))
                         } else {
-                            text(format!(""))
+                            button(Text::new(format!("")))
                         }
                     }
-                    .align_y(alignment::Alignment::Center)
-                    .size(14.0)
+                    .style(|_, _| button::Style {
+                        background: Some(iced::Background::Color(self.theme.palette().background)),
+                        ..Default::default()
+                    })
+                    .padding(Padding::new(5.0).left(0.0))
                     .height(Length::Fill)
-                    .width(Length::FillPortion(12)),
+                    .width(Length::FillPortion(14)),
                     {
                         if let Some(param) = params.get(&status.srn_no[ch]) {
                             text(format!("{}", param.channel_routing[ch])).color(
@@ -408,7 +418,7 @@ impl SPC2MIDI2Window for MainWindow {
             text("Solo").width(50).align_x(alignment::Alignment::Start),
             text("SRN").width(30).align_x(alignment::Alignment::Start),
             text("Program")
-                .width(Length::FillPortion(12))
+                .width(Length::FillPortion(14))
                 .align_x(alignment::Alignment::Start),
             text("CH")
                 .width(Length::FillPortion(2))
