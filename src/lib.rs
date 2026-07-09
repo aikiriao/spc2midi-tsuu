@@ -2278,7 +2278,7 @@ mod tests {
             test_param_field!(app, 0, mute, true);
             let _ = app.update(Message::SRNMuteFlagToggled(0, false));
             test_param_field!(app, 0, mute, false);
-            let _ = app.update(Message::ProgramSelected(0, Program::BrightAcoustic));
+            let _ = app.update(Message::ProgramSelected(0, Program::BrightAcoustic, true));
             test_param_field!(app, 0, program, Program::BrightAcoustic);
             let _ = app.update(Message::CenterNoteIntChanged(0, 0));
             let _ = app.update(Message::CenterNoteFractionChanged(0, 0.0));
