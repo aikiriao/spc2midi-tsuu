@@ -62,7 +62,7 @@ impl SPC2MIDI2Window for SRNWindow {
                 &self.program_box,
                 "Program",
                 Some(&param.program),
-                move |program| Message::ProgramSelected(srn_no, program),
+                move |program| Message::ProgramSelected(srn_no, program, true),
             ),]
             .spacing(10)
             .width(Length::Fill)

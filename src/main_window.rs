@@ -1,10 +1,11 @@
 use crate::types::*;
 use crate::Message;
+use crate::Program;
 use iced::border::Radius;
 use iced::widget::canvas::{self, Canvas, Event, Frame, Geometry};
 use iced::widget::{
-    button, checkbox, column, progress_bar, row, scrollable, space, stack, text, tooltip, Column,
-    Text,
+    button, checkbox, column, pick_list, progress_bar, row, scrollable, space, stack, text,
+    tooltip, Column, Text,
 };
 use iced::{
     alignment, mouse, Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer,
@@ -206,7 +207,7 @@ impl SPC2MIDI2Window for MainWindow {
             let mut srns = vec![];
             for (srn, info) in infos.iter() {
                 if info.using_channel[spc_ch] {
-                    srns.push(srn);
+                    srns.push(srn.clone());
                 }
             }
             // チャンネルヘッダ行
@@ -231,27 +232,30 @@ impl SPC2MIDI2Window for MainWindow {
             // spc_chで発音されているSRNの情報表示
             if self.showing_channel_srn_list[spc_ch] {
                 for srn in srns {
-                    let param = params.get(srn).unwrap();
+                    let param = params.get(&srn).unwrap();
                     srn_list.push(
                         row![
-                            text(format!("0x{:02X}", *srn))
+                            text(format!("0x{:02X}", srn))
                                 .width(30)
                                 .align_x(alignment::Alignment::Start),
-                            text(format!(
-                                "{}",
-                                if param.instrument_name != "" {
-                                    param.instrument_name.clone()
-                                } else {
-                                    param.program.to_string()
-                                }
-                            ))
-                            .color(if param.mute {
-                                self.theme.palette().warning
+                            pick_list(
+                                Program::ALL.to_vec(),
+                                Some(param.program.clone()),
+                                move |prog| Message::ProgramSelected(srn, prog, false),
+                            )
+                            .placeholder(if param.instrument_name != "" {
+                                param.instrument_name.clone()
                             } else {
-                                self.theme.palette().text
+                                param.program.to_string()
                             })
-                            .width(Length::FillPortion(17))
-                            .align_x(alignment::Alignment::Start),
+                            .style(|theme: &Theme, _| pick_list::Style {
+                                text_color: theme.palette().text,
+                                placeholder_color: theme.palette().text,
+                                handle_color: theme.palette().text,
+                                background: iced::Background::Color(theme.palette().background),
+                                border: Border::default().rounded(0.0)
+                            })
+                            .width(Length::FillPortion(17)),
                             stack![
                                 progress_bar(0.0..=127.0, param.center_note as f32 / 512.0).style(
                                     |theme: &Theme| progress_bar::Style {
@@ -289,7 +293,7 @@ impl SPC2MIDI2Window for MainWindow {
                             ]
                             .width(Length::FillPortion(6)),
                             button("Open")
-                                .on_press(Message::OpenSRNWindow(*srn))
+                                .on_press(Message::OpenSRNWindow(srn))
                                 .width(60),
                         ]
                         .spacing(10)

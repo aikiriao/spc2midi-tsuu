@@ -1,16 +1,16 @@
 pub mod cli;
+mod device_setting_window;
 mod main_window;
 mod midi_output_configuration_window;
-mod device_setting_window;
 mod program;
 mod source_estimation;
 mod srn_ch_routing_window;
 mod srn_window;
 mod types;
 
-use crate::main_window::*;
-use crate:: midi_output_configuration_window::*;
 use crate::device_setting_window::*;
+use crate::main_window::*;
+use crate::midi_output_configuration_window::*;
 use crate::program::*;
 use crate::source_estimation::*;
 use crate::srn_ch_routing_window::*;
@@ -108,7 +108,7 @@ pub enum Message {
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
     SRNMuteFlagToggled(u8, bool),
-    ProgramSelected(u8, Program),
+    ProgramSelected(u8, Program, bool),
     SRNMIDIPreviewFlagToggled(bool),
     ReceivedMIDIPreviewRequest(u8),
     CenterNoteIntChanged(u8, u8),
@@ -343,7 +343,7 @@ impl App {
                 );
                 return open.map(Message::DeviceWindowOpened);
             }
-            Message::DeviceWindowOpened(_id) => {},
+            Message::DeviceWindowOpened(_id) => {}
             Message::OpenSRNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
                     size: iced::Size::new(800.0, 750.0),
@@ -652,7 +652,7 @@ impl App {
                     });
                 }
             }
-            Message::ProgramSelected(srn_no, program) => {
+            Message::ProgramSelected(srn_no, program, preview) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
                     // 出力チャンネルを設定前がドラムであればSPCと同じに、設定後にドラムであれば9に
@@ -670,7 +670,7 @@ impl App {
                     param.program = program.clone();
                 }
                 let mut tasks = vec![];
-                if self.midi_preview.load(Ordering::Relaxed) {
+                if preview && self.midi_preview.load(Ordering::Relaxed) {
                     tasks.push(Task::perform(async {}, move |_| {
                         Message::ReceivedMIDIPreviewRequest(srn_no)
                     }));
