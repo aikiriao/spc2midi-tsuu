@@ -243,11 +243,6 @@ impl SPC2MIDI2Window for MainWindow {
                                 Some(param.program.clone()),
                                 move |prog| Message::ProgramSelected(srn, prog, false),
                             )
-                            .placeholder(if param.instrument_name != "" {
-                                param.instrument_name.clone()
-                            } else {
-                                param.program.to_string()
-                            })
                             .style(|theme: &Theme, _| pick_list::Style {
                                 text_color: theme.palette().text,
                                 placeholder_color: theme.palette().text,
