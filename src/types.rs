@@ -32,6 +32,21 @@ pub enum VolumeCurve {
     Linear,
 }
 
+/// 再生MIDISystem
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MIDISystem {
+    /// 指定なし
+    NONE,
+    /// GM Level 1
+    GMLevel1, 
+    /// GM Level 2
+    GMLevel2, 
+    /// GS
+    GS,
+    /// XG
+    XG,
+}
+
 /// 音源情報
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -102,6 +117,8 @@ pub struct MIDIOutputConfigure {
     pub spc_clockup_factor: u32, 
     /// ボリュームカーブ
     pub volume_curve: VolumeCurve,
+    /// ターゲットMIDIシステム
+    pub midi_system: MIDISystem,
     /// ドラム音色をサンプル単位でトラックに分割するか
     pub split_drum_into_separate_tracks: bool,
     /// 先頭のイベントがない区間を取り除くか
@@ -160,6 +177,7 @@ impl MIDIOutputConfigure {
             ticks_per_quarter: DEFAULT_MIDI_RESOLUSIONS,
             spc_clockup_factor: DEFAULT_SPC_CLOCKUP_FACTOR,
             volume_curve: VolumeCurve::SquareRoot,
+            midi_system: MIDISystem::NONE,
             split_drum_into_separate_tracks: false,
             trim_leading_nonevents_period: false,
         }

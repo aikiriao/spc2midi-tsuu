@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 pub struct MIDIOutputConfigurationWindow {
     ticks_per_quarter_box: combo_box::State<u16>,
     volume_curve_box: combo_box::State<VolumeCurve>,
+    midi_system_box: combo_box::State<MIDISystem>,
     midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
 }
 
@@ -22,6 +23,22 @@ impl std::fmt::Display for VolumeCurve {
             Self::SquareRoot => "Square Root",
             Self::Log => "Log",
             Self::Linear => "Linear",
+        })
+    }
+}
+
+impl MIDISystem {
+    pub const ALL: [MIDISystem; 5] = [Self::NONE, Self::GMLevel1, Self::GMLevel2, Self::GS, Self::XG];
+}
+
+impl std::fmt::Display for MIDISystem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::NONE => "None",
+            Self::GMLevel1 => "GM Level 1",
+            Self::GMLevel2 => "GM Level 2",
+            Self::GS => "GS",
+            Self::XG => "XG",
         })
     }
 }
@@ -116,6 +133,19 @@ impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
             .align_y(alignment::Alignment::Center)
             .width(Length::Fill),
             row![
+                text("Target MIDI System"),
+                combo_box(
+                    &self.midi_system_box,
+                    "Target MIDI System",
+                    Some(&midi_output_configure.midi_system),
+                    move |system| { Message::MIDISystemChanged(system) },
+                ),
+            ]
+            .spacing(10)
+            .padding(10)
+            .align_y(alignment::Alignment::Center)
+            .width(Length::Fill),
+            row![
                 text("SPC700 Clock-Up Factor"),
                 number_input(
                     &midi_output_configure.spc_clockup_factor,
@@ -164,6 +194,7 @@ impl MIDIOutputConfigurationWindow {
                 24, 30, 48, 60, 96, 120, 192, 240, 384, 480, 960,
             ]),
             volume_curve_box: combo_box::State::new(VolumeCurve::ALL.to_vec()),
+            midi_system_box: combo_box::State::new(MIDISystem::ALL.to_vec()),
         }
     }
 }

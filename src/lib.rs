@@ -69,6 +69,18 @@ const MIDIMSG_PROGRAM_CHANGE: u8 = 0xC0;
 const MIDIMSG_MODE: u8 = 0xB0;
 /// MIDIチェンネルモードメッセージ：オールサウンドオフ
 const MIDIMSG_MODE_ALL_SOUND_OFF: u8 = 0x78;
+/// MIDI System Exclusive：GMシステムオン
+const MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_ON: [u8; 6] = [0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7];
+/// MIDI System Exclusive：GMシステムオフ
+const MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_OFF: [u8; 6] = [0xF0, 0x7E, 0x7F, 0x09, 0x02, 0xF7];
+/// MIDI System Exclusive：GM2システムオン
+const MIDIMSG_SYSEX_GMLEVEL2_SYSTEM_ON: [u8; 6] = [0xF0, 0x7E, 0x7F, 0x09, 0x03, 0xF7];
+/// MIDI System Exclusive：GSリセット
+const MIDIMSG_SYSEX_GS_RESET: [u8; 11] = [
+    0xF0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7F, 0x00, 0x41, 0xF7,
+];
+/// MIDI System Exclusive：XGシステムオン
+const MIDIMSG_SYSEX_XG_SYSTEM_ON: [u8; 9] = [0xF0, 0x43, 0x10, 0x4C, 0x00, 0x00, 0x7E, 0x00, 0xF7];
 /// MIDIをプレビューする際に使用するチャンネル
 const MIDI_PREVIEW_CHANNEL: u8 = 0;
 /// MIDIをプレビューする時間(msec)
@@ -136,6 +148,7 @@ pub enum Message {
     MIDIOutputBpmChanged(f32),
     MIDIOutputTicksPerQuarterChanged(u16),
     MIDIVolumeCurveChanged(VolumeCurve),
+    MIDISystemChanged(MIDISystem),
     MIDIOutputUpdatePeriodChanged(u8),
     MIDIOutputDurationChanged(u64),
     MIDIOutputSPC700ClockUpFactorChanged(u32),
@@ -317,7 +330,7 @@ impl App {
             Message::MainWindowOpened(_id) => {}
             Message::OpenMIDIOutpoutConfigurationWindow => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(500.0, 500.0),
+                    size: iced::Size::new(500.0, 600.0),
                     ..Default::default()
                 });
                 self.windows.insert(
@@ -962,6 +975,33 @@ impl App {
                 // 再生にかかわることなのでパラメータ反映
                 return Task::perform(async {}, move |_| Message::ReceivedSourceParameterUpdate);
             }
+            Message::MIDISystemChanged(system) => {
+                let mut config = self.midi_output_configure.write().unwrap();
+                if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+                    let midi_out_conn = midi_out_conn_ref.clone();
+                    let mut conn_out = midi_out_conn.lock().unwrap();
+                    match system {
+                        MIDISystem::NONE => {
+                            // GM1システムオンしてからオフ
+                            conn_out.send(&MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_ON).unwrap();
+                            conn_out.send(&MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_OFF).unwrap();
+                        }
+                        MIDISystem::GMLevel1 => {
+                            conn_out.send(&MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_ON).unwrap();
+                        }
+                        MIDISystem::GMLevel2 => {
+                            conn_out.send(&MIDIMSG_SYSEX_GMLEVEL2_SYSTEM_ON).unwrap();
+                        }
+                        MIDISystem::GS => {
+                            conn_out.send(&MIDIMSG_SYSEX_GS_RESET).unwrap();
+                        }
+                        MIDISystem::XG => {
+                            conn_out.send(&MIDIMSG_SYSEX_XG_SYSTEM_ON).unwrap();
+                        }
+                    }
+                }
+                config.midi_system = system;
+            }
             Message::MIDIOutputUpdatePeriodChanged(period) => {
                 let mut config = self.midi_output_configure.write().unwrap();
                 config.playback_parameter_update_period = period;
@@ -1429,9 +1469,9 @@ impl App {
                     let msg = out.messages[i];
                     track.events.push(TrackEvent {
                         vtime: if i == 0 { delta_ticks } else { 0 },
-                        event: MidiEvent::Midi(MidiMessage {
-                            data: msg.data[..msg.length].to_vec(),
-                        }),
+                        event: MidiEvent::Midi(MidiMessage::from_bytes(
+                            msg.data[..msg.length].to_vec(),
+                        )),
                     });
                 }
                 previous_elapsed_ticks = total_elapsed_ticks;
@@ -1481,9 +1521,9 @@ impl App {
             for (ch, note) in noteon_ch_notes {
                 track.events.push(TrackEvent {
                     vtime: 0,
-                    event: MidiEvent::Midi(MidiMessage {
-                        data: [MIDIMSG_NOTE_OFF | ch as u8, note, 0].to_vec(),
-                    }),
+                    event: MidiEvent::Midi(MidiMessage::from_bytes(
+                        [MIDIMSG_NOTE_OFF | ch as u8, note, 0].to_vec(),
+                    )),
                 });
             }
         }
@@ -1511,6 +1551,22 @@ impl App {
             });
 
             // メタイベントの設定
+            // MIDIシステムの設定
+            let sysex_msg = match config.midi_system {
+                MIDISystem::NONE => None,
+                MIDISystem::GMLevel1 => Some(MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_ON.to_vec()),
+                MIDISystem::GMLevel2 => Some(MIDIMSG_SYSEX_GMLEVEL2_SYSTEM_ON.to_vec()),
+                MIDISystem::GS => Some(MIDIMSG_SYSEX_GS_RESET.to_vec()),
+                MIDISystem::XG => Some(MIDIMSG_SYSEX_XG_SYSTEM_ON.to_vec()),
+            };
+            if let Some(mut sysex) = sysex_msg {
+                // System Exclusiveのサイズを付加
+                sysex.insert(1, sysex.len() as u8 - 1u8);
+                smf.tracks[0].events.push(TrackEvent {
+                    vtime: 0,
+                    event: MidiEvent::Midi(MidiMessage::from_bytes(sysex)),
+                });
+            }
             // テンポ
             let quarter_usec = (60_000_000.0 / config.beats_per_minute) as u32;
             smf.tracks[0].events.push(TrackEvent {
