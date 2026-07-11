@@ -8,7 +8,7 @@ const SPC_SAMPLING_RATE: f32 = 32000.0;
 /// センターピッチ(A4)
 const A4_PITCH_HZ: f32 = 440.0;
 /// 有効なピッチ候補と認めるスレッショルド
-const PITCH_PEAK_THRESHOLD: f32 = 0.8;
+const PITCH_PEAK_THRESHOLD: f32 = 0.9;
 
 macro_rules! chirp(
     ($m:expr) => ({
@@ -126,6 +126,9 @@ fn detect_drum(source_info: &SourceInformation) -> bool {
 
 /// センターノートの推定
 fn center_note_estimation(source_info: &SourceInformation) -> f32 {
+    // 対数パワースペクトルのオフセット
+    const LOG_POWER_SPECTRUM_OFFSET_DB: f32 = 120.0;
+
     // ループ長からの周期推定
     let nsmpls = source_info.signal.len();
     if nsmpls > source_info.loop_start_sample {
@@ -141,7 +144,10 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
 
     let power_spec = &source_info.power_spectrum;
     // 対数パワースペクトルに変換
-    let log_spec: Vec<f32> = power_spec.iter().map(|p| 10.0 * f32::log10(*p)).collect();
+    let log_spec: Vec<f32> = power_spec
+        .iter()
+        .map(|p| 10.0 * f32::log10(*p) + LOG_POWER_SPECTRUM_OFFSET_DB)
+        .collect();
 
     // 最大値
     let (argmax, max) =
@@ -211,10 +217,8 @@ pub fn estimate_bpm(onset_signal: &[f32], sampling_rate: f32) -> f32 {
         .collect();
 
     // 候補ラグ内でのピーク
-    let min_lag =
-        ((60.0 * sampling_rate) / (MAX_ESTIMATED_BPM * frame_size as f32)) as usize;
-    let max_lag =
-        ((60.0 * sampling_rate) / (MIN_ESTIMATED_BPM * frame_size as f32)) as usize;
+    let min_lag = ((60.0 * sampling_rate) / (MAX_ESTIMATED_BPM * frame_size as f32)) as usize;
+    let max_lag = ((60.0 * sampling_rate) / (MIN_ESTIMATED_BPM * frame_size as f32)) as usize;
     let max_lag = max_lag.min(auto_corr.len() - 1);
     let max = auto_corr[min_lag..=max_lag]
         .iter()
