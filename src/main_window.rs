@@ -575,7 +575,7 @@ fn draw_indicator(
         color: theme.palette().text,
         align_x: alignment::Horizontal::Center.into(),
         align_y: alignment::Vertical::Center,
-        font: Font::MONOSPACE,
+        font: Font::DEFAULT,
         ..canvas::Text::default()
     });
 }

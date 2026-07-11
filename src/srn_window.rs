@@ -592,7 +592,7 @@ fn draw_timelabel(frame: &mut Frame, bounds: &Rectangle, sampling_rate: f32, num
                 color: Color::WHITE,
                 align_x: alignment::Horizontal::Center.into(),
                 align_y: alignment::Vertical::Bottom,
-                font: Font::MONOSPACE,
+                font: Font::DEFAULT,
                 ..canvas::Text::default()
             });
             next_tick += tick;
@@ -686,7 +686,7 @@ fn draw_spectrum_peak_label(
             color: Color::WHITE,
             align_x: alignment::Horizontal::Center.into(),
             align_y: alignment::Vertical::Bottom,
-            font: Font::MONOSPACE,
+            font: Font::DEFAULT,
             ..canvas::Text::default()
         });
     }
