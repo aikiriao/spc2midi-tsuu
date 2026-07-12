@@ -4149,7 +4149,7 @@ dependencies = [
 
 [[package]]
 name = "spc2midi-tsuu"
-version = "0.2.46"
+version = "0.2.47"
 dependencies = [
  "clap",
  "cpal",
@@ -4160,8 +4160,10 @@ dependencies = [
  "iced_widget",
  "midir",
  "num-traits 0.2.19",
+ "realfft",
  "rfd",
  "rimd",
+ "rustfft",
  "samplerate",
  "serde",
  "serde_json",

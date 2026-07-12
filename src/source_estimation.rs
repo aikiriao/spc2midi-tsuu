@@ -2,6 +2,7 @@ use crate::types::*;
 use czt::{c32, transform};
 use num_traits::Pow;
 use std::f32::consts::PI;
+use realfft::RealFftPlanner;
 
 /// SPCの出力サンプリングレート
 const SPC_SAMPLING_RATE: f32 = 32000.0;
@@ -204,17 +205,12 @@ pub fn estimate_bpm(onset_signal: &[f32], sampling_rate: f32) -> f32 {
         .map(|c| c.iter().sum::<f32>() / frame_size as f32)
         .collect();
 
+    // 平均除去
+    let mean = onset_envelope.iter().sum::<f32>() / onset_envelope.len() as f32;
+    let onset_envelope: Vec<_> = onset_envelope.into_iter().map(|c| c - mean).collect();
+
     // 自己相関計算
-    let m = onset_envelope.len();
-    let power_spec: Vec<_> = transform(onset_envelope.as_slice(), m, chirp!(m), c32::new(1.0, 0.0))
-        .iter()
-        .map(|c| c.re * c.re + c.im * c.im)
-        .collect();
-    let auto_corr: Vec<_> = transform(power_spec.as_slice(), m, chirp!(m), c32::new(1.0, 0.0))
-        [..(power_spec.len() / 2)]
-        .iter()
-        .map(|c| c.re)
-        .collect();
+    let auto_corr = compute_auto_correlation(&onset_envelope);
 
     // 候補ラグ内でのピーク
     let min_lag = ((60.0 * sampling_rate) / (MAX_ESTIMATED_BPM * frame_size as f32)) as usize;
@@ -258,4 +254,33 @@ pub fn compute_power_spectrum(signal: &Vec<f32>) -> Vec<f32> {
         .iter()
         .map(|c| c.re * c.re + c.im * c.im)
         .collect::<Vec<_>>()
+}
+
+/// 自己相関関数の計算
+fn compute_auto_correlation(signal: &Vec<f32>) -> Vec<f32> {
+    // 後半ゼロ埋めした信号
+    let pad_len = signal.len().next_power_of_two() * 2;
+    let mut buffer = vec![0.0f32; pad_len];
+    let normalized_factor = 1.0 / pad_len as f32;
+    for n in 0..signal.len() {
+        buffer[n] = signal[n] * normalized_factor;
+    }
+
+    // パワースペクトル計算
+    let mut fft_planner = RealFftPlanner::<f32>::new();
+    let r2c = fft_planner.plan_fft_forward(pad_len);
+    let mut complex_spectrum = r2c.make_output_vec();
+    r2c.process(&mut buffer, &mut complex_spectrum).unwrap();
+    for n in 0..complex_spectrum.len() {
+        let re = complex_spectrum[n].re;
+        let im = complex_spectrum[n].im;
+        complex_spectrum[n].re = re * re + im * im;
+        complex_spectrum[n].im = 0.0;
+    }
+
+    // 逆FFTして自己相関を求める
+    let r2c = fft_planner.plan_fft_inverse(pad_len);
+    r2c.process(&mut complex_spectrum, &mut buffer).unwrap();
+
+    buffer[0..signal.len()].to_vec()
 }
