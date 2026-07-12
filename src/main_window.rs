@@ -243,7 +243,7 @@ impl SPC2MIDI2Window for MainWindow {
                                     DisplaySourceIDType::StartAddress => {
                                         text(format!("{:04X}", info.start_address))
                                     }
-                                    DisplaySourceIDType::SRN => text(format!("0x{:02X}", srn)),
+                                    DisplaySourceIDType::SRN => text(format!("{}", srn)),
                                 }
                             } else {
                                 text(format!(""))
@@ -380,7 +380,7 @@ impl SPC2MIDI2Window for MainWindow {
                                 text(format!("{:04X}", info.start_address))
                             }
                             DisplaySourceIDType::SRN => {
-                                text(format!("0x{:02X}", status.srn_no[ch]))
+                                text(format!("{}", status.srn_no[ch]))
                             }
                         }
                     } else {
