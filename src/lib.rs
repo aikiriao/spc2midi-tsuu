@@ -160,6 +160,7 @@ pub enum Message {
     ReceivedBpmDoubleButtonClicked,
     ReceivedBpmHalfButtonClicked,
     ReceivedSRNReanalyzeRequest,
+    DisplaySourceIDTypeToggled,
     Tick,
 }
 
@@ -190,6 +191,7 @@ pub struct App {
     channel_mute_flags: Arc<AtomicU8>,
     audio_out_device_name: Arc<RwLock<Option<String>>>,
     midi_out_port_name: Arc<RwLock<Option<String>>>,
+    display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,6 +279,7 @@ impl Default for App {
                 None
             })),
             midi_out_port_name: Arc::new(RwLock::new(midi_out_port_name)),
+            display_source_id_type: Arc::new(RwLock::new(DisplaySourceIDType::StartAddress)),
         }
     }
 }
@@ -322,6 +325,7 @@ impl App {
                     self.pcm_spc_on.clone(),
                     self.midi_spc_on.clone(),
                     self.channel_mute_flags.clone(),
+                    self.display_source_id_type.clone(),
                 );
                 self.main_window_id = id;
                 self.windows.insert(id, Box::new(window));
@@ -1133,6 +1137,14 @@ impl App {
                         &spc_file.ram,
                         &spc_file.dsp_register,
                     );
+                }
+            }
+            Message::DisplaySourceIDTypeToggled => {
+                if let Ok(mut id_type) = self.display_source_id_type.write() {
+                    *id_type = match *id_type {
+                        DisplaySourceIDType::StartAddress => DisplaySourceIDType::SRN,
+                        DisplaySourceIDType::SRN => DisplaySourceIDType::StartAddress,
+                    };
                 }
             }
             Message::Tick => {

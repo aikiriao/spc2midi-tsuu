@@ -29,6 +29,7 @@ pub struct MainWindow {
     pcm_spc_on: Arc<AtomicBool>,
     midi_spc_on: Arc<AtomicBool>,
     channel_mute_flags: Arc<AtomicU8>,
+    display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
     pub playback_time_sec: f32,
     pub midi_bit_rate: f32,
     pub pitch_indicator: [Indicator; 8],
@@ -47,6 +48,7 @@ impl MainWindow {
         pcm_spc_on: Arc<AtomicBool>,
         midi_spc_on: Arc<AtomicBool>,
         channel_mute_flags: Arc<AtomicU8>,
+        display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
     ) -> Self {
         Self {
             title: title.clone(),
@@ -67,6 +69,7 @@ impl MainWindow {
             volume_indicator: [[Indicator::new(0.0, -128.0, 127.0, |value| format!("{}", value));
                 2]; 8],
             showing_channel_srn_list: [true; 8],
+            display_source_id_type: display_source_id_type,
         }
     }
 }
@@ -235,9 +238,18 @@ impl SPC2MIDI2Window for MainWindow {
                     let param = params.get(&srn).unwrap();
                     srn_list.push(
                         row![
-                            text(format!("0x{:02X}", srn))
-                                .width(30)
-                                .align_x(alignment::Alignment::Start),
+                            if let Some(info) = infos.get(&srn) {
+                                match *self.display_source_id_type.read().unwrap() {
+                                    DisplaySourceIDType::StartAddress => {
+                                        text(format!("{:04X}", info.start_address))
+                                    }
+                                    DisplaySourceIDType::SRN => text(format!("0x{:02X}", srn)),
+                                }
+                            } else {
+                                text(format!(""))
+                            }
+                            .width(40)
+                            .align_x(alignment::Alignment::Start),
                             pick_list(
                                 Program::ALL.to_vec(),
                                 Some(param.program.clone()),
@@ -250,6 +262,7 @@ impl SPC2MIDI2Window for MainWindow {
                                 background: iced::Background::Color(theme.palette().background),
                                 border: Border::default().rounded(0.0)
                             })
+                            .padding(0)
                             .width(Length::FillPortion(17)),
                             stack![
                                 progress_bar(0.0..=127.0, param.center_note as f32 / 512.0).style(
@@ -301,7 +314,29 @@ impl SPC2MIDI2Window for MainWindow {
         }
         // 表インデックス
         let srn_index = row![
-            text("SRN").width(30).align_x(alignment::Alignment::Start),
+            tooltip(
+                button(
+                    text(match *self.display_source_id_type.read().unwrap() {
+                        DisplaySourceIDType::StartAddress => "Addr",
+                        DisplaySourceIDType::SRN => "SRN",
+                    })
+                    .align_x(alignment::Alignment::Start)
+                )
+                .on_press(Message::DisplaySourceIDTypeToggled)
+                .width(40)
+                .padding(0)
+                .style(|_, _| {
+                    button::Style {
+                        background: None,
+                        text_color: self.theme.palette().text,
+                        border: iced::Border::default(),
+                        shadow: iced::Shadow::default(),
+                        snap: false,
+                    }
+                }),
+                "Click to switch between sample Address and SRN",
+                tooltip::Position::Bottom,
+            ),
             text("Program")
                 .width(Length::FillPortion(17))
                 .align_x(alignment::Alignment::Start),
@@ -339,35 +374,44 @@ impl SPC2MIDI2Window for MainWindow {
                         .align_y(alignment::Alignment::Center)
                         .height(Length::Fill)
                         .width(10),
-                    text(format!("0x{:02X}", status.srn_no[ch]))
-                        .align_y(alignment::Alignment::Center)
-                        .height(Length::Fill)
-                        .size(14.0)
-                        .width(30),
-                    {
-                        if let Some(param) = params.get(&status.srn_no[ch]) {
-                            button(
-                                Text::new(format!(
-                                    "{}",
-                                    if param.instrument_name != "" {
-                                        param.instrument_name.clone()
-                                    } else {
-                                        param.program.to_string()
-                                    }
-                                ))
-                                .color(if param.mute {
-                                    self.theme.palette().warning
-                                } else {
-                                    self.theme.palette().text
-                                })
-                                .size(14.0)
-                                .align_x(alignment::Alignment::Start)
-                                .align_y(alignment::Alignment::Center),
-                            )
-                            .on_press(Message::OpenSRNWindow(status.srn_no[ch]))
-                        } else {
-                            button(Text::new(format!("")))
+                    if let Some(info) = infos.get(&status.srn_no[ch]) {
+                        match *self.display_source_id_type.read().unwrap() {
+                            DisplaySourceIDType::StartAddress => {
+                                text(format!("{:04X}", info.start_address))
+                            }
+                            DisplaySourceIDType::SRN => {
+                                text(format!("0x{:02X}", status.srn_no[ch]))
+                            }
                         }
+                    } else {
+                        text(format!(""))
+                    }
+                    .align_y(alignment::Alignment::Center)
+                    .height(Length::Fill)
+                    .size(14.0)
+                    .width(30),
+                    if let Some(param) = params.get(&status.srn_no[ch]) {
+                        button(
+                            Text::new(format!(
+                                "{}",
+                                if param.instrument_name != "" {
+                                    param.instrument_name.clone()
+                                } else {
+                                    param.program.to_string()
+                                }
+                            ))
+                            .color(if param.mute {
+                                self.theme.palette().warning
+                            } else {
+                                self.theme.palette().text
+                            })
+                            .size(14.0)
+                            .align_x(alignment::Alignment::Start)
+                            .align_y(alignment::Alignment::Center),
+                        )
+                        .on_press(Message::OpenSRNWindow(status.srn_no[ch]))
+                    } else {
+                        button(Text::new(format!("")))
                     }
                     .style(|_, _| button::Style {
                         background: Some(iced::Background::Color(self.theme.palette().background)),
@@ -415,7 +459,29 @@ impl SPC2MIDI2Window for MainWindow {
         let status_index = row![
             text("Mute").width(35).align_x(alignment::Alignment::Start),
             text("Solo").width(50).align_x(alignment::Alignment::Start),
-            text("SRN").width(30).align_x(alignment::Alignment::Start),
+            tooltip(
+                button(
+                    text(match *self.display_source_id_type.read().unwrap() {
+                        DisplaySourceIDType::StartAddress => "Addr",
+                        DisplaySourceIDType::SRN => "SRN",
+                    })
+                    .align_x(alignment::Alignment::Start)
+                )
+                .on_press(Message::DisplaySourceIDTypeToggled)
+                .width(30)
+                .padding(0)
+                .style(|_, _| {
+                    button::Style {
+                        background: None,
+                        text_color: self.theme.palette().text,
+                        border: iced::Border::default(),
+                        shadow: iced::Shadow::default(),
+                        snap: false,
+                    }
+                }),
+                "Click to switch between sample Address and SRN",
+                tooltip::Position::Top,
+            ),
             text("Program")
                 .width(Length::FillPortion(14))
                 .align_x(alignment::Alignment::Start),

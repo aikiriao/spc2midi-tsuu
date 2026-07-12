@@ -47,6 +47,15 @@ pub enum MIDISystem {
     XG,
 }
 
+/// 波形を区別するIDの表示種別
+#[derive(Debug, Clone)]
+pub enum DisplaySourceIDType {
+    /// 波形開始アドレス（デフォルト）
+    StartAddress,
+    /// SRN
+    SRN, 
+}
+
 /// 音源情報
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
