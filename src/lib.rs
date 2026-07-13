@@ -370,7 +370,7 @@ impl App {
                 if let Some(source) = infos.get(&srn_no) {
                     let window = SRNWindow::new(
                         format!(
-                            "SRN 0x{:02X} 0x{:04X} - 0x{:04X}",
+                            "SRN {}: 0x{:04X} - 0x{:04X}",
                             srn_no, source.start_address, source.end_address
                         ),
                         srn_no,
