@@ -2,9 +2,11 @@ use crate::types::*;
 use crate::Message;
 use crate::SPC2MIDI2_TITLE_STR;
 use cpal::traits::{DeviceTrait, HostTrait};
-use iced::widget::{column, combo_box, text};
+use iced::widget::{column, combo_box, row, text};
 use iced::{alignment, Element, Length};
+use iced_aw::number_input;
 use midir::MidiOutput;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug)]
@@ -13,6 +15,7 @@ pub struct DeviceSettingWindow {
     audio_out_devices_box: combo_box::State<String>,
     midi_out_port_name: Arc<RwLock<Option<String>>>,
     midi_ports_box: combo_box::State<String>,
+    audio_output_latency_msec: Arc<AtomicUsize>,
 }
 
 impl SPC2MIDI2Window for DeviceSettingWindow {
@@ -50,6 +53,19 @@ impl SPC2MIDI2Window for DeviceSettingWindow {
             .padding(10)
             .width(Length::Fill)
             .align_x(alignment::Alignment::Start),
+            row![
+                text("Audio Output Latency (msec)"),
+                number_input(
+                    &self.audio_output_latency_msec.load(Ordering::Relaxed),
+                    50..=1000,
+                    move |msec| Message::AudioLatencyMsecChanged(msec),
+                )
+                .step(10),
+            ]
+            .spacing(10)
+            .padding(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center),
         ]
         .spacing(10)
         .padding(10)
@@ -63,6 +79,7 @@ impl DeviceSettingWindow {
     pub fn new(
         audio_out_device_name: Arc<RwLock<Option<String>>>,
         midi_out_port_name: Arc<RwLock<Option<String>>>,
+        audio_output_latency_msec: Arc<AtomicUsize>,
     ) -> Self {
         let device_name_list: Vec<String> = cpal::default_host()
             .devices()
@@ -88,6 +105,7 @@ impl DeviceSettingWindow {
             audio_out_devices_box: combo_box::State::new(device_name_list),
             midi_out_port_name: midi_out_port_name,
             midi_ports_box: combo_box::State::new(port_name_list),
+            audio_output_latency_msec: audio_output_latency_msec,
         }
     }
 }

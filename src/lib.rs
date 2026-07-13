@@ -161,6 +161,7 @@ pub enum Message {
     ReceivedBpmHalfButtonClicked,
     ReceivedSRNReanalyzeRequest,
     DisplaySourceIDTypeToggled,
+    AudioLatencyMsecChanged(usize),
     Tick,
 }
 
@@ -180,6 +181,7 @@ pub struct App {
     stream_played_samples: Arc<AtomicUsize>,
     midi_output_bytes: Arc<AtomicUsize>,
     stream_is_playing: Arc<AtomicBool>,
+    audio_output_latency_msec: Arc<AtomicUsize>,
     midi_out_conn: Option<Arc<Mutex<MidiOutputConnection>>>,
     pcm_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::sdsp::SDSP>>>>>,
     midi_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>>>>>,
@@ -259,6 +261,7 @@ impl Default for App {
             stream_played_samples: Arc::new(AtomicUsize::new(0)),
             midi_output_bytes: Arc::new(AtomicUsize::new(0)),
             stream_is_playing: Arc::new(AtomicBool::new(false)),
+            audio_output_latency_msec: Arc::new(AtomicUsize::new(200)),
             midi_out_conn: midi_out_conn,
             pcm_spc: None,
             midi_spc: None,
@@ -348,7 +351,7 @@ impl App {
             Message::MIDIOutpoutConfigurationWindowOpened(_id) => {}
             Message::OpenDeviceSettingWindow => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(500.0, 200.0),
+                    size: iced::Size::new(500.0, 300.0),
                     ..Default::default()
                 });
                 self.windows.insert(
@@ -356,6 +359,7 @@ impl App {
                     Box::new(DeviceSettingWindow::new(
                         self.audio_out_device_name.clone(),
                         self.midi_out_port_name.clone(),
+                        self.audio_output_latency_msec.clone(),
                     )),
                 );
                 return open.map(Message::DeviceWindowOpened);
@@ -1147,6 +1151,10 @@ impl App {
                     };
                 }
             }
+            Message::AudioLatencyMsecChanged(msec) => {
+                self.audio_output_latency_msec
+                    .store(msec, Ordering::Relaxed);
+            }
             Message::Tick => {
                 // 再生情報取得
                 if let Some(midi_spc_ref) = &self.midi_spc {
@@ -1770,11 +1778,17 @@ impl App {
         };
 
         // リサンプラ初期化 32k -> デバイスの出力レート変換となるように
+        let latency = self.audio_output_latency_msec.load(Ordering::Relaxed) as f64 / 1000.0;
         let (mut prod, mut cons) = fixed_resample::resampling_channel::<f32, NUM_CHANNELS>(
             NonZero::new(NUM_CHANNELS).unwrap(),
             SPC_SAMPLING_RATE,
             stream_config.sample_rate,
-            Default::default(),
+            fixed_resample::ResamplingChannelConfig {
+                latency_seconds: latency,
+                capacity_seconds: 3.0 * latency, // 2倍程度確保するべしとあるが、余裕を見て3倍
+                overflow_autocorrect_percent_threshold: None, // capacityを大きくするとOverflowと判定されやすくなるため判定を無効に
+                ..Default::default()
+            },
         );
 
         // SPCのミュートフラグ取得・設定
