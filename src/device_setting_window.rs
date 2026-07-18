@@ -86,9 +86,12 @@ impl DeviceSettingWindow {
             .unwrap()
             .filter(|d| d.supports_output())
             .map(|d| {
-                d.description()
-                    .expect("Failed to get device name")
-                    .to_string()
+                let desc = d.description().expect("Failed to get device name");
+                if let Some(driver) = desc.driver() {
+                    format!("{} ({})", desc.name(), driver)
+                } else {
+                    format!("{}", desc.name())
+                }
             })
             .collect();
         let port_name_list = if let Ok(midi_out) = MidiOutput::new(SPC2MIDI2_TITLE_STR) {

@@ -272,12 +272,14 @@ impl Default for App {
             preview_volume: Arc::new(AtomicU8::new(40)),
             channel_mute_flags: Arc::new(AtomicU8::new(0)),
             audio_out_device_name: Arc::new(RwLock::new(if let Some(device) = device {
-                Some(
-                    device
-                        .description()
-                        .expect("Failed to get device name")
-                        .to_string(),
-                )
+                Some({
+                    let desc = device.description().expect("Failed to get device name");
+                    if let Some(driver) = desc.driver() {
+                        format!("{} ({})", desc.name(), driver)
+                    } else {
+                        format!("{}", desc.name())
+                    }
+                })
             } else {
                 None
             })),
@@ -931,7 +933,7 @@ impl App {
                     .expect("Failed to get devices");
                 if let Some(device) = devices
                     .filter(|d| d.supports_output())
-                    .find(|d| d.description().unwrap().to_string() == device_name)
+                    .find(|d| device_name.starts_with(d.description().unwrap().name()))
                 {
                     if let Ok(config) = device.default_output_config() {
                         self.stream_device = Some(device);
