@@ -2,9 +2,14 @@ use crate::program::*;
 use crate::types::*;
 use crate::Message;
 use crate::SPC_SAMPLING_RATE;
+use fuzzy_match::fuzzy_match;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
-use iced::widget::{button, checkbox, column, combo_box, row, slider, text, text_input, tooltip};
+use iced::widget::{
+    button, checkbox, column, combo_box, pick_list, row, slider, text, text_input,
+    tooltip,
+};
+use iced::window;
 use iced::{
     alignment, mouse, Color, Element, Font, Length, Point, Rectangle, Renderer, Size, Theme,
 };
@@ -15,8 +20,12 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 
+// 周辺とみなすプログラム数
+const NUM_NEARBY_PROGRAMS: u8 = 11;
+
 #[derive(Debug)]
 pub struct SRNWindow {
+    window_id: window::Id,
     title: String,
     srn_no: u8,
     source_info: Arc<SourceInformation>,
@@ -25,6 +34,7 @@ pub struct SRNWindow {
     preview_loop: Arc<AtomicBool>,
     preview_volume: Arc<AtomicU8>,
     program_box: combo_box::State<Program>,
+    pub program_search_query: Option<String>,
     cache: Cache,
 }
 
@@ -40,6 +50,94 @@ impl Default for DrawMode {
     }
 }
 
+// 文字列クエリから最もそれらしいプログラムを探す
+fn search_bestmatch_program_from_query(query: Option<String>) -> Option<Program> {
+    if query.is_none() {
+        return None;
+    }
+
+    let query = query.unwrap();
+    let programs: Vec<_> = Program::ALL
+        .into_iter()
+        .map(|program| (format!("{}", program), program))
+        .collect();
+
+    // クエリが整数ならば数値で前方一致
+    if query.chars().all(|c| c.is_ascii_digit()) {
+        for (name, prog) in &programs {
+            if name.starts_with(&query) {
+                return Some(prog.clone());
+            }
+        }
+    }
+
+    // ドラムの場合の前方一致
+    if query.chars().nth(0) == Some('D') && query[1..].chars().all(|c| c.is_ascii_digit()) {
+        for (name, prog) in &programs {
+            if name.starts_with(&query) {
+                return Some(prog.clone());
+            }
+        }
+    }
+
+    // 部分一致
+    let queries: Vec<_> = query
+        .to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .map(String::from)
+        .collect();
+    for (name, prog) in &programs {
+        for q in &queries {
+            if name.contains(q) {
+                return Some(prog.clone());
+            }
+        }
+    }
+
+    // あいまい一致検索
+    fuzzy_match(
+        &query,
+        programs
+            .iter()
+            .map(|(name, program)| (name.as_str(), program.clone())),
+    )
+}
+
+// プログラムから周囲のプログラム番号を含むリストを作成
+fn create_nearby_programs_list(program: Option<Program>) -> Vec<Program> {
+    if program.is_none() {
+        return vec![];
+    }
+
+    // プログラム番号に応じて周囲のリストを決定
+    let program_no = program.unwrap() as u8;
+    let melody_end = Program::Gunshot as u8;
+    let drum_start = Program::AcousticBassDrum as u8;
+    let drum_end = Program::OpenTriangle as u8;
+    let num_half_programs = NUM_NEARBY_PROGRAMS / 2;
+    if program_no <= melody_end {
+        if program_no < num_half_programs {
+            0..NUM_NEARBY_PROGRAMS
+        } else if (program_no + num_half_programs) >= melody_end {
+            (melody_end - NUM_NEARBY_PROGRAMS + 1)..(melody_end + 1)
+        } else {
+            (program_no - num_half_programs)..(program_no + num_half_programs + 1)
+        }
+    } else if program_no >= drum_start && program_no <= drum_end {
+        if (program_no - num_half_programs) <= drum_start {
+            drum_start..(drum_start + NUM_NEARBY_PROGRAMS)
+        } else if (program_no + num_half_programs) >= drum_end {
+            (drum_end - NUM_NEARBY_PROGRAMS + 1)..(drum_end + 1)
+        } else {
+            (program_no - num_half_programs)..(program_no + num_half_programs + 1)
+        }
+    } else {
+        0..NUM_NEARBY_PROGRAMS
+    }
+    .map(|i| Program::try_from(i as u8).unwrap())
+    .collect()
+}
+
 impl SPC2MIDI2Window for SRNWindow {
     fn title(&self) -> String {
         self.title.clone()
@@ -47,10 +145,13 @@ impl SPC2MIDI2Window for SRNWindow {
 
     fn view(&self) -> Element<'_, Message> {
         let srn_no = self.srn_no;
+        let window_id = self.window_id;
         let params = self.source_parameter.read().unwrap();
         let param = params.get(&self.srn_no).unwrap();
         let center_note_int = (param.center_note >> 9) as u8;
         let center_note_fraction = (param.center_note & 0x1FF) as f32 / 512.0;
+        let match_program = search_bestmatch_program_from_query(self.program_search_query.clone());
+        let nearby_programs = create_nearby_programs_list(match_program.clone());
         let parameter_controller = column![
             row![checkbox(param.mute)
                 .label("Mute")
@@ -58,12 +159,25 @@ impl SPC2MIDI2Window for SRNWindow {
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
-            row![combo_box(
-                &self.program_box,
-                "Program",
-                Some(&param.program),
-                move |program| Message::ProgramSelected(srn_no, program, true),
-            ),]
+            row![
+                combo_box(
+                    &self.program_box,
+                    "Program",
+                    Some(&param.program),
+                    move |program| Message::ProgramSelected(srn_no, program, true)
+                )
+                .on_input(move |name| Message::ProgramSearchboxInputed(window_id, name))
+                .on_close(Message::ProgramSearchboxClosed(
+                    window_id,
+                    param.program.to_string()
+                ))
+                .width(Length::FillPortion(2)),
+                pick_list(nearby_programs, match_program, move |program| {
+                    Message::ProgramSelected(srn_no, program, true)
+                })
+                .placeholder("Nearby Programs")
+                .width(Length::FillPortion(1)),
+            ]
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
@@ -289,6 +403,7 @@ impl SPC2MIDI2Window for SRNWindow {
 
 impl SRNWindow {
     pub fn new(
+        window_id: window::Id,
         title: String,
         srn_no: u8,
         source_info: &SourceInformation,
@@ -298,6 +413,7 @@ impl SRNWindow {
         preview_volume: Arc<AtomicU8>,
     ) -> Self {
         Self {
+            window_id: window_id,
             title: title,
             srn_no: srn_no,
             source_info: source_info.clone().into(),
@@ -306,6 +422,7 @@ impl SRNWindow {
             preview_loop: preview_loop,
             preview_volume: preview_volume,
             program_box: combo_box::State::new(Program::ALL.to_vec()),
+            program_search_query: None,
             cache: Cache::default(),
         }
     }

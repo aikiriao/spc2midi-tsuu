@@ -121,6 +121,8 @@ pub enum Message {
     MIDIMuteFlagToggled(bool),
     SRNMuteFlagToggled(u8, bool),
     ProgramSelected(u8, Program, bool),
+    ProgramSearchboxInputed(window::Id, String),
+    ProgramSearchboxClosed(window::Id, String),
     SRNMIDIPreviewFlagToggled(bool),
     ReceivedMIDIPreviewRequest(u8),
     CenterNoteIntChanged(u8, u8),
@@ -375,6 +377,7 @@ impl App {
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
                     let window = SRNWindow::new(
+                        id,
                         format!(
                             "SRN {}: 0x{:04X} - 0x{:04X}",
                             srn_no, source.start_address, source.end_address
@@ -702,6 +705,20 @@ impl App {
                     Message::ReceivedSourceParameterUpdate
                 }));
                 return Task::batch(tasks);
+            }
+            Message::ProgramSearchboxInputed(window_id, query) => {
+                if let Some(window) = self.windows.get_mut(&window_id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    srn_win.program_search_query = Some(query);
+                }
+            }
+            Message::ProgramSearchboxClosed(window_id, name) => {
+                if let Some(window) = self.windows.get_mut(&window_id) {
+                    let srn_win: &mut SRNWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    // srn_win.program_search_query = Some(name);
+                }
             }
             Message::CenterNoteIntChanged(srn_no, note) => {
                 let mut params = self.source_parameter.write().unwrap();

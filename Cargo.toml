@@ -22,6 +22,7 @@ spc700 = { git = "https://github.com/aikiriao/spc700.git" }
 windows-sys = "0.61.2"
 rustfft = "6.2.0"
 realfft = "3.4.0"
+fuzzy_match = "0.2.1"
 
 [build-dependencies]
 winresource = "0.1.30"
