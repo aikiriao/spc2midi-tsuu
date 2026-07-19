@@ -135,7 +135,9 @@ pub enum Message {
     AutoVolumeFlagToggled(u8, bool),
     FixedVolumeChanged(u8, u8),
     EnvelopeAsExpressionFlagToggled(u8, bool),
-    EchoAsEffect1FlagToggled(u8, bool),
+    EchoAsReverbFlagToggled(u8, bool),
+    FixedReverbSendChanged(u8, u8),
+    ChorusSendChanged(u8, u8),
     UpdateParameterAfterNoteOnFlagToggled(u8, bool),
     ChannelRoutingMuteChanged(u8, u8, bool),
     ChannelRoutingChanged(u8, u8, u8),
@@ -371,7 +373,7 @@ impl App {
             Message::DeviceWindowOpened(_id) => {}
             Message::OpenSRNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(800.0, 750.0),
+                    size: iced::Size::new(800.0, 850.0),
                     ..Default::default()
                 });
                 let infos = self.source_infos.read().unwrap();
@@ -873,10 +875,28 @@ impl App {
                     });
                 }
             }
-            Message::EchoAsEffect1FlagToggled(srn_no, flag) => {
+            Message::EchoAsReverbFlagToggled(srn_no, flag) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
-                    param.echo_as_effect1 = flag;
+                    param.echo_as_reverb_send = flag;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
+                }
+            }
+            Message::FixedReverbSendChanged(srn_no, send) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.fixed_reverb_send = send;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
+                }
+            }
+            Message::ChorusSendChanged(srn_no, send) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.chorus_send = send;
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
                     });
@@ -1427,8 +1447,10 @@ impl App {
                     fixed_pan: 64,
                     auto_volume: true,
                     fixed_volume: 100,
+                    fixed_reverb_send: 0,
+                    chorus_send: 0,
                     enable_pitch_bend: !is_drum,
-                    echo_as_effect1: true,
+                    echo_as_reverb_send: false,
                     update_parameter_after_noteon: true,
                     channel_routing: if is_drum {
                         [9; 8]
@@ -2177,11 +2199,8 @@ fn apply_source_parameter(
         if param.envelope_as_expression {
             flag |= 0x40;
         }
-        if param.echo_as_effect1 {
-            flag |= 0x20;
-        }
         if param.update_parameter_after_noteon {
-            flag |= 0x10;
+            flag |= 0x20;
         }
         spc.dsp.write_register(ram, DSP_ADDRESS_SRN_FLAG, flag);
         spc.dsp
@@ -2213,6 +2232,17 @@ fn apply_source_parameter(
             DSP_ADDRESS_SRN_PITCHBEND_SENSITIVITY,
             if param.enable_pitch_bend { 0x80 } else { 0x00 } | param.pitch_bend_width,
         );
+        spc.dsp.write_register(
+            ram,
+            DSP_ADDRESS_SRN_REVERB_SEND,
+            if param.echo_as_reverb_send {
+                0x80
+            } else {
+                0x00
+            } | param.fixed_reverb_send,
+        );
+        spc.dsp
+            .write_register(ram, DSP_ADDRESS_SRN_CHORUS_SEND, param.chorus_send);
         for ch in 0..8 {
             let value = if param.channel_mute[ch] { 0x80 } else { 0x00 }
                 | (ch << 4) as u8
@@ -2423,10 +2453,10 @@ mod tests {
             test_param_field!(app, 0, envelope_as_expression, true);
             let _ = app.update(Message::EnvelopeAsExpressionFlagToggled(0, false));
             test_param_field!(app, 0, envelope_as_expression, false);
-            let _ = app.update(Message::EchoAsEffect1FlagToggled(0, true));
-            test_param_field!(app, 0, echo_as_effect1, true);
-            let _ = app.update(Message::EchoAsEffect1FlagToggled(0, false));
-            test_param_field!(app, 0, echo_as_effect1, false);
+            let _ = app.update(Message::EchoAsReverbFlagToggled(0, true));
+            test_param_field!(app, 0, echo_as_reverb_send, true);
+            let _ = app.update(Message::EchoAsReverbFlagToggled(0, false));
+            test_param_field!(app, 0, echo_as_reverb_send, false);
         }
 
         Ok(())

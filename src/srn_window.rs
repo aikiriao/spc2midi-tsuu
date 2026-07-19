@@ -6,13 +6,12 @@ use fuzzy_match::fuzzy_match;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{
-    button, checkbox, column, combo_box, container, row, scrollable, slider, stack,
-    text, text_input, tooltip,
+    button, checkbox, column, combo_box, container, row, scrollable, slider, stack, text,
+    text_input, tooltip,
 };
 use iced::window;
 use iced::{
-    alignment, mouse, Border, Color, Element, Font, Length, Point, Rectangle, Renderer,
-    Size, Theme,
+    alignment, mouse, Border, Color, Element, Font, Length, Point, Rectangle, Renderer, Size, Theme,
 };
 use iced_aw::number_input;
 use num_traits::pow::Pow;
@@ -253,15 +252,44 @@ impl SPC2MIDI2Window for SRNWindow {
                 checkbox(param.auto_volume)
                     .label("Use SPC Value")
                     .on_toggle(move |flag| Message::AutoVolumeFlagToggled(srn_no, flag)),
-                number_input(
-                    &param.fixed_volume,
-                    if param.auto_volume {
-                        param.fixed_volume..=param.fixed_volume
-                    } else {
-                        0..=127
-                    },
-                    move |volume| { Message::FixedVolumeChanged(srn_no, volume) }
-                )
+                number_input(&param.fixed_volume, 0..=127, move |volume| {
+                    Message::FixedVolumeChanged(srn_no, volume)
+                })
+                .step(1)
+                .on_input_maybe(if param.auto_volume {
+                    None
+                } else {
+                    Some(move |volume| Message::FixedVolumeChanged(srn_no, volume))
+                }),
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center),
+            row![
+                text("Effects")
+                    .width(90)
+                    .align_x(alignment::Alignment::Start),
+                checkbox(param.echo_as_reverb_send)
+                    .label("Echo as Reverb")
+                    .on_toggle(move |flag| Message::EchoAsReverbFlagToggled(srn_no, flag)),
+                text("Reverb")
+                    .width(60)
+                    .align_x(alignment::Alignment::Start),
+                number_input(&param.fixed_reverb_send, 0..=127, move |send| {
+                    Message::FixedReverbSendChanged(srn_no, send)
+                })
+                .step(1)
+                .on_input_maybe(if param.echo_as_reverb_send {
+                    None
+                } else {
+                    Some(move |send| Message::FixedReverbSendChanged(srn_no, send))
+                }),
+                text("Chorus")
+                    .width(60)
+                    .align_x(alignment::Alignment::Start),
+                number_input(&param.chorus_send, 0..=127, move |send| {
+                    Message::ChorusSendChanged(srn_no, send)
+                })
                 .step(1),
             ]
             .spacing(10)
@@ -323,9 +351,6 @@ impl SPC2MIDI2Window for SRNWindow {
                 checkbox(param.envelope_as_expression)
                     .label("Envelope as Expression")
                     .on_toggle(move |flag| Message::EnvelopeAsExpressionFlagToggled(srn_no, flag)),
-                checkbox(param.echo_as_effect1)
-                    .label("Echo as Reverb")
-                    .on_toggle(move |flag| Message::EchoAsEffect1FlagToggled(srn_no, flag)),
             ]
             .spacing(10)
             .width(Length::Fill)

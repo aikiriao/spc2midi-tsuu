@@ -97,10 +97,14 @@ pub struct SourceParameter {
     pub auto_volume: bool,
     /// ボリューム値
     pub fixed_volume: u8,
+    /// リバーブセンド値
+    pub fixed_reverb_send: u8,
+    /// コーラスセンド値
+    pub chorus_send: u8,
     /// ピッチベンドを使うか
     pub enable_pitch_bend: bool,
-    /// エコーをエフェクト1デプスとして出力するか
-    pub echo_as_effect1: bool,
+    /// エコーをリバーブセンドとして出力するか
+    pub echo_as_reverb_send: bool,
     /// ノートオン後に再生パラメータを更新するか
     pub update_parameter_after_noteon: bool,
     /// 出力チャンネル（SPCの出力チャンネルをインデックス、出力先MIDIチャンネルが値）
