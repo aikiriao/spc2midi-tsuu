@@ -6,12 +6,13 @@ use fuzzy_match::fuzzy_match;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{
-    button, checkbox, column, combo_box, pick_list, row, slider, text, text_input,
-    tooltip,
+    button, checkbox, column, combo_box, container, pick_list, row, scrollable, slider, stack,
+    text, text_input, tooltip, Space,
 };
 use iced::window;
 use iced::{
-    alignment, mouse, Color, Element, Font, Length, Point, Rectangle, Renderer, Size, Theme,
+    alignment, mouse, Background, Border, Color, Element, Font, Length, Point, Rectangle, Renderer,
+    Size, Theme,
 };
 use iced_aw::number_input;
 use num_traits::pow::Pow;
@@ -159,28 +160,14 @@ impl SPC2MIDI2Window for SRNWindow {
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
-            row![
-                combo_box(
-                    &self.program_box,
-                    "Program",
-                    Some(&param.program),
-                    move |program| Message::ProgramSelected(srn_no, program, true)
-                )
-                .on_input(move |name| Message::ProgramSearchboxInputed(window_id, name))
-                .on_close(Message::ProgramSearchboxClosed(
-                    window_id,
-                    param.program.to_string()
-                ))
-                .width(Length::FillPortion(2)),
-                pick_list(nearby_programs, match_program, move |program| {
-                    Message::ProgramSelected(srn_no, program, true)
-                })
-                .placeholder("Nearby Programs")
-                .width(Length::FillPortion(1)),
-            ]
-            .spacing(10)
-            .width(Length::Fill)
-            .align_y(alignment::Alignment::Center),
+            combo_box(
+                &self.program_box,
+                "Program",
+                Some(&param.program),
+                move |program| Message::ProgramSelected(srn_no, program, Some(window_id))
+            )
+            .on_input(move |name| Message::ProgramSearchboxInputed(window_id, name))
+            .on_close(Message::ProgramSearchboxClosed(window_id)),
             row![
                 text("Center Note")
                     .width(90)
@@ -374,15 +361,79 @@ impl SPC2MIDI2Window for SRNWindow {
                 .label("MIDI Update Preview")
                 .on_toggle(|flag| Message::SRNMIDIPreviewFlagToggled(flag)),
         ];
+        let nearby_programs_popup = container({
+            let list = nearby_programs.iter().fold(column![], |col, program| {
+                col.push(
+                    button(text(program.to_string()))
+                        .style(move |theme: &Theme, status| {
+                            let palette = theme.extended_palette();
+                            let base_style = button::Style {
+                                background: Some(Background::Color(palette.background.weak.color)),
+                                text_color: palette.background.weak.text,
+                                border: Border {
+                                    radius: 0.0.into(),
+                                    width: 0.0,
+                                    color: palette.background.weak.color,
+                                },
+                                shadow: iced::Shadow::default(),
+                                snap: true,
+                            };
+
+                            match status {
+                                button::Status::Hovered => button::Style {
+                                    background: Some(Background::Color(
+                                        palette.primary.strong.color,
+                                    )),
+                                    text_color: palette.primary.strong.text,
+                                    ..base_style
+                                },
+                                button::Status::Pressed => button::Style {
+                                    background: Some(Background::Color(
+                                        palette.primary.strong.color,
+                                    )),
+                                    text_color: palette.primary.strong.text,
+                                    ..base_style
+                                },
+                                button::Status::Disabled => button::Style {
+                                    background: Some(Background::Color(
+                                        palette.background.weaker.color,
+                                    )),
+                                    text_color: palette.background.strongest.color,
+                                    ..base_style
+                                },
+                                button::Status::Active => base_style,
+                            }
+                        })
+                        .on_press(Message::ProgramSelected(
+                            srn_no,
+                            program.clone(),
+                            Some(window_id),
+                        ))
+                        .width(Length::Fill),
+                )
+            });
+
+            scrollable(list).height(Length::Fill).width(Length::Fill)
+        })
+        .style(|_: &Theme| container::Style {
+            border: Border {
+                radius: 0.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
 
         column![
-            tooltip(
-                Canvas::new(self)
-                    .width(Length::Fill)
-                    .height(Length::FillPortion(15)),
-                "Click to toggle time / frequency view",
-                tooltip::Position::Bottom,
-            ),
+            stack![
+                tooltip(
+                    Canvas::new(self)
+                        .width(Length::Fill)
+                        .height(Length::FillPortion(15)),
+                    "Click to toggle time / frequency view",
+                    tooltip::Position::Bottom,
+                ),
+                nearby_programs_popup
+            ],
             parameter_controller
                 .spacing(10)
                 .width(Length::Fill)

@@ -253,7 +253,7 @@ impl SPC2MIDI2Window for MainWindow {
                             pick_list(
                                 Program::ALL.to_vec(),
                                 Some(param.program.clone()),
-                                move |prog| Message::ProgramSelected(srn, prog, false),
+                                move |prog| Message::ProgramSelected(srn, prog, None),
                             )
                             .style(|theme: &Theme, _| pick_list::Style {
                                 text_color: theme.palette().text,

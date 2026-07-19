@@ -120,9 +120,9 @@ pub enum Message {
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
     SRNMuteFlagToggled(u8, bool),
-    ProgramSelected(u8, Program, bool),
+    ProgramSelected(u8, Program, Option<window::Id>),
     ProgramSearchboxInputed(window::Id, String),
-    ProgramSearchboxClosed(window::Id, String),
+    ProgramSearchboxClosed(window::Id),
     SRNMIDIPreviewFlagToggled(bool),
     ReceivedMIDIPreviewRequest(u8),
     CenterNoteIntChanged(u8, u8),
@@ -678,7 +678,7 @@ impl App {
                     });
                 }
             }
-            Message::ProgramSelected(srn_no, program, preview) => {
+            Message::ProgramSelected(srn_no, program, window_id) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
                     // 出力チャンネルを設定前がドラムであればSPCと同じに、設定後にドラムであれば9に
@@ -696,10 +696,16 @@ impl App {
                     param.program = program.clone();
                 }
                 let mut tasks = vec![];
-                if preview && self.midi_preview.load(Ordering::Relaxed) {
+                // SRNウィンドウからの呼び出しの場合
+                if let Some(id) = window_id {
                     tasks.push(Task::perform(async {}, move |_| {
-                        Message::ReceivedMIDIPreviewRequest(srn_no)
+                        Message::ProgramSearchboxClosed(id)
                     }));
+                    if self.midi_preview.load(Ordering::Relaxed) {
+                        tasks.push(Task::perform(async {}, move |_| {
+                            Message::ReceivedMIDIPreviewRequest(srn_no)
+                        }));
+                    }
                 }
                 tasks.push(Task::perform(async {}, move |_| {
                     Message::ReceivedSourceParameterUpdate
@@ -713,11 +719,11 @@ impl App {
                     srn_win.program_search_query = Some(query);
                 }
             }
-            Message::ProgramSearchboxClosed(window_id, name) => {
+            Message::ProgramSearchboxClosed(window_id) => {
                 if let Some(window) = self.windows.get_mut(&window_id) {
                     let srn_win: &mut SRNWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
-                    // srn_win.program_search_query = Some(name);
+                    srn_win.program_search_query = None;
                 }
             }
             Message::CenterNoteIntChanged(srn_no, note) => {
@@ -2379,7 +2385,7 @@ mod tests {
             test_param_field!(app, 0, mute, true);
             let _ = app.update(Message::SRNMuteFlagToggled(0, false));
             test_param_field!(app, 0, mute, false);
-            let _ = app.update(Message::ProgramSelected(0, Program::BrightAcoustic, true));
+            let _ = app.update(Message::ProgramSelected(0, Program::BrightAcoustic, None));
             test_param_field!(app, 0, program, Program::BrightAcoustic);
             let _ = app.update(Message::CenterNoteIntChanged(0, 0));
             let _ = app.update(Message::CenterNoteFractionChanged(0, 0.0));
