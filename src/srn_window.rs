@@ -6,12 +6,12 @@ use fuzzy_match::fuzzy_match;
 use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{
-    button, checkbox, column, combo_box, container, pick_list, row, scrollable, slider, stack,
-    text, text_input, tooltip, Space,
+    button, checkbox, column, combo_box, container, row, scrollable, slider, stack,
+    text, text_input, tooltip,
 };
 use iced::window;
 use iced::{
-    alignment, mouse, Background, Border, Color, Element, Font, Length, Point, Rectangle, Renderer,
+    alignment, mouse, Border, Color, Element, Font, Length, Point, Rectangle, Renderer,
     Size, Theme,
 };
 use iced_aw::number_input;
@@ -57,10 +57,10 @@ fn search_bestmatch_program_from_query(query: Option<String>) -> Option<Program>
         return None;
     }
 
-    let query = query.unwrap();
+    let query = query.unwrap().to_lowercase();
     let programs: Vec<_> = Program::ALL
         .into_iter()
-        .map(|program| (format!("{}", program), program))
+        .map(|program| (format!("{}", program.to_string().to_lowercase()), program))
         .collect();
 
     // クエリが整数ならば数値で前方一致
@@ -73,7 +73,7 @@ fn search_bestmatch_program_from_query(query: Option<String>) -> Option<Program>
     }
 
     // ドラムの場合の前方一致
-    if query.chars().nth(0) == Some('D') && query[1..].chars().all(|c| c.is_ascii_digit()) {
+    if query.chars().nth(0) == Some('d') && query[1..].chars().all(|c| c.is_ascii_digit()) {
         for (name, prog) in &programs {
             if name.starts_with(&query) {
                 return Some(prog.clone());
@@ -364,52 +364,17 @@ impl SPC2MIDI2Window for SRNWindow {
         let nearby_programs_popup = container({
             let list = nearby_programs.iter().fold(column![], |col, program| {
                 col.push(
-                    button(text(program.to_string()))
-                        .style(move |theme: &Theme, status| {
-                            let palette = theme.extended_palette();
-                            let base_style = button::Style {
-                                background: Some(Background::Color(palette.background.weak.color)),
-                                text_color: palette.background.weak.text,
-                                border: Border {
-                                    radius: 0.0.into(),
-                                    width: 0.0,
-                                    color: palette.background.weak.color,
-                                },
-                                shadow: iced::Shadow::default(),
-                                snap: true,
-                            };
-
-                            match status {
-                                button::Status::Hovered => button::Style {
-                                    background: Some(Background::Color(
-                                        palette.primary.strong.color,
-                                    )),
-                                    text_color: palette.primary.strong.text,
-                                    ..base_style
-                                },
-                                button::Status::Pressed => button::Style {
-                                    background: Some(Background::Color(
-                                        palette.primary.strong.color,
-                                    )),
-                                    text_color: palette.primary.strong.text,
-                                    ..base_style
-                                },
-                                button::Status::Disabled => button::Style {
-                                    background: Some(Background::Color(
-                                        palette.background.weaker.color,
-                                    )),
-                                    text_color: palette.background.strongest.color,
-                                    ..base_style
-                                },
-                                button::Status::Active => base_style,
-                            }
-                        })
-                        .on_press(Message::ProgramSelected(
-                            srn_no,
-                            program.clone(),
-                            Some(window_id),
-                        ))
-                        .width(Length::Fill),
+                    container(
+                        text(program.to_string())
+                            .size(18.0)
+                            .width(Length::Fill)
+                            .align_x(alignment::Alignment::Start),
+                    )
+                    .style(move |theme: &Theme| container::Style {
+                        text_color: Some(theme.palette().text),
+                        background: None,
+                        ..Default::default()
+                    }),
                 )
             });
 
