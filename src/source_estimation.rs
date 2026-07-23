@@ -1,8 +1,7 @@
 use crate::types::*;
-use czt::{c32, transform};
 use num_traits::Pow;
-use std::f32::consts::PI;
 use realfft::RealFftPlanner;
+use std::f32::consts::PI;
 
 /// SPCの出力サンプリングレート
 const SPC_SAMPLING_RATE: f32 = 32000.0;
@@ -10,12 +9,6 @@ const SPC_SAMPLING_RATE: f32 = 32000.0;
 const A4_PITCH_HZ: f32 = 440.0;
 /// 有効なピッチ候補と認めるスレッショルド
 const PITCH_PEAK_THRESHOLD: f32 = 0.9;
-
-macro_rules! chirp(
-    ($m:expr) => ({
-        c32::from_polar(&1.0, &(-2.0 * PI / $m as f32))
-    });
-);
 
 fn detect_nonzero_erea(signal: &Vec<f32>) -> (usize, usize) {
     let mut start = 0;
@@ -234,26 +227,50 @@ pub fn estimate_bpm(onset_signal: &[f32], sampling_rate: f32) -> f32 {
 pub fn compute_power_spectrum(signal: &Vec<f32>) -> Vec<f32> {
     // 分析範囲の切り出し（TODO: 要るか？）
     let (start, end) = detect_nonzero_erea(signal);
-    let mut signal = if start < end {
+    let signal = if start < end {
         signal[start..end].to_vec()
     } else {
         signal.to_vec()
     };
 
-    // 正規化 + 窓かけ
     let m = signal.len();
-    signal = signal
-        .iter()
-        .enumerate()
-        .map(|(i, r)| {
-            *r * f32::sin((PI * (i as f32)) / (signal.len() - 1) as f32).pow(2.0) / (m as f32)
-        })
+    // 窓との重み付き平均
+    let window: Vec<_> = (0..m)
+        .map(|i| f32::sin((PI * (i as f32)) / (m - 1) as f32).pow(2.0))
         .collect();
-
-    transform(signal.as_slice(), m, chirp!(m), c32::new(1.0, 0.0))[..=(m / 2)]
+    let wmean = signal
         .iter()
-        .map(|c| c.re * c.re + c.im * c.im)
-        .collect::<Vec<_>>()
+        .zip(window.iter())
+        .map(|(s, w)| s * w)
+        .sum::<f32>()
+        / window.iter().sum::<f32>();
+
+    // 直流成分除去しつつ窓かけ
+    let signal: Vec<_> = signal
+        .iter()
+        .zip(window.iter())
+        .map(|(s, w)| (s - wmean) * w).collect();
+
+    // ゼロ埋め
+    let pad_len = m.next_power_of_two() * 4;
+    let mut buffer = vec![0.0f32; pad_len];
+    let normalized_factor = 1.0 / pad_len as f32;
+    for n in 0..m {
+        buffer[n] = signal[n] * normalized_factor;
+    }
+
+    // パワースペクトル計算
+    let mut fft_planner = RealFftPlanner::<f32>::new();
+    let r2c = fft_planner.plan_fft_forward(pad_len);
+    let mut complex_spectrum = r2c.make_output_vec();
+    r2c.process(&mut buffer, &mut complex_spectrum).unwrap();
+    for n in 0..pad_len / 2 {
+        let re = complex_spectrum[n].re;
+        let im = complex_spectrum[n].im;
+        buffer[n] = re * re + im * im;
+    }
+
+    buffer[0..pad_len / 2].to_vec()
 }
 
 /// 自己相関関数の計算
