@@ -57,12 +57,14 @@ pub enum DisplaySourceIDType {
 }
 
 /// 波形リストの表示モード
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DisplaySourceOrder {
     /// SPCチャンネル
     SPCChannel,
     /// アドレス
     Address, 
+    /// SRN
+    SRN, 
 }
 
 /// 音源情報

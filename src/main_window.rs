@@ -192,9 +192,18 @@ impl SPC2MIDI2Window for MainWindow {
                             {
                                 menu_tuple(menu_items!(
                                     (menu_button(
-                                        text("By SPC Channel")
-                                            .height(Length::Shrink)
-                                            .align_y(alignment::Vertical::Center),
+                                        text(format!(
+                                            "{} SPC Channel",
+                                            if self.sample_list_order
+                                                == DisplaySourceOrder::SPCChannel
+                                            {
+                                                "☒"
+                                            } else {
+                                                "☐"
+                                            }
+                                        ))
+                                        .height(Length::Shrink)
+                                        .align_y(alignment::Vertical::Center),
                                         Message::SampleListOrderChanged(
                                             DisplaySourceOrder::SPCChannel
                                         ),
@@ -202,11 +211,37 @@ impl SPC2MIDI2Window for MainWindow {
                                     .width(Length::Fill)
                                     .height(Length::Shrink)),
                                     (menu_button(
-                                        text("By Address")
-                                            .height(Length::Shrink)
-                                            .align_y(alignment::Vertical::Center),
+                                        text(format!(
+                                            "{} Address",
+                                            if self.sample_list_order == DisplaySourceOrder::Address
+                                            {
+                                                "☒"
+                                            } else {
+                                                "☐"
+                                            }
+                                        ))
+                                        .height(Length::Shrink)
+                                        .align_y(alignment::Vertical::Center),
                                         Message::SampleListOrderChanged(
                                             DisplaySourceOrder::Address
+                                        ),
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                    (menu_button(
+                                        text(format!(
+                                            "{} SRN",
+                                            if self.sample_list_order == DisplaySourceOrder::SRN
+                                            {
+                                                "☒"
+                                            } else {
+                                                "☐"
+                                            }
+                                        ))
+                                        .height(Length::Shrink)
+                                        .align_y(alignment::Vertical::Center),
+                                        Message::SampleListOrderChanged(
+                                            DisplaySourceOrder::SRN
                                         ),
                                     )
                                     .width(Length::Fill)
@@ -361,6 +396,17 @@ impl SPC2MIDI2Window for MainWindow {
                 srn_addrs.sort_by(|a, b| a.1.cmp(&b.1));
                 for srn_addr in srn_addrs {
                     srn_list.push(create_srn_row(*srn_addr.0));
+                }
+            }
+            DisplaySourceOrder::SRN => {
+                // SRN順にソート
+                let mut srns = vec![];
+                for (srn, _) in infos.iter() {
+                    srns.push(srn);
+                }
+                srns.sort();
+                for srn in srns {
+                    srn_list.push(create_srn_row(*srn));
                 }
             }
         }
