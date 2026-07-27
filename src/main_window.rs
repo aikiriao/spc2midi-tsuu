@@ -30,6 +30,7 @@ pub struct MainWindow {
     midi_spc_on: Arc<AtomicBool>,
     channel_mute_flags: Arc<AtomicU8>,
     display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
+    pub sample_list_order: DisplaySourceOrder,
     pub playback_time_sec: f32,
     pub midi_bit_rate: f32,
     pub pitch_indicator: [Indicator; 8],
@@ -62,6 +63,7 @@ impl MainWindow {
             channel_mute_flags: channel_mute_flags,
             playback_time_sec: 0.0f32,
             midi_bit_rate: 0.0f32,
+            sample_list_order: DisplaySourceOrder::SPCChannel,
             expression_indicator: [Indicator::new(0.0, 0.0, 127.0, |value| format!("{:<3}", value));
                 8],
             pitch_indicator: [Indicator::new(0.0, -48.0, 48.0, |value| format!("{:+4.1}", value));
@@ -178,6 +180,41 @@ impl SPC2MIDI2Window for MainWindow {
                         )
                         .width(Length::Fill)
                         .height(Length::Shrink)),
+                        (
+                            menu_button(
+                                text("Sample List Order")
+                                    .height(Length::Shrink)
+                                    .align_y(alignment::Vertical::Center),
+                                Message::MenuSelected,
+                            )
+                            .width(Length::Fill)
+                            .height(Length::Shrink),
+                            {
+                                menu_tuple(menu_items!(
+                                    (menu_button(
+                                        text("By SPC Channel")
+                                            .height(Length::Shrink)
+                                            .align_y(alignment::Vertical::Center),
+                                        Message::SampleListOrderChanged(
+                                            DisplaySourceOrder::SPCChannel
+                                        ),
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                    (menu_button(
+                                        text("By Address")
+                                            .height(Length::Shrink)
+                                            .align_y(alignment::Vertical::Center),
+                                        Message::SampleListOrderChanged(
+                                            DisplaySourceOrder::Address
+                                        ),
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                ))
+                                .width(140.0)
+                            }
+                        ),
                     ))
                     .width(240.0)
                 }
@@ -203,112 +240,127 @@ impl SPC2MIDI2Window for MainWindow {
 
         let params = self.source_params.read().unwrap();
         let infos = self.source_infos.read().unwrap();
+
+        // SRNの一行分の要素を生成
+        let create_srn_row = |srn: u8| -> Element<'_, Message> {
+            let param = params.get(&srn).unwrap();
+            row![
+                if let Some(info) = infos.get(&srn) {
+                    match *self.display_source_id_type.read().unwrap() {
+                        DisplaySourceIDType::StartAddress => {
+                            text(format!("{:04X}", info.start_address))
+                        }
+                        DisplaySourceIDType::SRN => text(format!("{}", srn)),
+                    }
+                } else {
+                    text(format!(""))
+                }
+                .width(40)
+                .align_x(alignment::Alignment::Start),
+                pick_list(
+                    Program::ALL.to_vec(),
+                    Some(param.program.clone()),
+                    move |prog| Message::ProgramSelected(srn, prog, None),
+                )
+                .style(|theme: &Theme, _| pick_list::Style {
+                    text_color: theme.palette().text,
+                    placeholder_color: theme.palette().text,
+                    handle_color: theme.palette().text,
+                    background: iced::Background::Color(theme.palette().background),
+                    border: Border::default().rounded(0.0)
+                })
+                .padding(0)
+                .width(Length::FillPortion(17)),
+                stack![
+                    progress_bar(0.0..=127.0, param.center_note as f32 / 512.0).style(
+                        |theme: &Theme| progress_bar::Style {
+                            background: iced::Background::Color(theme.palette().background),
+                            bar: iced::Background::Color(theme.palette().success),
+                            border: Border::default().rounded(0.0)
+                        }
+                    ),
+                    text(format!("{:6.2}", param.center_note as f32 / 512.0))
+                        .size(17.0)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(alignment::Alignment::End)
+                        .align_y(alignment::Alignment::Center),
+                ]
+                .width(Length::FillPortion(6)),
+                stack![
+                    progress_bar(0.0..=127.0, param.noteon_velocity as f32).style(
+                        |theme: &Theme| progress_bar::Style {
+                            background: iced::Background::Color(theme.palette().background),
+                            bar: iced::Background::Color(theme.palette().success),
+                            border: Border::default().rounded(0.0)
+                        }
+                    ),
+                    text(format!("{}", param.noteon_velocity))
+                        .size(17.0)
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(alignment::Alignment::End)
+                        .align_y(alignment::Alignment::Center),
+                ]
+                .width(Length::FillPortion(6)),
+                button("Open")
+                    .on_press(Message::OpenSRNWindow(srn))
+                    .width(60),
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_y(alignment::Alignment::Center)
+            .into()
+        };
+
         // 音源リスト
         let mut srn_list = vec![];
-        for spc_ch in 0..8 {
-            // spc_chで発音されているSRNを集める
-            let mut srns = vec![];
-            for (srn, info) in infos.iter() {
-                if info.using_channel[spc_ch] {
-                    srns.push(srn.clone());
+        match self.sample_list_order {
+            DisplaySourceOrder::SPCChannel => {
+                for spc_ch in 0..8 {
+                    // spc_chで発音されているSRNを集める
+                    let mut srns = vec![];
+                    for (srn, info) in infos.iter() {
+                        if info.using_channel[spc_ch] {
+                            srns.push(srn.clone());
+                        }
+                    }
+                    // チャンネルヘッダ行
+                    if srns.len() > 0 {
+                        srn_list.push(
+                            row![
+                                checkbox(self.showing_channel_srn_list[spc_ch])
+                                    .size(12)
+                                    .on_toggle(move |flag| Message::SRNChannelListFlagToggled(
+                                        spc_ch, flag
+                                    )),
+                                text(format!("Channel {}", spc_ch))
+                                    .size(14.0)
+                                    .align_x(alignment::Alignment::Start),
+                            ]
+                            .width(Length::Fill)
+                            .align_y(alignment::Alignment::Center)
+                            .spacing(10)
+                            .into(),
+                        );
+                    }
+                    // spc_chで発音されているSRNの情報表示
+                    if self.showing_channel_srn_list[spc_ch] {
+                        for srn in srns {
+                            srn_list.push(create_srn_row(srn));
+                        }
+                    }
                 }
             }
-            // チャンネルヘッダ行
-            if srns.len() > 0 {
-                srn_list.push(
-                    row![
-                        checkbox(self.showing_channel_srn_list[spc_ch])
-                            .size(12)
-                            .on_toggle(move |flag| Message::SRNChannelListFlagToggled(
-                                spc_ch, flag
-                            )),
-                        text(format!("Channel {}", spc_ch))
-                            .size(14.0)
-                            .align_x(alignment::Alignment::Start),
-                    ]
-                    .width(Length::Fill)
-                    .align_y(alignment::Alignment::Center)
-                    .spacing(10)
-                    .into(),
-                );
-            }
-            // spc_chで発音されているSRNの情報表示
-            if self.showing_channel_srn_list[spc_ch] {
-                for srn in srns {
-                    let param = params.get(&srn).unwrap();
-                    srn_list.push(
-                        row![
-                            if let Some(info) = infos.get(&srn) {
-                                match *self.display_source_id_type.read().unwrap() {
-                                    DisplaySourceIDType::StartAddress => {
-                                        text(format!("{:04X}", info.start_address))
-                                    }
-                                    DisplaySourceIDType::SRN => text(format!("{}", srn)),
-                                }
-                            } else {
-                                text(format!(""))
-                            }
-                            .width(40)
-                            .align_x(alignment::Alignment::Start),
-                            pick_list(
-                                Program::ALL.to_vec(),
-                                Some(param.program.clone()),
-                                move |prog| Message::ProgramSelected(srn, prog, None),
-                            )
-                            .style(|theme: &Theme, _| pick_list::Style {
-                                text_color: theme.palette().text,
-                                placeholder_color: theme.palette().text,
-                                handle_color: theme.palette().text,
-                                background: iced::Background::Color(theme.palette().background),
-                                border: Border::default().rounded(0.0)
-                            })
-                            .padding(0)
-                            .width(Length::FillPortion(17)),
-                            stack![
-                                progress_bar(0.0..=127.0, param.center_note as f32 / 512.0).style(
-                                    |theme: &Theme| progress_bar::Style {
-                                        background: iced::Background::Color(
-                                            theme.palette().background
-                                        ),
-                                        bar: iced::Background::Color(theme.palette().success),
-                                        border: Border::default().rounded(0.0)
-                                    }
-                                ),
-                                text(format!("{:6.2}", param.center_note as f32 / 512.0))
-                                    .size(17.0)
-                                    .width(Length::Fill)
-                                    .height(Length::Fill)
-                                    .align_x(alignment::Alignment::End)
-                                    .align_y(alignment::Alignment::Center),
-                            ]
-                            .width(Length::FillPortion(6)),
-                            stack![
-                                progress_bar(0.0..=127.0, param.noteon_velocity as f32).style(
-                                    |theme: &Theme| progress_bar::Style {
-                                        background: iced::Background::Color(
-                                            theme.palette().background
-                                        ),
-                                        bar: iced::Background::Color(theme.palette().success),
-                                        border: Border::default().rounded(0.0)
-                                    }
-                                ),
-                                text(format!("{}", param.noteon_velocity))
-                                    .size(17.0)
-                                    .width(Length::Fill)
-                                    .height(Length::Fill)
-                                    .align_x(alignment::Alignment::End)
-                                    .align_y(alignment::Alignment::Center),
-                            ]
-                            .width(Length::FillPortion(6)),
-                            button("Open")
-                                .on_press(Message::OpenSRNWindow(srn))
-                                .width(60),
-                        ]
-                        .spacing(10)
-                        .width(Length::Fill)
-                        .align_y(alignment::Alignment::Center)
-                        .into(),
-                    );
+            DisplaySourceOrder::Address => {
+                // アドレス順にソート
+                let mut srn_addrs = vec![];
+                for (srn, info) in infos.iter() {
+                    srn_addrs.push((srn, info.start_address));
+                }
+                srn_addrs.sort_by(|a, b| a.1.cmp(&b.1));
+                for srn_addr in srn_addrs {
+                    srn_list.push(create_srn_row(*srn_addr.0));
                 }
             }
         }
@@ -379,9 +431,7 @@ impl SPC2MIDI2Window for MainWindow {
                             DisplaySourceIDType::StartAddress => {
                                 text(format!("{:04X}", info.start_address))
                             }
-                            DisplaySourceIDType::SRN => {
-                                text(format!("{}", status.srn_no[ch]))
-                            }
+                            DisplaySourceIDType::SRN => text(format!("{}", status.srn_no[ch])),
                         }
                     } else {
                         text(format!(""))

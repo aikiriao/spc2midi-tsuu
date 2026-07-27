@@ -56,6 +56,15 @@ pub enum DisplaySourceIDType {
     SRN, 
 }
 
+/// 波形リストの表示モード
+#[derive(Debug, Clone)]
+pub enum DisplaySourceOrder {
+    /// SPCチャンネル
+    SPCChannel,
+    /// アドレス
+    Address, 
+}
+
 /// 音源情報
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

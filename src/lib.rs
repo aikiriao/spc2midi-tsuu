@@ -97,6 +97,7 @@ pub enum Message {
     OpenMIDIOutpoutConfigurationWindow,
     MIDIOutpoutConfigurationWindowOpened(window::Id),
     OpenDeviceSettingWindow,
+    SampleListOrderChanged(DisplaySourceOrder),
     DeviceWindowOpened(window::Id),
     OpenSRNWindow(u8),
     SRNWindowOpened(window::Id),
@@ -369,6 +370,13 @@ impl App {
                     )),
                 );
                 return open.map(Message::DeviceWindowOpened);
+            }
+            Message::SampleListOrderChanged(order) => {
+                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                    let main_window: &mut MainWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    main_window.sample_list_order = order;
+                }
             }
             Message::DeviceWindowOpened(_id) => {}
             Message::OpenSRNWindow(srn_no) => {
