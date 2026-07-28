@@ -208,12 +208,13 @@ impl SPC2MIDI2Window for MainWindow {
                                     .height(Length::Shrink)),
                                     (menu_button(
                                         checkbox(
-                                            self.sample_list_order == DisplaySourceOrder::Address
+                                            self.sample_list_order
+                                                == DisplaySourceOrder::AddressDescending
                                         )
-                                        .label("Address")
+                                        .label("Address desc")
                                         .on_toggle(|_| {
                                             Message::SampleListOrderChanged(
-                                                DisplaySourceOrder::Address,
+                                                DisplaySourceOrder::AddressDescending,
                                             )
                                         }),
                                         Message::MenuSelected
@@ -221,13 +222,30 @@ impl SPC2MIDI2Window for MainWindow {
                                     .width(Length::Fill)
                                     .height(Length::Shrink)),
                                     (menu_button(
-                                        checkbox(self.sample_list_order == DisplaySourceOrder::SRCN)
-                                            .label("SRCN")
-                                            .on_toggle(|_| {
-                                                Message::SampleListOrderChanged(
-                                                    DisplaySourceOrder::Address,
-                                                )
-                                            }),
+                                        checkbox(
+                                            self.sample_list_order
+                                                == DisplaySourceOrder::AddressAscending
+                                        )
+                                        .label("Address asc")
+                                        .on_toggle(|_| {
+                                            Message::SampleListOrderChanged(
+                                                DisplaySourceOrder::AddressAscending,
+                                            )
+                                        }),
+                                        Message::MenuSelected
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                    (menu_button(
+                                        checkbox(
+                                            self.sample_list_order == DisplaySourceOrder::SRCN
+                                        )
+                                        .label("SRCN")
+                                        .on_toggle(|_| {
+                                            Message::SampleListOrderChanged(
+                                                DisplaySourceOrder::SRCN,
+                                            )
+                                        }),
                                         Message::MenuSelected
                                     )
                                     .width(Length::Fill)
@@ -373,13 +391,17 @@ impl SPC2MIDI2Window for MainWindow {
                     }
                 }
             }
-            DisplaySourceOrder::Address => {
+            DisplaySourceOrder::AddressDescending | DisplaySourceOrder::AddressAscending => {
                 // アドレス順にソート
                 let mut srn_addrs = vec![];
                 for (srn, info) in infos.iter() {
                     srn_addrs.push((srn, info.start_address));
                 }
-                srn_addrs.sort_by(|a, b| a.1.cmp(&b.1));
+                if self.sample_list_order == DisplaySourceOrder::AddressDescending {
+                    srn_addrs.sort_by(|a, b| b.1.cmp(&a.1));
+                } else {
+                    srn_addrs.sort_by(|a, b| a.1.cmp(&b.1));
+                }
                 for srn_addr in srn_addrs {
                     srn_list.push(create_srn_row(*srn_addr.0));
                 }

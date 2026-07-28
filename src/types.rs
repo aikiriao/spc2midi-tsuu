@@ -61,8 +61,10 @@ pub enum DisplaySourceIDType {
 pub enum DisplaySourceOrder {
     /// SPCチャンネル
     SPCChannel,
-    /// アドレス
-    Address, 
+    /// アドレス降順（spc2midi準拠）
+    AddressDescending, 
+    /// アドレス昇順
+    AddressAscending, 
     /// SRCN
     SRCN, 
 }
