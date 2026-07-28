@@ -6,14 +6,14 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug)]
-pub struct SRNChannelRoutingWindow {
+pub struct SRCNChannelRoutingWindow {
     title: String,
     srn_no: u8,
     source_info: Arc<SourceInformation>,
     source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
 }
 
-impl SPC2MIDI2Window for SRNChannelRoutingWindow {
+impl SPC2MIDI2Window for SRCNChannelRoutingWindow {
     fn title(&self) -> String {
         self.title.clone()
     }
@@ -95,7 +95,7 @@ impl SPC2MIDI2Window for SRNChannelRoutingWindow {
     }
 }
 
-impl SRNChannelRoutingWindow {
+impl SRCNChannelRoutingWindow {
     pub fn new(
         title: String,
         srn_no: u8,

@@ -4,8 +4,8 @@ mod main_window;
 mod midi_output_configuration_window;
 mod program;
 mod source_estimation;
-mod srn_ch_routing_window;
-mod srn_window;
+mod srcn_ch_routing_window;
+mod srcn_window;
 mod types;
 
 use crate::device_setting_window::*;
@@ -13,8 +13,8 @@ use crate::main_window::*;
 use crate::midi_output_configuration_window::*;
 use crate::program::*;
 use crate::source_estimation::*;
-use crate::srn_ch_routing_window::*;
-use crate::srn_window::*;
+use crate::srcn_ch_routing_window::*;
+use crate::srcn_window::*;
 use crate::types::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, PauseStreamError, PlayStreamError, Stream, StreamConfig};
@@ -99,10 +99,10 @@ pub enum Message {
     OpenDeviceSettingWindow,
     SampleListOrderChanged(DisplaySourceOrder),
     DeviceWindowOpened(window::Id),
-    OpenSRNWindow(u8),
-    SRNWindowOpened(window::Id),
-    OpenSRNChannelRoutingWindow(u8),
-    SRNChannelRoutingWindowOpened(window::Id),
+    OpenSRCNWindow(u8),
+    SRCNWindowOpened(window::Id),
+    OpenSRCNChannelRoutingWindow(u8),
+    SRCNChannelRoutingWindowOpened(window::Id),
     WindowClosed(window::Id),
     OpenFile,
     FileOpened(Result<(PathBuf, LoadedFile), Error>),
@@ -112,19 +112,19 @@ pub enum Message {
     JSONSaved(Result<(), Error>),
     MenuSelected,
     EventOccurred(iced::Event),
-    ReceivedSRNPlayStartRequest(u8),
-    SRNPlayLoopFlagToggled(bool),
-    SRNPlayVolumeChanged(u8),
+    ReceivedSRCNPlayStartRequest(u8),
+    SRCNPlayLoopFlagToggled(bool),
+    SRCNPlayVolumeChanged(u8),
     ReceivedPlayStartRequest,
     ReceivedPlayStopRequest,
-    SRNChannelListFlagToggled(usize, bool),
+    SRCNChannelListFlagToggled(usize, bool),
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
-    SRNMuteFlagToggled(u8, bool),
+    SRCNMuteFlagToggled(u8, bool),
     ProgramSelected(u8, Program, Option<window::Id>),
     ProgramSearchboxInputed(window::Id, String),
     ProgramSearchboxClosed(window::Id),
-    SRNMIDIPreviewFlagToggled(bool),
+    SRCNMIDIPreviewFlagToggled(bool),
     ReceivedMIDIPreviewRequest(u8),
     CenterNoteIntChanged(u8, u8),
     CenterNoteFractionChanged(u8, f32),
@@ -144,9 +144,9 @@ pub enum Message {
     ChannelRoutingChanged(u8, u8, u8),
     ChannelRoutingReseted(u8),
     InstrumentNameChanged(u8, String),
-    SRNCenterNoteOctaveUpClicked(u8),
-    SRNCenterNoteOctaveDownClicked(u8),
-    SRNNoteEstimationClicked(u8),
+    SRCNCenterNoteOctaveUpClicked(u8),
+    SRCNCenterNoteOctaveDownClicked(u8),
+    SRCNNoteEstimationClicked(u8),
     ReceivedSourceParameterUpdate,
     AudioOutputDeviceSelected(String),
     MIDIOutputPortSelected(String),
@@ -164,7 +164,7 @@ pub enum Message {
     ReceivedBpmAnalyzeRequest,
     ReceivedBpmDoubleButtonClicked,
     ReceivedBpmHalfButtonClicked,
-    ReceivedSRNReanalyzeRequest,
+    ReceivedSRCNReanalyzeRequest,
     DisplaySourceIDTypeToggled,
     AudioLatencyMsecChanged(usize),
     Tick,
@@ -379,17 +379,17 @@ impl App {
                 }
             }
             Message::DeviceWindowOpened(_id) => {}
-            Message::OpenSRNWindow(srn_no) => {
+            Message::OpenSRCNWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
                     size: iced::Size::new(800.0, 850.0),
                     ..Default::default()
                 });
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
-                    let window = SRNWindow::new(
+                    let window = SRCNWindow::new(
                         id,
                         format!(
-                            "SRN {}: 0x{:04X} - 0x{:04X}",
+                            "SRCN {}: 0x{:04X} - 0x{:04X}",
                             srn_no, source.start_address, source.end_address
                         ),
                         srn_no,
@@ -400,28 +400,28 @@ impl App {
                         self.preview_volume.clone(),
                     );
                     self.windows.insert(id, Box::new(window));
-                    return open.map(Message::SRNWindowOpened);
+                    return open.map(Message::SRCNWindowOpened);
                 }
             }
-            Message::SRNWindowOpened(_id) => {}
-            Message::OpenSRNChannelRoutingWindow(srn_no) => {
+            Message::SRCNWindowOpened(_id) => {}
+            Message::OpenSRCNChannelRoutingWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
                     size: iced::Size::new(350.0, 300.0),
                     ..Default::default()
                 });
                 let infos = self.source_infos.read().unwrap();
                 if let Some(source) = infos.get(&srn_no) {
-                    let window = SRNChannelRoutingWindow::new(
-                        format!("SRN 0x{:02X} Channel Routing", srn_no),
+                    let window = SRCNChannelRoutingWindow::new(
+                        format!("SRCN 0x{:02X} Channel Routing", srn_no),
                         srn_no,
                         source,
                         self.source_parameter.clone(),
                     );
                     self.windows.insert(id, Box::new(window));
-                    return open.map(Message::SRNChannelRoutingWindowOpened);
+                    return open.map(Message::SRCNChannelRoutingWindowOpened);
                 }
             }
-            Message::SRNChannelRoutingWindowOpened(_id) => {}
+            Message::SRCNChannelRoutingWindowOpened(_id) => {}
             Message::WindowClosed(id) => {
                 if id == self.main_window_id {
                     return iced::exit();
@@ -494,7 +494,7 @@ impl App {
                                         main_window.base_title,
                                         path.file_name().unwrap().to_str().unwrap()
                                     );
-                                    // 全てのSRNを表示
+                                    // 全てのSRCNを表示
                                     main_window.showing_channel_srn_list = [true; 8];
                                 }
                                 // 出力時間をSPCの情報を元に設定
@@ -577,7 +577,7 @@ impl App {
                 }
                 _ => {}
             },
-            Message::ReceivedSRNPlayStartRequest(srn_no) => {
+            Message::ReceivedSRCNPlayStartRequest(srn_no) => {
                 if self.stream_is_playing.load(Ordering::Relaxed) {
                     // 再生中の場合は止める
                     self.stream_play_stop().expect("Failed to stop play");
@@ -588,13 +588,13 @@ impl App {
                     }
                 }
             }
-            Message::SRNPlayLoopFlagToggled(flag) => {
+            Message::SRCNPlayLoopFlagToggled(flag) => {
                 self.preview_loop.store(flag, Ordering::Relaxed);
             }
-            Message::SRNPlayVolumeChanged(volume) => {
+            Message::SRCNPlayVolumeChanged(volume) => {
                 self.preview_volume.store(volume, Ordering::Relaxed);
             }
-            Message::SRNMIDIPreviewFlagToggled(flag) => {
+            Message::SRCNMIDIPreviewFlagToggled(flag) => {
                 self.midi_preview.store(flag, Ordering::Relaxed);
             }
             Message::ReceivedPlayStartRequest => {
@@ -638,7 +638,7 @@ impl App {
                 self.stream_played_samples.store(0, Ordering::Relaxed);
                 self.midi_output_bytes.store(0, Ordering::Relaxed);
             }
-            Message::SRNChannelListFlagToggled(spc_ch, flag) => {
+            Message::SRCNChannelListFlagToggled(spc_ch, flag) => {
                 if let Some(window) = self.windows.get_mut(&self.main_window_id) {
                     let main_win: &mut MainWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
@@ -679,7 +679,7 @@ impl App {
                     self.stop_midi_all_sound();
                 }
             }
-            Message::SRNMuteFlagToggled(srn_no, flag) => {
+            Message::SRCNMuteFlagToggled(srn_no, flag) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
                     param.mute = flag;
@@ -706,7 +706,7 @@ impl App {
                     param.program = program.clone();
                 }
                 let mut tasks = vec![];
-                // SRNウィンドウからの呼び出しの場合
+                // SRCNウィンドウからの呼び出しの場合
                 if let Some(id) = window_id {
                     tasks.push(Task::perform(async {}, move |_| {
                         Message::ProgramSearchboxClosed(id)
@@ -724,14 +724,14 @@ impl App {
             }
             Message::ProgramSearchboxInputed(window_id, query) => {
                 if let Some(window) = self.windows.get_mut(&window_id) {
-                    let srn_win: &mut SRNWindow =
+                    let srn_win: &mut SRCNWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     srn_win.program_search_query = Some(query);
                 }
             }
             Message::ProgramSearchboxClosed(window_id) => {
                 if let Some(window) = self.windows.get_mut(&window_id) {
-                    let srn_win: &mut SRNWindow =
+                    let srn_win: &mut SRCNWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     srn_win.program_search_query = None;
                 }
@@ -919,7 +919,7 @@ impl App {
                     });
                 }
             }
-            Message::SRNCenterNoteOctaveUpClicked(srn_no) => {
+            Message::SRCNCenterNoteOctaveUpClicked(srn_no) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
                     let note = param.center_note as u32 + OCTAVE_NOTE as u32;
@@ -938,7 +938,7 @@ impl App {
                     }
                 }
             }
-            Message::SRNCenterNoteOctaveDownClicked(srn_no) => {
+            Message::SRCNCenterNoteOctaveDownClicked(srn_no) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
                     if param.center_note >= OCTAVE_NOTE {
@@ -956,7 +956,7 @@ impl App {
                     }
                 }
             }
-            Message::SRNNoteEstimationClicked(srn_no) => {
+            Message::SRCNNoteEstimationClicked(srn_no) => {
                 let mut params = self.source_parameter.write().unwrap();
                 let infos = self.source_infos.read().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
@@ -1181,7 +1181,7 @@ impl App {
                     config.beats_per_minute = bpm;
                 }
             }
-            Message::ReceivedSRNReanalyzeRequest => {
+            Message::ReceivedSRCNReanalyzeRequest => {
                 let output_duration = {
                     let config = self.midi_output_configure.read().unwrap();
                     (config.output_duration_msec as f32 / 1000.0).round() as u32
@@ -1199,8 +1199,8 @@ impl App {
             Message::DisplaySourceIDTypeToggled => {
                 if let Ok(mut id_type) = self.display_source_id_type.write() {
                     *id_type = match *id_type {
-                        DisplaySourceIDType::StartAddress => DisplaySourceIDType::SRN,
-                        DisplaySourceIDType::SRN => DisplaySourceIDType::StartAddress,
+                        DisplaySourceIDType::StartAddress => DisplaySourceIDType::SRCN,
+                        DisplaySourceIDType::SRCN => DisplaySourceIDType::StartAddress,
                     };
                 }
             }
@@ -1696,9 +1696,9 @@ impl App {
                         if param.channel_routing[ch] != midi_ch {
                             let value = 0x80 | ((ch << 4) as u8) | param.channel_routing[ch];
                             spc.dsp
-                                .write_register(&[0u8], DSP_ADDRESS_SRN_TARGET, *srn_no);
+                                .write_register(&[0u8], DSP_ADDRESS_SRCN_TARGET, *srn_no);
                             spc.dsp
-                                .write_register(&[0u8], DSP_ADDRESS_SRN_CHANNEL_ROUTING, value);
+                                .write_register(&[0u8], DSP_ADDRESS_SRCN_CHANNEL_ROUTING, value);
                         } else {
                             exist_routing = true;
                         }
@@ -1759,10 +1759,10 @@ impl App {
                             if another_srn_no != srn_no {
                                 spc.dsp.write_register(
                                     &[0u8],
-                                    DSP_ADDRESS_SRN_TARGET,
+                                    DSP_ADDRESS_SRCN_TARGET,
                                     *another_srn_no,
                                 );
-                                spc.dsp.write_register(&[0u8], DSP_ADDRESS_SRN_FLAG, 0x80);
+                                spc.dsp.write_register(&[0u8], DSP_ADDRESS_SRCN_FLAG, 0x80);
                             }
                         }
 
@@ -2199,7 +2199,8 @@ fn apply_source_parameter(
 ) {
     // 音源に依存するパラメータ
     for (srn_no, param) in source_params.iter() {
-        spc.dsp.write_register(ram, DSP_ADDRESS_SRN_TARGET, *srn_no);
+        spc.dsp
+            .write_register(ram, DSP_ADDRESS_SRCN_TARGET, *srn_no);
         let mut flag = 0;
         if param.mute {
             flag |= 0x80;
@@ -2210,39 +2211,39 @@ fn apply_source_parameter(
         if param.update_parameter_after_noteon {
             flag |= 0x20;
         }
-        spc.dsp.write_register(ram, DSP_ADDRESS_SRN_FLAG, flag);
+        spc.dsp.write_register(ram, DSP_ADDRESS_SRCN_FLAG, flag);
         spc.dsp
-            .write_register(ram, DSP_ADDRESS_SRN_PROGRAM, param.program.clone() as u8);
+            .write_register(ram, DSP_ADDRESS_SRCN_PROGRAM, param.program.clone() as u8);
         spc.dsp
-            .write_register(ram, DSP_ADDRESS_SRN_NOTEON_VELOCITY, param.noteon_velocity);
+            .write_register(ram, DSP_ADDRESS_SRCN_NOTEON_VELOCITY, param.noteon_velocity);
         spc.dsp.write_register(
             ram,
-            DSP_ADDRESS_SRN_CENTER_NOTE_HIGH,
+            DSP_ADDRESS_SRCN_CENTER_NOTE_HIGH,
             ((param.center_note >> 8) & 0xFF) as u8,
         );
         spc.dsp.write_register(
             ram,
-            DSP_ADDRESS_SRN_CENTER_NOTE_LOW,
+            DSP_ADDRESS_SRCN_CENTER_NOTE_LOW,
             ((param.center_note >> 0) & 0xFF) as u8,
         );
         spc.dsp.write_register(
             ram,
-            DSP_ADDRESS_SRN_VOLUME,
+            DSP_ADDRESS_SRCN_VOLUME,
             if param.auto_volume { 0x80 } else { 0x00 } | param.fixed_volume,
         );
         spc.dsp.write_register(
             ram,
-            DSP_ADDRESS_SRN_PAN,
+            DSP_ADDRESS_SRCN_PAN,
             if param.auto_pan { 0x80 } else { 0x00 } | param.fixed_pan,
         );
         spc.dsp.write_register(
             ram,
-            DSP_ADDRESS_SRN_PITCHBEND_SENSITIVITY,
+            DSP_ADDRESS_SRCN_PITCHBEND_SENSITIVITY,
             if param.enable_pitch_bend { 0x80 } else { 0x00 } | param.pitch_bend_width,
         );
         spc.dsp.write_register(
             ram,
-            DSP_ADDRESS_SRN_REVERB_SEND,
+            DSP_ADDRESS_SRCN_REVERB_SEND,
             if param.echo_as_reverb_send {
                 0x80
             } else {
@@ -2250,13 +2251,13 @@ fn apply_source_parameter(
             } | param.fixed_reverb_send,
         );
         spc.dsp
-            .write_register(ram, DSP_ADDRESS_SRN_CHORUS_SEND, param.chorus_send);
+            .write_register(ram, DSP_ADDRESS_SRCN_CHORUS_SEND, param.chorus_send);
         for ch in 0..8 {
             let value = if param.channel_mute[ch] { 0x80 } else { 0x00 }
                 | (ch << 4) as u8
                 | param.channel_routing[ch];
             spc.dsp
-                .write_register(ram, DSP_ADDRESS_SRN_CHANNEL_ROUTING, value);
+                .write_register(ram, DSP_ADDRESS_SRCN_CHANNEL_ROUTING, value);
         }
     }
     // 音源に依存しないパラメータ
@@ -2418,10 +2419,10 @@ mod tests {
                 LoadedFile::SPCFile(*data),
             ))));
 
-            // SRN = 0に対してパラメータ編集し、意図した値が設定されているか確認
-            let _ = app.update(Message::SRNMuteFlagToggled(0, true));
+            // SRCN = 0に対してパラメータ編集し、意図した値が設定されているか確認
+            let _ = app.update(Message::SRCNMuteFlagToggled(0, true));
             test_param_field!(app, 0, mute, true);
-            let _ = app.update(Message::SRNMuteFlagToggled(0, false));
+            let _ = app.update(Message::SRCNMuteFlagToggled(0, false));
             test_param_field!(app, 0, mute, false);
             let _ = app.update(Message::ProgramSelected(0, Program::BrightAcoustic, None));
             test_param_field!(app, 0, program, Program::BrightAcoustic);

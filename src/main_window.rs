@@ -221,8 +221,8 @@ impl SPC2MIDI2Window for MainWindow {
                                     .width(Length::Fill)
                                     .height(Length::Shrink)),
                                     (menu_button(
-                                        checkbox(self.sample_list_order == DisplaySourceOrder::SRN)
-                                            .label("SRN")
+                                        checkbox(self.sample_list_order == DisplaySourceOrder::SRCN)
+                                            .label("SRCN")
                                             .on_toggle(|_| {
                                                 Message::SampleListOrderChanged(
                                                     DisplaySourceOrder::Address,
@@ -262,7 +262,7 @@ impl SPC2MIDI2Window for MainWindow {
         let params = self.source_params.read().unwrap();
         let infos = self.source_infos.read().unwrap();
 
-        // SRNの一行分の要素を生成
+        // SRCNの一行分の要素を生成
         let create_srn_row = |srn: u8| -> Element<'_, Message> {
             let param = params.get(&srn).unwrap();
             row![
@@ -271,7 +271,7 @@ impl SPC2MIDI2Window for MainWindow {
                         DisplaySourceIDType::StartAddress => {
                             text(format!("{:04X}", info.start_address))
                         }
-                        DisplaySourceIDType::SRN => text(format!("{}", srn)),
+                        DisplaySourceIDType::SRCN => text(format!("{}", srn)),
                     }
                 } else {
                     text(format!(""))
@@ -325,7 +325,7 @@ impl SPC2MIDI2Window for MainWindow {
                 ]
                 .width(Length::FillPortion(6)),
                 button("Open")
-                    .on_press(Message::OpenSRNWindow(srn))
+                    .on_press(Message::OpenSRCNWindow(srn))
                     .width(60),
             ]
             .spacing(10)
@@ -339,7 +339,7 @@ impl SPC2MIDI2Window for MainWindow {
         match self.sample_list_order {
             DisplaySourceOrder::SPCChannel => {
                 for spc_ch in 0..8 {
-                    // spc_chで発音されているSRNを集める
+                    // spc_chで発音されているSRCNを集める
                     let mut srns = vec![];
                     for (srn, info) in infos.iter() {
                         if info.using_channel[spc_ch] {
@@ -352,7 +352,7 @@ impl SPC2MIDI2Window for MainWindow {
                             row![
                                 checkbox(self.showing_channel_srn_list[spc_ch])
                                     .size(12)
-                                    .on_toggle(move |flag| Message::SRNChannelListFlagToggled(
+                                    .on_toggle(move |flag| Message::SRCNChannelListFlagToggled(
                                         spc_ch, flag
                                     )),
                                 text(format!("Channel {}", spc_ch))
@@ -365,7 +365,7 @@ impl SPC2MIDI2Window for MainWindow {
                             .into(),
                         );
                     }
-                    // spc_chで発音されているSRNの情報表示
+                    // spc_chで発音されているSRCNの情報表示
                     if self.showing_channel_srn_list[spc_ch] {
                         for srn in srns {
                             srn_list.push(create_srn_row(srn));
@@ -384,8 +384,8 @@ impl SPC2MIDI2Window for MainWindow {
                     srn_list.push(create_srn_row(*srn_addr.0));
                 }
             }
-            DisplaySourceOrder::SRN => {
-                // SRN順にソート
+            DisplaySourceOrder::SRCN => {
+                // SRCN順にソート
                 let mut srns = vec![];
                 for (srn, _) in infos.iter() {
                     srns.push(srn);
@@ -402,7 +402,7 @@ impl SPC2MIDI2Window for MainWindow {
                 button(
                     text(match *self.display_source_id_type.read().unwrap() {
                         DisplaySourceIDType::StartAddress => "Addr",
-                        DisplaySourceIDType::SRN => "SRN",
+                        DisplaySourceIDType::SRCN => "SRCN",
                     })
                     .align_x(alignment::Alignment::Start)
                 )
@@ -418,7 +418,7 @@ impl SPC2MIDI2Window for MainWindow {
                         snap: false,
                     }
                 }),
-                "Click to switch between sample Address and SRN",
+                "Click to switch between sample Address and SRCN",
                 tooltip::Position::Bottom,
             ),
             text("Program")
@@ -463,7 +463,7 @@ impl SPC2MIDI2Window for MainWindow {
                             DisplaySourceIDType::StartAddress => {
                                 text(format!("{:04X}", info.start_address))
                             }
-                            DisplaySourceIDType::SRN => text(format!("{}", status.srn_no[ch])),
+                            DisplaySourceIDType::SRCN => text(format!("{}", status.srn_no[ch])),
                         }
                     } else {
                         text(format!(""))
@@ -491,7 +491,7 @@ impl SPC2MIDI2Window for MainWindow {
                             .align_x(alignment::Alignment::Start)
                             .align_y(alignment::Alignment::Center),
                         )
-                        .on_press(Message::OpenSRNWindow(status.srn_no[ch]))
+                        .on_press(Message::OpenSRCNWindow(status.srn_no[ch]))
                     } else {
                         button(Text::new(format!("")))
                     }
@@ -545,7 +545,7 @@ impl SPC2MIDI2Window for MainWindow {
                 button(
                     text(match *self.display_source_id_type.read().unwrap() {
                         DisplaySourceIDType::StartAddress => "Addr",
-                        DisplaySourceIDType::SRN => "SRN",
+                        DisplaySourceIDType::SRCN => "SRCN",
                     })
                     .align_x(alignment::Alignment::Start)
                 )
@@ -561,7 +561,7 @@ impl SPC2MIDI2Window for MainWindow {
                         snap: false,
                     }
                 }),
-                "Click to switch between sample Address and SRN",
+                "Click to switch between sample Address and SRCN",
                 tooltip::Position::Top,
             ),
             text("Program")

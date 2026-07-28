@@ -24,7 +24,7 @@ use std::sync::{Arc, RwLock};
 const NUM_NEARBY_PROGRAMS: u8 = 11;
 
 #[derive(Debug)]
-pub struct SRNWindow {
+pub struct SRCNWindow {
     window_id: window::Id,
     title: String,
     srn_no: u8,
@@ -138,7 +138,7 @@ fn create_nearby_programs_list(program: Option<Program>) -> Vec<Program> {
     .collect()
 }
 
-impl SPC2MIDI2Window for SRNWindow {
+impl SPC2MIDI2Window for SRCNWindow {
     fn title(&self) -> String {
         self.title.clone()
     }
@@ -155,7 +155,7 @@ impl SPC2MIDI2Window for SRNWindow {
         let parameter_controller = column![
             row![checkbox(param.mute)
                 .label("Mute")
-                .on_toggle(|flag| Message::SRNMuteFlagToggled(self.srn_no, flag)),]
+                .on_toggle(|flag| Message::SRCNMuteFlagToggled(self.srn_no, flag)),]
             .spacing(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
@@ -176,12 +176,12 @@ impl SPC2MIDI2Window for SRNWindow {
                 })
                 .step(1),
                 tooltip(
-                    button("▼").on_press(Message::SRNCenterNoteOctaveDownClicked(self.srn_no)),
+                    button("▼").on_press(Message::SRCNCenterNoteOctaveDownClicked(self.srn_no)),
                     "Note Octave Down",
                     tooltip::Position::Bottom,
                 ),
                 tooltip(
-                    button("▲").on_press(Message::SRNCenterNoteOctaveUpClicked(self.srn_no)),
+                    button("▲").on_press(Message::SRCNCenterNoteOctaveUpClicked(self.srn_no)),
                     "Note Octave Up",
                     tooltip::Position::Bottom,
                 ),
@@ -194,7 +194,7 @@ impl SPC2MIDI2Window for SRNWindow {
                     let note = param.center_note as f32 / 512.0;
                     text(format!("{:8.2}Hz", note_to_frequency(note))).width(90)
                 },
-                button("Reset").on_press(Message::SRNNoteEstimationClicked(self.srn_no)),
+                button("Reset").on_press(Message::SRCNNoteEstimationClicked(self.srn_no)),
             ]
             .spacing(10)
             .width(Length::Fill)
@@ -300,7 +300,7 @@ impl SPC2MIDI2Window for SRNWindow {
                     .width(90)
                     .align_x(alignment::Alignment::Start),
                 button("Edit Channel Routing")
-                    .on_press(Message::OpenSRNChannelRoutingWindow(srn_no))
+                    .on_press(Message::OpenSRCNChannelRoutingWindow(srn_no))
                     .width(170),
                 {
                     let mut ch_route_text = "".to_string();
@@ -358,7 +358,7 @@ impl SPC2MIDI2Window for SRNWindow {
         ];
         let preview_controller = row![
             tooltip(
-                button("Play/Stop").on_press(Message::ReceivedSRNPlayStartRequest(self.srn_no)),
+                button("Play/Stop").on_press(Message::ReceivedSRCNPlayStartRequest(self.srn_no)),
                 "Play / Stop (F6)",
                 tooltip::Position::Top,
             ),
@@ -369,7 +369,7 @@ impl SPC2MIDI2Window for SRNWindow {
             ),
             checkbox(self.preview_loop.load(Ordering::Relaxed))
                 .label("Loop")
-                .on_toggle(|flag| Message::SRNPlayLoopFlagToggled(flag)),
+                .on_toggle(|flag| Message::SRCNPlayLoopFlagToggled(flag)),
             text(format!(
                 "Volume {:<3}",
                 self.preview_volume.load(Ordering::Relaxed)
@@ -379,12 +379,12 @@ impl SPC2MIDI2Window for SRNWindow {
             slider(
                 0..=127,
                 self.preview_volume.load(Ordering::Relaxed),
-                Message::SRNPlayVolumeChanged
+                Message::SRCNPlayVolumeChanged
             )
             .width(100),
             checkbox(self.midi_preview.load(Ordering::Relaxed))
                 .label("MIDI Update Preview")
-                .on_toggle(|flag| Message::SRNMIDIPreviewFlagToggled(flag)),
+                .on_toggle(|flag| Message::SRCNMIDIPreviewFlagToggled(flag)),
         ];
         let nearby_programs_popup = container({
             let list = nearby_programs.iter().fold(column![], |col, program| {
@@ -442,7 +442,7 @@ impl SPC2MIDI2Window for SRNWindow {
     }
 }
 
-impl SRNWindow {
+impl SRCNWindow {
     pub fn new(
         window_id: window::Id,
         title: String,
@@ -469,7 +469,7 @@ impl SRNWindow {
     }
 }
 
-impl canvas::Program<Message> for SRNWindow {
+impl canvas::Program<Message> for SRCNWindow {
     type State = DrawMode;
 
     fn draw(
@@ -579,7 +579,7 @@ impl canvas::Program<Message> for SRNWindow {
                 ..
             }) => {
                 return Some(iced_widget::Action::publish(
-                    Message::ReceivedSRNPlayStartRequest(self.srn_no),
+                    Message::ReceivedSRCNPlayStartRequest(self.srn_no),
                 ))
             }
             Event::Keyboard(iced::keyboard::Event::KeyReleased {

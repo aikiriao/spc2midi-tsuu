@@ -52,8 +52,8 @@ pub enum MIDISystem {
 pub enum DisplaySourceIDType {
     /// 波形開始アドレス（デフォルト）
     StartAddress,
-    /// SRN
-    SRN, 
+    /// SRCN
+    SRCN, 
 }
 
 /// 波形リストの表示モード
@@ -63,8 +63,8 @@ pub enum DisplaySourceOrder {
     SPCChannel,
     /// アドレス
     Address, 
-    /// SRN
-    SRN, 
+    /// SRCN
+    SRCN, 
 }
 
 /// 音源情報

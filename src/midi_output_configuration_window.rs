@@ -126,7 +126,7 @@ impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
                     move |duration| { Message::MIDIOutputDurationChanged(duration) },
                 )
                 .step(100),
-                button("Re-analyze SRN").on_press(Message::ReceivedSRNReanalyzeRequest),
+                button("Re-analyze SRCN").on_press(Message::ReceivedSRCNReanalyzeRequest),
             ]
             .spacing(10)
             .padding(10)
