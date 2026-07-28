@@ -192,57 +192,43 @@ impl SPC2MIDI2Window for MainWindow {
                             {
                                 menu_tuple(menu_items!(
                                     (menu_button(
-                                        text(format!(
-                                            "{} SPC Channel",
-                                            if self.sample_list_order
+                                        checkbox(
+                                            self.sample_list_order
                                                 == DisplaySourceOrder::SPCChannel
-                                            {
-                                                "☒"
-                                            } else {
-                                                "☐"
-                                            }
-                                        ))
-                                        .height(Length::Shrink)
-                                        .align_y(alignment::Vertical::Center),
-                                        Message::SampleListOrderChanged(
-                                            DisplaySourceOrder::SPCChannel
-                                        ),
+                                        )
+                                        .label("SPC Channel")
+                                        .on_toggle(|_| {
+                                            Message::SampleListOrderChanged(
+                                                DisplaySourceOrder::SPCChannel,
+                                            )
+                                        }),
+                                        Message::MenuSelected
                                     )
                                     .width(Length::Fill)
                                     .height(Length::Shrink)),
                                     (menu_button(
-                                        text(format!(
-                                            "{} Address",
-                                            if self.sample_list_order == DisplaySourceOrder::Address
-                                            {
-                                                "☒"
-                                            } else {
-                                                "☐"
-                                            }
-                                        ))
-                                        .height(Length::Shrink)
-                                        .align_y(alignment::Vertical::Center),
-                                        Message::SampleListOrderChanged(
-                                            DisplaySourceOrder::Address
-                                        ),
+                                        checkbox(
+                                            self.sample_list_order == DisplaySourceOrder::Address
+                                        )
+                                        .label("Address")
+                                        .on_toggle(|_| {
+                                            Message::SampleListOrderChanged(
+                                                DisplaySourceOrder::Address,
+                                            )
+                                        }),
+                                        Message::MenuSelected
                                     )
                                     .width(Length::Fill)
                                     .height(Length::Shrink)),
                                     (menu_button(
-                                        text(format!(
-                                            "{} SRN",
-                                            if self.sample_list_order == DisplaySourceOrder::SRN
-                                            {
-                                                "☒"
-                                            } else {
-                                                "☐"
-                                            }
-                                        ))
-                                        .height(Length::Shrink)
-                                        .align_y(alignment::Vertical::Center),
-                                        Message::SampleListOrderChanged(
-                                            DisplaySourceOrder::SRN
-                                        ),
+                                        checkbox(self.sample_list_order == DisplaySourceOrder::SRN)
+                                            .label("SRN")
+                                            .on_toggle(|_| {
+                                                Message::SampleListOrderChanged(
+                                                    DisplaySourceOrder::Address,
+                                                )
+                                            }),
+                                        Message::MenuSelected
                                     )
                                     .width(Length::Fill)
                                     .height(Length::Shrink)),
