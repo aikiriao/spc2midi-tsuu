@@ -4185,7 +4185,7 @@ dependencies = [
 [[package]]
 name = "spc700"
 version = "0.1.0"
-source = "git+https://github.com/aikiriao/spc700.git#54bb605cf05fe344f6b9b7ec705944740703d3b5"
+source = "git+https://github.com/aikiriao/spc700.git#1b8e0204c8eefd258535e43979af68bc1eb59647"
 dependencies = [
  "libm",
  "log",
