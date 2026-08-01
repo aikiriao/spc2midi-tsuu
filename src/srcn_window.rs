@@ -424,8 +424,7 @@ impl SPC2MIDI2Window for SRCNWindow {
                 ),
                 nearby_programs_popup
             ],
-            parameter_controller
-                .spacing(10)
+            scrollable(parameter_controller.spacing(10))
                 .width(Length::Fill)
                 .height(Length::FillPortion(20)),
             preview_controller
