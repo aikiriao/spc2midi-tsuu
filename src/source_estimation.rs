@@ -159,8 +159,8 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
     // ピークをとるインデックスを探索
     let mut peaks = Vec::new();
     for i in 1..(log_spec.len() - 1) {
-        if log_spec[i] >= PITCH_PEAK_THRESHOLD * max {
-            if log_spec[i - 1] < log_spec[i] && log_spec[i + 1] < log_spec[i] {
+        if log_spec[i - 1] < log_spec[i] && log_spec[i + 1] < log_spec[i] {
+            if log_spec[i] >= PITCH_PEAK_THRESHOLD * max {
                 peaks.push(i);
             }
         }

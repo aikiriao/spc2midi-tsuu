@@ -813,7 +813,7 @@ fn draw_spectrum_peak_label(
     bounds: &Rectangle,
     spec: &[f32],
     sampling_rate: f32,
-    num_peaks: usize,
+    max_num_peaks: usize,
 ) {
     let center = bounds.center();
     let center_left = Point::new(center.x - bounds.width / 2.0, center.y);
@@ -826,12 +826,23 @@ fn draw_spectrum_peak_label(
     let compute_frequency =
         move |s: usize| -> f32 { sampling_rate * (s as f32) / (2.0 * spec.len() as f32) };
 
-    // スペクトルを降順にソートし対応するビンを並べる
-    let mut peak_bins = (0..spec.len()).collect::<Vec<_>>();
-    peak_bins.sort_unstable_by(|&i, &j| spec[j].total_cmp(&spec[i]));
+    // スペクトルのピークを列挙
+    const PEAK_THRESHOLD: f32 = 0.8;
+    const LOG_POWER_SPECTRUM_OFFSET_DB: f32 = 120.0;
+    let max_spec = spec.iter().fold(0.0 / 0.0, |m, v| v.max(m)) + LOG_POWER_SPECTRUM_OFFSET_DB;
+    let mut peak_bins = vec![];
+    for i in 1..(spec.len() - 1) {
+        if spec[i - 1] < spec[i] && spec[i + 1] < spec[i] {
+            let sp = spec[i] + LOG_POWER_SPECTRUM_OFFSET_DB;
+            if sp > max_spec * PEAK_THRESHOLD {
+                peak_bins.push(i);
+            }
+        }
+    }
 
     // ピークの周波数を描画
     const FONT_SIZE: f32 = 16.0;
+    let num_peaks = max_num_peaks.min(peak_bins.len());
     for i in 0..num_peaks {
         frame.fill_text(canvas::Text {
             content: format!("{:.1}", compute_frequency(peak_bins[i])),
