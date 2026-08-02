@@ -143,7 +143,7 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
     for i in 1..(auto_corr.len() - 1) {
         let corr = auto_corr[i];
         if corr > 0.0 && auto_corr[i - 1] < corr && auto_corr[i + 1] < corr {
-            if corr > max_corr * PITCH_PEAK_THRESHOLD {
+            if corr >= PITCH_PEAK_THRESHOLD * max_corr {
                 auto_corr_peak_hzs.push(SPC_SAMPLING_RATE / (i as f32));
             }
         }
@@ -177,14 +177,14 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
         1.0
     };
 
-    // パワースペクトルの倍音列に自己相関のピッチ候補が入っているかチェック
+    // 自己相関で求めたピークは1/2周波数ピッチが多くなるため、パワースペクトルの最低周期未満の場合は切り捨てる
     if auto_corr_peak_hzs.len() > 0 {
-        'pitch_check_loop: for corr_hz in &auto_corr_peak_hzs {
-            for power_hz in &power_spec_peak_hzs {
-                if power_hz % corr_hz < 1.0 {
-                    pitch_hz = *corr_hz;
-                    break 'pitch_check_loop;
-                }
+        let lowest_peak_hz = 0.95 * power_spec_peak_hzs.iter().fold(0.0 / 0.0, |m, v| v.min(m));
+        auto_corr_peak_hzs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        for corr_hz in &auto_corr_peak_hzs {
+            if *corr_hz >= lowest_peak_hz {
+                pitch_hz = *corr_hz;
+                break;
             }
         }
     };
