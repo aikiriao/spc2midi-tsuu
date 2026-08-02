@@ -177,17 +177,13 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
         1.0
     };
 
-    // 自己相関で求めたピークは1/2周波数ピッチが多くなるため、パワースペクトルの最低周期未満の場合は切り捨てる
-    if auto_corr_peak_hzs.len() > 0 {
-        let lowest_peak_hz = 0.95 * power_spec_peak_hzs.iter().fold(0.0 / 0.0, |m, v| v.min(m));
-        auto_corr_peak_hzs.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        for corr_hz in &auto_corr_peak_hzs {
-            if *corr_hz >= lowest_peak_hz {
-                pitch_hz = *corr_hz;
-                break;
-            }
+    // 自己相関で求めたピークは1/2周波数ピッチが多くなるため、パワースペクトルの最低周期未満の場合は
+    // パワースペクトルのピッチ候補に修正
+    if auto_corr_peak_hzs.len() > 0 && auto_corr_peak_hzs.len() > 0 {
+        if pitch_hz < power_spec_peak_hzs[0] {
+            pitch_hz = power_spec_peak_hzs[0];
         }
-    };
+    }
 
     // ピッチ周波数を推定ノートとする
     let estimated_note = 12.0 * f32::log2(pitch_hz / A4_PITCH_HZ) + 69.0;
