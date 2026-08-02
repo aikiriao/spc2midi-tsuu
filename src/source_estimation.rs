@@ -136,43 +136,61 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
         }
     }
 
+    // 自己相関の先頭にある大きいピークを探索
+    let auto_corr = compute_auto_correlation(&source_info.signal);
+    let max_corr = auto_corr.iter().fold(0.0 / 0.0, |m, v| v.max(m));
+    let mut auto_corr_peak_hzs = Vec::new();
+    for i in 1..(auto_corr.len() - 1) {
+        let corr = auto_corr[i];
+        if corr > 0.0 && auto_corr[i - 1] < corr && auto_corr[i + 1] < corr {
+            if corr > max_corr * PITCH_PEAK_THRESHOLD {
+                auto_corr_peak_hzs.push(SPC_SAMPLING_RATE / (i as f32));
+            }
+        }
+    }
+
+    // パワースペクトルでのピークを探索
     let power_spec = &source_info.power_spectrum;
     // 対数パワースペクトルに変換
     let log_spec: Vec<f32> = power_spec
         .iter()
         .map(|p| 10.0 * f32::log10(*p) + LOG_POWER_SPECTRUM_OFFSET_DB)
         .collect();
-
-    // 最大値
-    let (argmax, max) =
-        log_spec
-            .iter()
-            .enumerate()
-            .fold((usize::MIN, f32::MIN), |(i_a, a), (i_b, &b)| {
-                if b > a {
-                    (i_b, b)
-                } else {
-                    (i_a, a)
-                }
-            });
-
+    let max_log_spec = log_spec.iter().fold(0.0 / 0.0, |m, v| v.max(m));
     // ピークをとるインデックスを探索
-    let mut peaks = Vec::new();
+    let mut power_spec_peak_hzs = Vec::new();
     for i in 1..(log_spec.len() - 1) {
         if log_spec[i - 1] < log_spec[i] && log_spec[i + 1] < log_spec[i] {
-            if log_spec[i] >= PITCH_PEAK_THRESHOLD * max {
-                peaks.push(i);
+            if log_spec[i] >= PITCH_PEAK_THRESHOLD * max_log_spec {
+                power_spec_peak_hzs
+                    .push((i as f32 / (2.0 * power_spec.len() as f32)) * SPC_SAMPLING_RATE);
             }
         }
     }
 
-    // 最初の候補をピッチとする
-    // 候補がなければ単純に最大のインデックス
-    let pitch_bin = if peaks.len() > 0 { peaks[0] } else { argmax };
+    // 自己相関のピークに該当するピッチ周波数を優先
+    let mut pitch_hz = if auto_corr_peak_hzs.len() > 0 {
+        auto_corr_peak_hzs[0]
+    } else if power_spec_peak_hzs.len() > 0 {
+        power_spec_peak_hzs[0]
+    } else {
+        1.0
+    };
 
-    let peak_hz = (pitch_bin as f32 / (2.0 * power_spec.len() as f32)) * SPC_SAMPLING_RATE;
-    let estimated_note = 12.0 * f32::log2(peak_hz / A4_PITCH_HZ) + 69.0;
+    // パワースペクトルの倍音列に自己相関のピッチ候補が入っているかチェック
+    if auto_corr_peak_hzs.len() > 0 {
+        'pitch_check_loop: for corr_hz in &auto_corr_peak_hzs {
+            for power_hz in &power_spec_peak_hzs {
+                if power_hz % corr_hz < 1.0 {
+                    pitch_hz = *corr_hz;
+                    break 'pitch_check_loop;
+                }
+            }
+        }
+    };
 
+    // ピッチ周波数を推定ノートとする
+    let estimated_note = 12.0 * f32::log2(pitch_hz / A4_PITCH_HZ) + 69.0;
     estimated_note.clamp(0.0, 127.0)
 }
 
@@ -249,7 +267,8 @@ pub fn compute_power_spectrum(signal: &Vec<f32>) -> Vec<f32> {
     let signal: Vec<_> = signal
         .iter()
         .zip(window.iter())
-        .map(|(s, w)| (s - wmean) * w).collect();
+        .map(|(s, w)| (s - wmean) * w)
+        .collect();
 
     // ゼロ埋め
     let pad_len = m.next_power_of_two() * 4;

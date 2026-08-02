@@ -2131,7 +2131,7 @@ impl App {
         let param = params.get(&srn_no).unwrap();
         let program = param.program.clone() as u8;
         let velocity = param.noteon_velocity;
-        let note = (param.center_note >> 9) as u8;
+        let note = (param.center_note as f32 / 512.0).round() as u8;
 
         // MIDI出力の作成
         let midi_out_conn = if let Some(midi_out_conn_ref) = &self.midi_out_conn {
