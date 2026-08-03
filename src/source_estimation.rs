@@ -125,7 +125,11 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
 
     // ループ長からの周期推定
     let nsmpls = source_info.signal.len();
-    let loop_length = nsmpls - source_info.loop_start_sample;
+    let loop_length = if nsmpls > source_info.loop_start_sample {
+        nsmpls - source_info.loop_start_sample
+    } else {
+        0
+    };
     if loop_length > 0 {
         // ショートループのサンプル数が小さく、かつ波形全体に対するループが大きければ
         // ループ部分が1周期分の波形になっていると思って推定
