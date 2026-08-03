@@ -125,10 +125,10 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
 
     // ループ長からの周期推定
     let nsmpls = source_info.signal.len();
-    if nsmpls > source_info.loop_start_sample {
+    let loop_length = nsmpls - source_info.loop_start_sample;
+    if loop_length > 0 {
         // ショートループのサンプル数が小さく、かつ波形全体に対するループが大きければ
         // ループ部分が1周期分の波形になっていると思って推定
-        let loop_length = nsmpls - source_info.loop_start_sample;
         if loop_length < (SPC_SAMPLING_RATE / 100.0) as usize && nsmpls < 5 * loop_length {
             let freq = SPC_SAMPLING_RATE / loop_length as f32;
             let estimated_note = 12.0 * f32::log2(freq / A4_PITCH_HZ) + 69.0;
@@ -136,8 +136,15 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
         }
     }
 
+    // ループ長が長ければ解析区間をループ区間内に絞り込む
+    let analyze_signal = if loop_length > (0.1 * SPC_SAMPLING_RATE) as usize {
+        source_info.signal[source_info.loop_start_sample..].to_vec()
+    } else {
+        source_info.signal.clone()
+    };
+
     // 自己相関の先頭にある大きいピークを探索
-    let auto_corr = compute_auto_correlation(&source_info.signal);
+    let auto_corr = compute_auto_correlation(&analyze_signal);
     let max_corr = auto_corr.iter().fold(0.0 / 0.0, |m, v| v.max(m));
     let mut auto_corr_peak_hzs = Vec::new();
     for i in 1..(auto_corr.len() - 1) {
@@ -150,7 +157,7 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
     }
 
     // パワースペクトルでのピークを探索
-    let power_spec = &source_info.power_spectrum;
+    let power_spec = compute_power_spectrum(&analyze_signal);
     // 対数パワースペクトルに変換
     let log_spec: Vec<f32> = power_spec
         .iter()
@@ -177,10 +184,10 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
         1.0
     };
 
-    // 自己相関で求めたピークは1/2周波数ピッチが多くなるため、パワースペクトルの最低周期未満の場合は
-    // パワースペクトルのピッチ候補に修正
-    if auto_corr_peak_hzs.len() > 0 && auto_corr_peak_hzs.len() > 0 {
-        if pitch_hz < power_spec_peak_hzs[0] {
+    // ピッチ周波数が高いときはパワースペクトルの推定値に置き換える
+    // 自己相関の1ラグのずれで大きくピッチ周波数が揺らぐため
+    if power_spec_peak_hzs.len() > 0 {
+        if pitch_hz > 500.0 {
             pitch_hz = power_spec_peak_hzs[0];
         }
     }
