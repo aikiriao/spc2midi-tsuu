@@ -141,7 +141,7 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
     }
 
     // ループ長が長ければ解析区間をループ区間内に絞り込む
-    let analyze_signal = if loop_length > (0.1 * SPC_SAMPLING_RATE) as usize {
+    let analyze_signal = if loop_length > (0.05 * SPC_SAMPLING_RATE) as usize {
         source_info.signal[source_info.loop_start_sample..].to_vec()
     } else {
         source_info.signal.clone()
