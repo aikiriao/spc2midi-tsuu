@@ -121,26 +121,26 @@ fn detect_drum(source_info: &SourceInformation) -> bool {
 
 // 最適なセンターノートの小数部の推定
 // 半音単位で整数付近に偏るようにセンターノートの小数部を定める問題で考える
-fn compute_optimal_center_note_fraction(pitch_sequence: &Vec<u16>) -> f32 {
-    const F64PI: f64 = std::f64::consts::PI;
-    let mut sum_exp = Complex::new(0.0, 0.0);
-
+fn compute_optimal_center_note_fraction(pitch_sequence: &[u16]) -> Option<f32> {
     if pitch_sequence.len() == 0 {
-        return 0.0;
+        return None;
     }
 
     // expの和を取る
+    let mut sum_exp = Complex::new(0.0, 0.0);
     for pitch in pitch_sequence {
-        sum_exp += (Complex::I * 2.0 * F64PI * 12.0 * (*pitch as f64).log2()).exp();
+        if *pitch > 0 {
+            sum_exp += (Complex::I * std::f64::consts::TAU * 12.0 * (*pitch as f64).log2()).exp();
+        }
     }
 
     // 偏角argは[-pi, pi)なので[0, 2pi)に変換
     let mut sum_arg = sum_exp.arg();
     if sum_arg < 0.0 {
-        sum_arg += 2.0 * F64PI;
+        sum_arg += std::f64::consts::TAU;
     }
 
-    (-sum_arg / (2.0 * F64PI)).rem_euclid(1.0) as f32
+    Some((-sum_arg / std::f64::consts::TAU).rem_euclid(1.0) as f32)
 }
 
 /// センターノートの推定
@@ -225,10 +225,14 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
     let pitch_note = 12.0 * f32::log2(pitch_hz / A4_PITCH_HZ) + 69.0;
 
     // 小数部を半音単位の整数になるように補正
-    let optimal_frac = compute_optimal_center_note_fraction(&source_info.pitch_sequence);
-
-    // ピッチ基準のノート番号に最も近い 整数 + optimal_frac を選択
-    let estimated_note = optimal_frac + (pitch_note - optimal_frac).round();
+    let estimated_note = if let Some(optimal_frac) =
+        compute_optimal_center_note_fraction(&source_info.pitch_sequence)
+    {
+        // ピッチ基準のノート番号に最も近い 整数 + optimal_frac を選択
+        optimal_frac + (pitch_note - optimal_frac).round()
+    } else {
+        pitch_note
+    };
 
     estimated_note.clamp(0.0, 127.0)
 }
