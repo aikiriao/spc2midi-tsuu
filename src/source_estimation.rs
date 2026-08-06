@@ -1,4 +1,5 @@
 use crate::types::*;
+use num_complex::Complex;
 use num_traits::Pow;
 use realfft::RealFftPlanner;
 use std::f32::consts::PI;
@@ -118,6 +119,30 @@ fn detect_drum(source_info: &SourceInformation) -> bool {
     false
 }
 
+// 最適なセンターノートの小数部の推定
+// 半音単位で整数付近に偏るようにセンターノートの小数部を定める問題で考える
+fn compute_optimal_center_note_fraction(pitch_sequence: &Vec<u16>) -> f32 {
+    const F64PI: f64 = std::f64::consts::PI;
+    let mut sum_exp = Complex::new(0.0, 0.0);
+
+    if pitch_sequence.len() == 0 {
+        return 0.0;
+    }
+
+    // expの和を取る
+    for pitch in pitch_sequence {
+        sum_exp += (Complex::I * 2.0 * F64PI * 12.0 * (*pitch as f64).log2()).exp();
+    }
+
+    // 偏角argは[-pi, pi)なので[0, 2pi)に変換
+    let mut sum_arg = sum_exp.arg();
+    if sum_arg < 0.0 {
+        sum_arg += 2.0 * F64PI;
+    }
+
+    (-sum_arg / (2.0 * F64PI)).rem_euclid(1.0) as f32
+}
+
 /// センターノートの推定
 fn center_note_estimation(source_info: &SourceInformation) -> f32 {
     // 対数パワースペクトルのオフセット
@@ -170,11 +195,11 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
     let max_log_spec = log_spec.iter().fold(0.0 / 0.0, |m, v| v.max(m));
     // ピークをとるインデックスを探索
     let mut power_spec_peak_hzs = Vec::new();
+    let bin_to_freq_normalizer = SPC_SAMPLING_RATE / (2.0 * power_spec.len() as f32);
     for i in 1..(log_spec.len() - 1) {
         if log_spec[i - 1] < log_spec[i] && log_spec[i + 1] < log_spec[i] {
             if log_spec[i] >= PITCH_PEAK_THRESHOLD * max_log_spec {
-                power_spec_peak_hzs
-                    .push((i as f32 / (2.0 * power_spec.len() as f32)) * SPC_SAMPLING_RATE);
+                power_spec_peak_hzs.push((i as f32) * bin_to_freq_normalizer);
             }
         }
     }
@@ -189,15 +214,22 @@ fn center_note_estimation(source_info: &SourceInformation) -> f32 {
     };
 
     // ピッチ周波数が高いときはパワースペクトルの推定値に置き換える
-    // 自己相関の1ラグのずれで大きくピッチ周波数が揺らぐため
+    // 高周波では、自己相関の1ラグのずれで大きくピッチ周波数が揺らぐため
     if power_spec_peak_hzs.len() > 0 {
-        if pitch_hz > 500.0 {
+        if pitch_hz > 400.0 {
             pitch_hz = power_spec_peak_hzs[0];
         }
     }
 
-    // ピッチ周波数を推定ノートとする
-    let estimated_note = 12.0 * f32::log2(pitch_hz / A4_PITCH_HZ) + 69.0;
+    // ピッチ周波数基準のノート番号
+    let pitch_note = 12.0 * f32::log2(pitch_hz / A4_PITCH_HZ) + 69.0;
+
+    // 小数部を半音単位の整数になるように補正
+    let optimal_frac = compute_optimal_center_note_fraction(&source_info.pitch_sequence);
+
+    // ピッチ基準のノート番号に最も近い 整数 + optimal_frac を選択
+    let estimated_note = optimal_frac + (pitch_note - optimal_frac).round();
+
     estimated_note.clamp(0.0, 127.0)
 }
 

@@ -85,6 +85,8 @@ pub struct SourceInformation {
     pub loop_start_sample: usize,
     /// チャンネルを使っているか？（8チャンネル分）
     pub using_channel: [bool; 8],
+    /// この波形に対してキーオンされたときのピッチ列
+    pub pitch_sequence: Vec<u16>,
 }
 
 /// 1音源のパラメータ

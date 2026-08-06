@@ -1356,9 +1356,10 @@ impl App {
         let mut tick64khz_count = 0;
         let mut start_address_map = BTreeMap::new();
         let mut using_channel_map = BTreeMap::new();
+        let mut pitch_sequence_map: BTreeMap<u8, Vec<u16>> = BTreeMap::new();
         while tick64khz_count < analyze_duration_64khz_ticks {
             cycle_count += midispc.execute_step() as u32;
-            // キーオンが打たれていた時のサンプル番号を取得
+            // キーオンが打たれていた時のサンプル番号・チャンネル使用状況・ピッチを取得
             // DSPを動かすとキーオンフラグが落ちることがあるので64kHzティック前に調べる
             let keyon = midispc.dsp.read_register(ram, DSP_ADDRESS_KON);
             if keyon != 0 {
@@ -1376,6 +1377,19 @@ impl App {
                             .entry(sample_source)
                             .and_modify(|keyon_ch| *keyon_ch |= 1 << ch)
                             .or_insert(1 << ch);
+                        let pitch = ((midispc
+                            .dsp
+                            .read_register(ram, (ch << 4) | DSP_ADDRESS_V0PITCHH)
+                            as u16)
+                            << 8)
+                            | (midispc
+                                .dsp
+                                .read_register(ram, (ch << 4) | DSP_ADDRESS_V0PITCHL)
+                                as u16);
+                        pitch_sequence_map
+                            .entry(sample_source)
+                            .or_default()
+                            .push(pitch);
                     }
                 }
             }
@@ -1434,6 +1448,7 @@ impl App {
                 end_address: start_address + (signal.len() * 9) / 16,
                 loop_start_sample: ((loop_address - start_address) * 16) / 9,
                 using_channel: using_channel,
+                pitch_sequence: pitch_sequence_map.get(srn).unwrap().clone(),
             };
             infos.insert(*srn, source_info.clone());
             // ドラム音とピッチの推定

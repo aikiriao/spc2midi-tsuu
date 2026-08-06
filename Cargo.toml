@@ -1,6 +1,6 @@
 [package]
 name = "spc2midi-tsuu"
-version = "0.2.72"
+version = "0.2.73"
 edition = "2024"
 
 [dependencies]
@@ -22,6 +22,7 @@ windows-sys = "0.61.2"
 rustfft = "6.2.0"
 realfft = "3.4.0"
 fuzzy_match = "0.2.1"
+num-complex = "0.4.6"
 
 [build-dependencies]
 winresource = "0.1.30"
