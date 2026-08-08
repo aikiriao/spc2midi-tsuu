@@ -1232,6 +1232,7 @@ impl App {
                 // 再生情報更新
                 if let Some(window) = self.windows.get_mut(&self.main_window_id) {
                     let status = self.playback_status.read().unwrap();
+                    let params = self.source_parameter.read().unwrap();
                     let main_win: &mut MainWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let played_samples = self.stream_played_samples.load(Ordering::Relaxed);
@@ -1247,9 +1248,14 @@ impl App {
                     for ch in 0..8 {
                         main_win.expression_indicator[ch].value = status.envelope[ch] as f32;
                         main_win.pitch_indicator[ch].value = if status.pitch[ch] > 0 {
-                            12.0 * (f32::log2(status.pitch[ch] as f32) - 12.0)
+                            if let Some(param) = params.get(&status.srn_no[ch]) {
+                                let center_note = param.center_note as f32 / 512.0;
+                                (center_note + 12.0 * (f32::log2(status.pitch[ch] as f32) - 12.0)).round()
+                            } else {
+                                -1.0
+                            }
                         } else {
-                            0.0
+                            -1.0
                         };
                         main_win.volume_indicator[ch][0].value = status.volume[ch][0] as f32;
                         main_win.volume_indicator[ch][1].value = status.volume[ch][1] as f32;
