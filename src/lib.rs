@@ -63,12 +63,24 @@ const CLOCK_TICK_CYCLE_64KHZ_NANOSEC: u64 = 15625;
 const MIDIMSG_NOTE_ON: u8 = 0x90;
 /// MIDIメッセージ：ノートオフ
 const MIDIMSG_NOTE_OFF: u8 = 0x80;
+/// MIDIメッセージ：コントロールチェンジ
+const MIDIMSG_CONTROL_CHANGE: u8 = 0xB0;
 /// MIDIメッセージ：プログラムチェンジ
 const MIDIMSG_PROGRAM_CHANGE: u8 = 0xC0;
 /// MIDIメッセージ：チャンネルモードメッセージ
 const MIDIMSG_MODE: u8 = 0xB0;
+/// MIDIメッセージ：ピッチベンド
+const MIDIMSG_PITCH_BEND: u8 = 0xE0;
 /// MIDIチェンネルモードメッセージ：オールサウンドオフ
 const MIDIMSG_MODE_ALL_SOUND_OFF: u8 = 0x78;
+/// MIDIコントロールチェンジ：RPN LSB
+const MIDICC_RPN_LSB: u8 = 0x64;
+/// MIDIコントロールチェンジ：RPN MSB
+const MIDICC_RPN_MSB: u8 = 0x65;
+/// MIDIコントロールチェンジ：RPN データエントリーLSB
+const MIDICC_RPN_DATA_ENTRY_LSB: u8 = 0x06;
+/// MIDIコントロールチェンジ：RPN データエントリーMSB
+const MIDICC_RPN_DATA_ENTRY_MSB: u8 = 0x26;
 /// MIDI System Exclusive：GMシステムオン
 const MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_ON: [u8; 6] = [0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7];
 /// MIDI System Exclusive：GMシステムオフ
@@ -82,7 +94,7 @@ const MIDIMSG_SYSEX_GS_RESET: [u8; 11] = [
 /// MIDI System Exclusive：XGシステムオン
 const MIDIMSG_SYSEX_XG_SYSTEM_ON: [u8; 9] = [0xF0, 0x43, 0x10, 0x4C, 0x00, 0x00, 0x7E, 0x00, 0xF7];
 /// MIDIをプレビューする際に使用するチャンネル
-const MIDI_PREVIEW_CHANNEL: u8 = 0;
+const MIDI_PREVIEW_CHANNEL: u8 = 15;
 /// MIDIをプレビューする時間(msec)
 const MIDI_PREVIEW_DURATION_MSEC: u64 = 500;
 /// デフォルトの音源の分析時間(sec)
@@ -2146,7 +2158,8 @@ impl App {
         let param = params.get(&srn_no).unwrap();
         let program = param.program.clone() as u8;
         let velocity = param.noteon_velocity;
-        let note = (param.center_note as f32 / 512.0).round() as u8;
+        let center_note = param.center_note as f32 / 512.0;
+        let note = center_note.round() as u8;
 
         // MIDI出力の作成
         let midi_out_conn = if let Some(midi_out_conn_ref) = &self.midi_out_conn {
@@ -2159,9 +2172,32 @@ impl App {
 
         // ノートオン
         if program < 0x80 {
+            // ピッチベンド設定
+            let cc_msg = MIDIMSG_CONTROL_CHANGE | MIDI_PREVIEW_CHANNEL;
+            let sensitivity = param.pitch_bend_width;
+            conn_out.send(&[cc_msg, MIDICC_RPN_MSB, 0x00]).unwrap();
+            conn_out.send(&[cc_msg, MIDICC_RPN_LSB, 0x00]).unwrap();
+            conn_out
+                .send(&[cc_msg, MIDICC_RPN_DATA_ENTRY_LSB, sensitivity])
+                .unwrap();
+            conn_out
+                .send(&[cc_msg, MIDICC_RPN_DATA_ENTRY_MSB, 0])
+                .unwrap();
+            let pitch_bend = (((center_note - note as f32) / sensitivity as f32 * 8192.0)
+                .clamp(-8192.0, 8191.0) as i16
+                + 8192) as u16;
+            conn_out
+                .send(&[
+                    MIDIMSG_PITCH_BEND | MIDI_PREVIEW_CHANNEL,
+                    (pitch_bend & 0x7F) as u8,        // LSB
+                    ((pitch_bend >> 7) & 0x7F) as u8, // MSB
+                ])
+                .unwrap();
+            // プログラムチェンジ
             conn_out
                 .send(&[MIDIMSG_PROGRAM_CHANGE | MIDI_PREVIEW_CHANNEL, program])
                 .unwrap();
+            // ノートオン
             conn_out
                 .send(&[MIDIMSG_NOTE_ON | MIDI_PREVIEW_CHANNEL, note, velocity])
                 .unwrap();
