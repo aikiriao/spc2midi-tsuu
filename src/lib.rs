@@ -1250,7 +1250,7 @@ impl App {
                         main_win.pitch_indicator[ch].value = if status.pitch[ch] > 0 {
                             if let Some(param) = params.get(&status.srn_no[ch]) {
                                 let center_note = param.center_note as f32 / 512.0;
-                                (center_note + 12.0 * (f32::log2(status.pitch[ch] as f32) - 12.0)).round()
+                                center_note + 12.0 * (f32::log2(status.pitch[ch] as f32) - 12.0)
                             } else {
                                 -1.0
                             }

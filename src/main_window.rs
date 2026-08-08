@@ -568,13 +568,16 @@ impl SPC2MIDI2Window for MainWindow {
                         .width(Length::FillPortion(6)),
                     Canvas::new(expression_indicator[ch])
                         .height(Length::Fill)
-                        .width(Length::FillPortion(5)),
-                    Canvas::new(volume_indicator[ch][0])
-                        .height(Length::Fill)
-                        .width(Length::FillPortion(4)),
-                    Canvas::new(volume_indicator[ch][1])
-                        .height(Length::Fill)
-                        .width(Length::FillPortion(4)),
+                        .width(Length::FillPortion(6)),
+                    column![
+                        Canvas::new(volume_indicator[ch][0])
+                            .height(Length::Fill)
+                            .width(Length::Fill),
+                        Canvas::new(volume_indicator[ch][1])
+                            .height(Length::Fill)
+                            .width(Length::Fill),
+                    ]
+                    .width(Length::FillPortion(7)),
                 ]
                 .spacing(10)
                 .width(Length::Fill)
@@ -618,13 +621,10 @@ impl SPC2MIDI2Window for MainWindow {
                 .width(Length::FillPortion(6))
                 .align_x(alignment::Alignment::Start),
             text("Env.")
-                .width(Length::FillPortion(5))
+                .width(Length::FillPortion(6))
                 .align_x(alignment::Alignment::Start),
-            text("Lvol")
-                .width(Length::FillPortion(4))
-                .align_x(alignment::Alignment::Start),
-            text("Rvol")
-                .width(Length::FillPortion(4))
+            text("LR Vol.")
+                .width(Length::FillPortion(7))
                 .align_x(alignment::Alignment::Start),
         ]
         .spacing(10)
