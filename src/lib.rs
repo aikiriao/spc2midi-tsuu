@@ -178,6 +178,7 @@ pub enum Message {
     ReceivedBpmHalfButtonClicked,
     ReceivedSRCNReanalyzeRequest,
     DisplaySourceIDTypeToggled,
+    DisplayNoteTypeToggled,
     AudioLatencyMsecChanged(usize),
     Tick,
 }
@@ -211,6 +212,7 @@ pub struct App {
     audio_out_device_name: Arc<RwLock<Option<String>>>,
     midi_out_port_name: Arc<RwLock<Option<String>>>,
     display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
+    display_note_type: Arc<RwLock<DisplayNoteType>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -302,6 +304,7 @@ impl Default for App {
             })),
             midi_out_port_name: Arc::new(RwLock::new(midi_out_port_name)),
             display_source_id_type: Arc::new(RwLock::new(DisplaySourceIDType::StartAddress)),
+            display_note_type: Arc::new(RwLock::new(DisplayNoteType::NoteNameMiddleC4)),
         }
     }
 }
@@ -1214,6 +1217,20 @@ impl App {
                         DisplaySourceIDType::StartAddress => DisplaySourceIDType::SRCN,
                         DisplaySourceIDType::SRCN => DisplaySourceIDType::StartAddress,
                     };
+                }
+            }
+            Message::DisplayNoteTypeToggled => {
+                if let Ok(mut note_type) = self.display_note_type.write() {
+                    *note_type = match *note_type {
+                        DisplayNoteType::NoteNameMiddleC4 => DisplayNoteType::NoteNameMiddleC3,
+                        DisplayNoteType::NoteNameMiddleC3 => DisplayNoteType::NoteNumber,
+                        DisplayNoteType::NoteNumber => DisplayNoteType::NoteNameMiddleC4,
+                    };
+                    if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                        let main_win: &mut MainWindow =
+                            window.as_mut().as_any_mut().downcast_mut().unwrap();
+                        main_win.set_noteindicator_formatter(note_type.clone());
+                    }
                 }
             }
             Message::AudioLatencyMsecChanged(msec) => {

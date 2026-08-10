@@ -39,6 +39,36 @@ pub struct MainWindow {
     pub showing_channel_srn_list: [bool; 8],
 }
 
+// ノート番号をノート名に変換
+fn note_to_notename(note: f32, note_type: DisplayNoteType) -> String {
+    if note < 0.0 {
+        format!("")
+    } else {
+        let qnote = note.round() as u8;
+        let name = match qnote % 12 {
+            0 => "C",
+            1 => "C#",
+            2 => "D",
+            3 => "D#",
+            4 => "E",
+            5 => "F",
+            6 => "F#",
+            7 => "G",
+            8 => "G#",
+            9 => "A",
+            10 => "A#",
+            11 => "B",
+            _ => unreachable!("unreachable note name!"),
+        };
+        let number = match note_type {
+            DisplayNoteType::NoteNameMiddleC4 => (qnote / 12) as i8 - 1,
+            DisplayNoteType::NoteNameMiddleC3 => (qnote / 12) as i8 - 2,
+            _ => unreachable!("unreachable note name type!"),
+        };
+        format!("{}{}", name, number)
+    }
+}
+
 impl MainWindow {
     pub fn new(
         title: String,
@@ -67,33 +97,34 @@ impl MainWindow {
             expression_indicator: [Indicator::new(0.0, 0.0, 127.0, |value| format!("{:<3}", value));
                 8],
             pitch_indicator: [Indicator::new(60.0, 0.0, 127.0, |value| {
-                if value < 0.0 {
-                    format!("")
-                } else {
-                    let note = value.round() as u8;
-                    let name = match note % 12 {
-                        0 => "C",
-                        1 => "C#",
-                        2 => "D",
-                        3 => "D#",
-                        4 => "E",
-                        5 => "F",
-                        6 => "F#",
-                        7 => "G",
-                        8 => "G#",
-                        9 => "A",
-                        10 => "A#",
-                        11 => "B",
-                        _ => unreachable!("unreachable note name!"),
-                    };
-                    let number = (note / 12) as i8 - 1;
-                    format!("{}{}", name, number)
-                }
+                note_to_notename(value, DisplayNoteType::NoteNameMiddleC4)
             }); 8],
             volume_indicator: [[Indicator::new(0.0, -128.0, 127.0, |value| format!("{}", value));
                 2]; 8],
             showing_channel_srn_list: [true; 8],
             display_source_id_type: display_source_id_type,
+        }
+    }
+
+    // ノート番号の表示切り替え
+    pub fn set_noteindicator_formatter(&mut self, note_type: DisplayNoteType) {
+        let formatter = match note_type {
+            DisplayNoteType::NoteNameMiddleC4 => {
+                |value| note_to_notename(value, DisplayNoteType::NoteNameMiddleC4)
+            }
+            DisplayNoteType::NoteNameMiddleC3 => {
+                |value| note_to_notename(value, DisplayNoteType::NoteNameMiddleC3)
+            }
+            DisplayNoteType::NoteNumber => |value| {
+                if value < 0.0 {
+                    format!("")
+                } else {
+                    format!("{:6.2}", value)
+                }
+            },
+        };
+        for ch in 0..8 {
+            self.pitch_indicator[ch].formatter = formatter;
         }
     }
 }
@@ -617,9 +648,23 @@ impl SPC2MIDI2Window for MainWindow {
             text("CH")
                 .width(Length::FillPortion(2))
                 .align_x(alignment::Alignment::Start),
-            text("Pitch")
-                .width(Length::FillPortion(6))
-                .align_x(alignment::Alignment::Start),
+            tooltip(
+                button(text("Note").align_x(alignment::Alignment::Start))
+                    .on_press(Message::DisplayNoteTypeToggled)
+                    .width(Length::FillPortion(6))
+                    .padding(0)
+                    .style(|_, _| {
+                        button::Style {
+                            background: None,
+                            text_color: self.theme.palette().text,
+                            border: iced::Border::default(),
+                            shadow: iced::Shadow::default(),
+                            snap: false,
+                        }
+                    }),
+                "Click to switch note display type",
+                tooltip::Position::Top,
+            ),
             text("Env.")
                 .width(Length::FillPortion(6))
                 .align_x(alignment::Alignment::Start),
