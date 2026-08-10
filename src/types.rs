@@ -59,12 +59,10 @@ pub enum DisplaySourceIDType {
 /// ノート番号の表示タイプ
 #[derive(Debug, Clone)]
 pub enum DisplayNoteType {
-    /// ノート名（中央CがC4）
-    NoteNameMiddleC4,
-    /// ノート名（中央CがC3）
-    NoteNameMiddleC3,
     /// ノート番号
     NoteNumber, 
+    /// ノート名（中央CがC4）
+    NoteNameMiddleC4,
 }
 
 /// 波形リストの表示モード
