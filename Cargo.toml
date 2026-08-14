@@ -1,6 +1,6 @@
 [package]
 name = "spc2midi-tsuu"
-version = "0.2.81"
+version = "0.2.82"
 edition = "2024"
 
 [dependencies]
