@@ -142,9 +142,9 @@ fn menu_button<'a>(
             match status {
                 Status::Active => base.with_background(Color::TRANSPARENT),
                 Status::Hovered => base.with_background(Color::from_rgb(
-                    palette.primary.weak.color.r * 1.2,
-                    palette.primary.weak.color.g * 1.2,
-                    palette.primary.weak.color.b * 1.2,
+                    (palette.primary.weak.color.r * 1.2).min(1.0),
+                    (palette.primary.weak.color.g * 1.2).min(1.0),
+                    (palette.primary.weak.color.b * 1.2).min(1.0),
                 )),
                 Status::Disabled => base.with_background(Color::from_rgb(0.5, 0.5, 0.5)),
                 Status::Pressed => base.with_background(palette.primary.weak.color),
@@ -317,9 +317,9 @@ impl SPC2MIDI2Window for MainWindow {
                 ..Default::default()
             },
             path: Color::from_rgb(
-                theme.extended_palette().primary.weak.color.r * 1.2,
-                theme.extended_palette().primary.weak.color.g * 1.2,
-                theme.extended_palette().primary.weak.color.b * 1.2,
+                (theme.extended_palette().primary.weak.color.r * 1.2).min(1.0),
+                (theme.extended_palette().primary.weak.color.g * 1.2).min(1.0),
+                (theme.extended_palette().primary.weak.color.b * 1.2).min(1.0),
             )
             .into(),
             ..primary(theme, status)
