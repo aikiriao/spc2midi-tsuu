@@ -48,7 +48,7 @@ pub enum MIDISystem {
 }
 
 /// 波形を区別するIDの表示種別
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DisplaySourceIDType {
     /// 波形開始アドレス（デフォルト）
     StartAddress,
@@ -57,7 +57,7 @@ pub enum DisplaySourceIDType {
 }
 
 /// ノート番号の表示タイプ
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DisplayNoteType {
     /// ノート番号
     NoteNumber, 

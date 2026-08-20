@@ -30,6 +30,7 @@ pub struct MainWindow {
     midi_spc_on: Arc<AtomicBool>,
     channel_mute_flags: Arc<AtomicU8>,
     display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
+    display_note_type: Arc<RwLock<DisplayNoteType>>,
     pub row_color_style: SampleListRowColorStyle,
     pub sample_list_order: SampleListOrder,
     pub playback_time_sec: f32,
@@ -88,6 +89,7 @@ impl MainWindow {
         midi_spc_on: Arc<AtomicBool>,
         channel_mute_flags: Arc<AtomicU8>,
         display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
+        display_note_type: Arc<RwLock<DisplayNoteType>>,
     ) -> Self {
         Self {
             title: title.clone(),
@@ -115,6 +117,7 @@ impl MainWindow {
                 2]; 8],
             showing_channel_srn_list: [true; 8],
             display_source_id_type: display_source_id_type,
+            display_note_type: display_note_type,
         }
     }
 
@@ -320,6 +323,86 @@ impl SPC2MIDI2Window for MainWindow {
                                                 SampleListRowColorStyle::Solid,
                                             )
                                         }),
+                                        Message::MenuSelected
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                ))
+                                .width(140.0)
+                            }
+                        ),
+                        (
+                            menu_button(
+                                text("Sample ID")
+                                    .height(Length::Shrink)
+                                    .align_y(alignment::Vertical::Center),
+                                Message::MenuSelected,
+                            )
+                            .width(Length::Fill)
+                            .height(Length::Shrink),
+                            {
+                                let id_type = self.display_source_id_type.read().unwrap().clone();
+                                menu_tuple(menu_items!(
+                                    (menu_button(
+                                        checkbox(id_type == DisplaySourceIDType::StartAddress)
+                                            .label("StartAddress")
+                                            .on_toggle(|_| {
+                                                Message::DisplaySourceIDTypeChanged(
+                                                    DisplaySourceIDType::StartAddress,
+                                                )
+                                            }),
+                                        Message::MenuSelected
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                    (menu_button(
+                                        checkbox(id_type == DisplaySourceIDType::SRCN)
+                                            .label("SRCN")
+                                            .on_toggle(|_| {
+                                                Message::DisplaySourceIDTypeChanged(
+                                                    DisplaySourceIDType::SRCN,
+                                                )
+                                            }),
+                                        Message::MenuSelected
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                ))
+                                .width(140.0)
+                            }
+                        ),
+                        (
+                            menu_button(
+                                text("Note")
+                                    .height(Length::Shrink)
+                                    .align_y(alignment::Vertical::Center),
+                                Message::MenuSelected,
+                            )
+                            .width(Length::Fill)
+                            .height(Length::Shrink),
+                            {
+                                let note_type = self.display_note_type.read().unwrap().clone();
+                                menu_tuple(menu_items!(
+                                    (menu_button(
+                                        checkbox(note_type == DisplayNoteType::NoteNumber)
+                                            .label("Number")
+                                            .on_toggle(|_| {
+                                                Message::DisplayNoteTypeChanged(
+                                                    DisplayNoteType::NoteNumber,
+                                                )
+                                            }),
+                                        Message::MenuSelected
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                    (menu_button(
+                                        checkbox(note_type == DisplayNoteType::NoteNameMiddleC4)
+                                            .label("Name Center C4")
+                                            .on_toggle(|_| {
+                                                Message::DisplayNoteTypeChanged(
+                                                    DisplayNoteType::NoteNameMiddleC4,
+                                                )
+                                            }),
                                         Message::MenuSelected
                                     )
                                     .width(Length::Fill)
@@ -559,29 +642,12 @@ impl SPC2MIDI2Window for MainWindow {
 
         // 表インデックス
         let srn_index = row![
-            tooltip(
-                button(
-                    text(match *self.display_source_id_type.read().unwrap() {
-                        DisplaySourceIDType::StartAddress => "Addr",
-                        DisplaySourceIDType::SRCN => "SRCN",
-                    })
-                    .align_x(alignment::Alignment::Start)
-                )
-                .on_press(Message::DisplaySourceIDTypeToggled)
-                .width(40)
-                .padding(0)
-                .style(|_, _| {
-                    button::Style {
-                        background: None,
-                        text_color: self.theme.palette().text,
-                        border: iced::Border::default(),
-                        shadow: iced::Shadow::default(),
-                        snap: false,
-                    }
-                }),
-                "Click to switch between sample Address and SRCN",
-                tooltip::Position::Bottom,
-            ),
+            text(match *self.display_source_id_type.read().unwrap() {
+                DisplaySourceIDType::StartAddress => "Addr",
+                DisplaySourceIDType::SRCN => "SRCN",
+            })
+            .align_x(alignment::Alignment::Start)
+            .width(40),
             text("Program")
                 .width(Length::FillPortion(17))
                 .align_x(alignment::Alignment::Start),
@@ -729,52 +795,21 @@ impl SPC2MIDI2Window for MainWindow {
         let status_index = row![
             text("Mute").width(35).align_x(alignment::Alignment::Start),
             text("Solo").width(50).align_x(alignment::Alignment::Start),
-            tooltip(
-                button(
-                    text(match *self.display_source_id_type.read().unwrap() {
-                        DisplaySourceIDType::StartAddress => "Addr",
-                        DisplaySourceIDType::SRCN => "SRCN",
-                    })
-                    .align_x(alignment::Alignment::Start)
-                )
-                .on_press(Message::DisplaySourceIDTypeToggled)
-                .width(30)
-                .padding(0)
-                .style(|_, _| {
-                    button::Style {
-                        background: None,
-                        text_color: self.theme.palette().text,
-                        border: iced::Border::default(),
-                        shadow: iced::Shadow::default(),
-                        snap: false,
-                    }
-                }),
-                "Click to switch between sample Address and SRCN",
-                tooltip::Position::Top,
-            ),
+            text(match *self.display_source_id_type.read().unwrap() {
+                DisplaySourceIDType::StartAddress => "Addr",
+                DisplaySourceIDType::SRCN => "SRCN",
+            })
+            .align_x(alignment::Alignment::Start)
+            .width(30),
             text("Program")
                 .width(Length::FillPortion(14))
                 .align_x(alignment::Alignment::Start),
             text("CH")
                 .width(Length::FillPortion(2))
                 .align_x(alignment::Alignment::Start),
-            tooltip(
-                button(text("Note").align_x(alignment::Alignment::Start))
-                    .on_press(Message::DisplayNoteTypeToggled)
-                    .width(Length::FillPortion(6))
-                    .padding(0)
-                    .style(|_, _| {
-                        button::Style {
-                            background: None,
-                            text_color: self.theme.palette().text,
-                            border: iced::Border::default(),
-                            shadow: iced::Shadow::default(),
-                            snap: false,
-                        }
-                    }),
-                "Click to change note display type",
-                tooltip::Position::Top,
-            ),
+            text("Note")
+                .width(Length::FillPortion(6))
+                .align_x(alignment::Alignment::Start),
             text("Env.")
                 .width(Length::FillPortion(6))
                 .align_x(alignment::Alignment::Start),

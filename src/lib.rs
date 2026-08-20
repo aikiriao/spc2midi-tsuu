@@ -178,8 +178,8 @@ pub enum Message {
     ReceivedBpmDoubleButtonClicked,
     ReceivedBpmHalfButtonClicked,
     ReceivedSRCNReanalyzeRequest,
-    DisplaySourceIDTypeToggled,
-    DisplayNoteTypeToggled,
+    DisplaySourceIDTypeChanged(DisplaySourceIDType),
+    DisplayNoteTypeChanged(DisplayNoteType),
     AudioLatencyMsecChanged(usize),
     Tick,
 }
@@ -352,6 +352,7 @@ impl App {
                     self.midi_spc_on.clone(),
                     self.channel_mute_flags.clone(),
                     self.display_source_id_type.clone(),
+                    self.display_note_type.clone()
                 );
                 self.main_window_id = id;
                 self.windows.insert(id, Box::new(window));
@@ -1219,20 +1220,14 @@ impl App {
                     );
                 }
             }
-            Message::DisplaySourceIDTypeToggled => {
+            Message::DisplaySourceIDTypeChanged(new_id_type) => {
                 if let Ok(mut id_type) = self.display_source_id_type.write() {
-                    *id_type = match *id_type {
-                        DisplaySourceIDType::StartAddress => DisplaySourceIDType::SRCN,
-                        DisplaySourceIDType::SRCN => DisplaySourceIDType::StartAddress,
-                    };
+                    *id_type = new_id_type;
                 }
             }
-            Message::DisplayNoteTypeToggled => {
+            Message::DisplayNoteTypeChanged(new_note_type) => {
                 if let Ok(mut note_type) = self.display_note_type.write() {
-                    *note_type = match *note_type {
-                        DisplayNoteType::NoteNameMiddleC4 => DisplayNoteType::NoteNumber,
-                        DisplayNoteType::NoteNumber => DisplayNoteType::NoteNameMiddleC4,
-                    };
+                    *note_type = new_note_type;
                     if let Some(window) = self.windows.get_mut(&self.main_window_id) {
                         let main_win: &mut MainWindow =
                             window.as_mut().as_any_mut().downcast_mut().unwrap();
