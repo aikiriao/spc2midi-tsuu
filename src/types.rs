@@ -67,7 +67,7 @@ pub enum DisplayNoteType {
 
 /// 波形リストの表示モード
 #[derive(Debug, Clone, PartialEq)]
-pub enum DisplaySourceOrder {
+pub enum SampleListOrder {
     /// SPCチャンネル
     SPCChannel,
     /// アドレス降順（spc2midi準拠）
@@ -76,6 +76,15 @@ pub enum DisplaySourceOrder {
     AddressAscending, 
     /// SRCN
     SRCN, 
+}
+
+/// メインウィンドウの行の色の使い分け
+#[derive(Debug, Clone, PartialEq)]
+pub enum SampleListRowColorStyle {
+    /// ストライプ
+    Stripe, 
+    /// 単色
+    Solid,
 }
 
 /// 音源情報

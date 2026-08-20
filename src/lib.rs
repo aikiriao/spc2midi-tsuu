@@ -109,7 +109,8 @@ pub enum Message {
     OpenMIDIOutpoutConfigurationWindow,
     MIDIOutpoutConfigurationWindowOpened(window::Id),
     OpenDeviceSettingWindow,
-    SampleListOrderChanged(DisplaySourceOrder),
+    SampleListOrderChanged(SampleListOrder),
+    SampleListRowColorStyleChanged(SampleListRowColorStyle),
     DeviceWindowOpened(window::Id),
     OpenSRCNWindow(u8),
     SRCNWindowOpened(window::Id),
@@ -391,6 +392,13 @@ impl App {
                     let main_window: &mut MainWindow =
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     main_window.sample_list_order = order;
+                }
+            }
+            Message::SampleListRowColorStyleChanged(style) => {
+                if let Some(window) = self.windows.get_mut(&self.main_window_id) {
+                    let main_window: &mut MainWindow =
+                        window.as_mut().as_any_mut().downcast_mut().unwrap();
+                    main_window.row_color_style = style;
                 }
             }
             Message::DeviceWindowOpened(_id) => {}

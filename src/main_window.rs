@@ -4,8 +4,8 @@ use crate::Program;
 use iced::border::Radius;
 use iced::widget::canvas::{self, Canvas, Event, Frame, Geometry};
 use iced::widget::{
-    button, checkbox, column, pick_list, progress_bar, row, scrollable, space, stack, text,
-    tooltip, Column, Text,
+    button, checkbox, column, container, pick_list, progress_bar, row, scrollable, space, stack,
+    text, tooltip, Column, Container, Text,
 };
 use iced::{
     alignment, mouse, Border, Color, Element, Font, Length, Padding, Point, Rectangle, Renderer,
@@ -30,7 +30,8 @@ pub struct MainWindow {
     midi_spc_on: Arc<AtomicBool>,
     channel_mute_flags: Arc<AtomicU8>,
     display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
-    pub sample_list_order: DisplaySourceOrder,
+    pub row_color_style: SampleListRowColorStyle,
+    pub sample_list_order: SampleListOrder,
     pub playback_time_sec: f32,
     pub midi_bit_rate: f32,
     pub pitch_indicator: [Indicator; 8],
@@ -100,7 +101,8 @@ impl MainWindow {
             channel_mute_flags: channel_mute_flags,
             playback_time_sec: 0.0f32,
             midi_bit_rate: 0.0f32,
-            sample_list_order: DisplaySourceOrder::SPCChannel,
+            sample_list_order: SampleListOrder::AddressDescending,
+            row_color_style: SampleListRowColorStyle::Stripe,
             expression_indicator: [Indicator::new(0.0, 0.0, 127.0, |value| format!("{:<3}", value));
                 8],
             pitch_indicator: [Indicator::new(
@@ -203,6 +205,135 @@ impl SPC2MIDI2Window for MainWindow {
             ),
             (
                 menu_button(
+                    text("View")
+                        .height(Length::Shrink)
+                        .align_y(alignment::Vertical::Center),
+                    Message::MenuSelected,
+                )
+                .width(Length::Shrink)
+                .height(Length::Shrink),
+                {
+                    menu_tuple(menu_items!(
+                        (
+                            menu_button(
+                                text("Sample List Order")
+                                    .height(Length::Shrink)
+                                    .align_y(alignment::Vertical::Center),
+                                Message::MenuSelected,
+                            )
+                            .width(Length::Fill)
+                            .height(Length::Shrink),
+                            {
+                                menu_tuple(menu_items!(
+                                    (menu_button(
+                                        checkbox(
+                                            self.sample_list_order == SampleListOrder::SPCChannel
+                                        )
+                                        .label("SPC Channel")
+                                        .on_toggle(|_| {
+                                            Message::SampleListOrderChanged(
+                                                SampleListOrder::SPCChannel,
+                                            )
+                                        }),
+                                        Message::MenuSelected
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                    (menu_button(
+                                        checkbox(
+                                            self.sample_list_order
+                                                == SampleListOrder::AddressDescending
+                                        )
+                                        .label("Address desc")
+                                        .on_toggle(|_| {
+                                            Message::SampleListOrderChanged(
+                                                SampleListOrder::AddressDescending,
+                                            )
+                                        }),
+                                        Message::MenuSelected
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                    (menu_button(
+                                        checkbox(
+                                            self.sample_list_order
+                                                == SampleListOrder::AddressAscending
+                                        )
+                                        .label("Address asc")
+                                        .on_toggle(|_| {
+                                            Message::SampleListOrderChanged(
+                                                SampleListOrder::AddressAscending,
+                                            )
+                                        }),
+                                        Message::MenuSelected
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                    (menu_button(
+                                        checkbox(self.sample_list_order == SampleListOrder::SRCN)
+                                            .label("SRCN")
+                                            .on_toggle(|_| {
+                                                Message::SampleListOrderChanged(
+                                                    SampleListOrder::SRCN,
+                                                )
+                                            }),
+                                        Message::MenuSelected
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                ))
+                                .width(140.0)
+                            }
+                        ),
+                        (
+                            menu_button(
+                                text("Sample List Row Color Style")
+                                    .height(Length::Shrink)
+                                    .align_y(alignment::Vertical::Center),
+                                Message::MenuSelected,
+                            )
+                            .width(Length::Fill)
+                            .height(Length::Shrink),
+                            {
+                                menu_tuple(menu_items!(
+                                    (menu_button(
+                                        checkbox(
+                                            self.row_color_style == SampleListRowColorStyle::Stripe
+                                        )
+                                        .label("Stripe")
+                                        .on_toggle(|_| {
+                                            Message::SampleListRowColorStyleChanged(
+                                                SampleListRowColorStyle::Stripe,
+                                            )
+                                        }),
+                                        Message::MenuSelected
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                    (menu_button(
+                                        checkbox(
+                                            self.row_color_style == SampleListRowColorStyle::Solid
+                                        )
+                                        .label("Solid")
+                                        .on_toggle(|_| {
+                                            Message::SampleListRowColorStyleChanged(
+                                                SampleListRowColorStyle::Solid,
+                                            )
+                                        }),
+                                        Message::MenuSelected
+                                    )
+                                    .width(Length::Fill)
+                                    .height(Length::Shrink)),
+                                ))
+                                .width(140.0)
+                            }
+                        )
+                    ))
+                    .width(240.0)
+                }
+            ),
+            (
+                menu_button(
                     text("Option")
                         .height(Length::Shrink)
                         .align_y(alignment::Vertical::Center),
@@ -228,80 +359,6 @@ impl SPC2MIDI2Window for MainWindow {
                         )
                         .width(Length::Fill)
                         .height(Length::Shrink)),
-                        (
-                            menu_button(
-                                text("Sample List Order")
-                                    .height(Length::Shrink)
-                                    .align_y(alignment::Vertical::Center),
-                                Message::MenuSelected,
-                            )
-                            .width(Length::Fill)
-                            .height(Length::Shrink),
-                            {
-                                menu_tuple(menu_items!(
-                                    (menu_button(
-                                        checkbox(
-                                            self.sample_list_order
-                                                == DisplaySourceOrder::SPCChannel
-                                        )
-                                        .label("SPC Channel")
-                                        .on_toggle(|_| {
-                                            Message::SampleListOrderChanged(
-                                                DisplaySourceOrder::SPCChannel,
-                                            )
-                                        }),
-                                        Message::MenuSelected
-                                    )
-                                    .width(Length::Fill)
-                                    .height(Length::Shrink)),
-                                    (menu_button(
-                                        checkbox(
-                                            self.sample_list_order
-                                                == DisplaySourceOrder::AddressDescending
-                                        )
-                                        .label("Address desc")
-                                        .on_toggle(|_| {
-                                            Message::SampleListOrderChanged(
-                                                DisplaySourceOrder::AddressDescending,
-                                            )
-                                        }),
-                                        Message::MenuSelected
-                                    )
-                                    .width(Length::Fill)
-                                    .height(Length::Shrink)),
-                                    (menu_button(
-                                        checkbox(
-                                            self.sample_list_order
-                                                == DisplaySourceOrder::AddressAscending
-                                        )
-                                        .label("Address asc")
-                                        .on_toggle(|_| {
-                                            Message::SampleListOrderChanged(
-                                                DisplaySourceOrder::AddressAscending,
-                                            )
-                                        }),
-                                        Message::MenuSelected
-                                    )
-                                    .width(Length::Fill)
-                                    .height(Length::Shrink)),
-                                    (menu_button(
-                                        checkbox(
-                                            self.sample_list_order == DisplaySourceOrder::SRCN
-                                        )
-                                        .label("SRCN")
-                                        .on_toggle(|_| {
-                                            Message::SampleListOrderChanged(
-                                                DisplaySourceOrder::SRCN,
-                                            )
-                                        }),
-                                        Message::MenuSelected
-                                    )
-                                    .width(Length::Fill)
-                                    .height(Length::Shrink)),
-                                ))
-                                .width(140.0)
-                            }
-                        ),
                     ))
                     .width(240.0)
                 }
@@ -329,81 +386,114 @@ impl SPC2MIDI2Window for MainWindow {
         let infos = self.source_infos.read().unwrap();
 
         // SRCNの一行分の要素を生成
-        let create_srn_row = |srn: u8| -> Element<'_, Message> {
-            let param = params.get(&srn).unwrap();
-            row![
-                if let Some(info) = infos.get(&srn) {
-                    match *self.display_source_id_type.read().unwrap() {
-                        DisplaySourceIDType::StartAddress => {
-                            text(format!("{:04X}", info.start_address))
+        let create_srn_row =
+            |style: &SampleListRowColorStyle, index: usize, srn: u8| -> Element<'_, Message> {
+                let param = params.get(&srn).unwrap();
+                let bg_color_factor = match style {
+                    SampleListRowColorStyle::Stripe => {
+                        if index % 2 == 0 {
+                            1.0
+                        } else {
+                            0.5
                         }
-                        DisplaySourceIDType::SRCN => text(format!("{}", srn)),
                     }
-                } else {
-                    text(format!(""))
-                }
-                .width(40)
-                .align_x(alignment::Alignment::Start),
-                pick_list(
-                    Program::ALL.to_vec(),
-                    Some(param.program.clone()),
-                    move |prog| Message::ProgramSelected(srn, prog, None),
-                )
-                .style(|theme: &Theme, _| pick_list::Style {
-                    text_color: theme.palette().text,
-                    placeholder_color: theme.palette().text,
-                    handle_color: theme.palette().text,
-                    background: iced::Background::Color(theme.palette().background),
-                    border: Border::default().rounded(0.0)
-                })
-                .padding(0)
-                .width(Length::FillPortion(17)),
-                stack![
-                    progress_bar(0.0..=127.0, param.center_note as f32 / 512.0).style(
-                        |theme: &Theme| progress_bar::Style {
-                            background: iced::Background::Color(theme.palette().background),
-                            bar: iced::Background::Color(theme.palette().success),
-                            border: Border::default().rounded(0.0)
+                    SampleListRowColorStyle::Solid => 1.0,
+                };
+                let row = row![
+                    if let Some(info) = infos.get(&srn) {
+                        match *self.display_source_id_type.read().unwrap() {
+                            DisplaySourceIDType::StartAddress => {
+                                text(format!("{:04X}", info.start_address))
+                            }
+                            DisplaySourceIDType::SRCN => text(format!("{}", srn)),
                         }
-                    ),
-                    text(format!("{:6.2}", param.center_note as f32 / 512.0))
-                        .size(17.0)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .align_x(alignment::Alignment::End)
-                        .align_y(alignment::Alignment::Center),
+                    } else {
+                        text(format!(""))
+                    }
+                    .width(40)
+                    .align_x(alignment::Alignment::Start),
+                    pick_list(
+                        Program::ALL.to_vec(),
+                        Some(param.program.clone()),
+                        move |prog| Message::ProgramSelected(srn, prog, None),
+                    )
+                    .style(move |theme: &Theme, _| pick_list::Style {
+                        text_color: theme.palette().text,
+                        placeholder_color: theme.palette().text,
+                        handle_color: theme.palette().text,
+                        background: iced::Background::Color(Color::from_rgb(
+                            theme.palette().background.r * bg_color_factor,
+                            theme.palette().background.g * bg_color_factor,
+                            theme.palette().background.b * bg_color_factor,
+                        )),
+                        border: Border::default().rounded(0.0)
+                    })
+                    .padding(0)
+                    .width(Length::FillPortion(17)),
+                    stack![
+                        progress_bar(0.0..=127.0, param.center_note as f32 / 512.0).style(
+                            move |theme: &Theme| progress_bar::Style {
+                                background: iced::Background::Color(Color::from_rgb(
+                                    theme.palette().background.r * bg_color_factor,
+                                    theme.palette().background.g * bg_color_factor,
+                                    theme.palette().background.b * bg_color_factor,
+                                )),
+                                bar: iced::Background::Color(theme.palette().success),
+                                border: Border::default().rounded(0.0)
+                            }
+                        ),
+                        text(format!("{:6.2}", param.center_note as f32 / 512.0))
+                            .size(17.0)
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .align_x(alignment::Alignment::End)
+                            .align_y(alignment::Alignment::Center),
+                    ]
+                    .width(Length::FillPortion(6)),
+                    stack![
+                        progress_bar(0.0..=127.0, param.noteon_velocity as f32).style(
+                            move |theme: &Theme| progress_bar::Style {
+                                background: iced::Background::Color(Color::from_rgb(
+                                    theme.palette().background.r * bg_color_factor,
+                                    theme.palette().background.g * bg_color_factor,
+                                    theme.palette().background.b * bg_color_factor,
+                                )),
+                                bar: iced::Background::Color(theme.palette().success),
+                                border: Border::default().rounded(0.0)
+                            }
+                        ),
+                        text(format!("{}", param.noteon_velocity))
+                            .size(17.0)
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .align_x(alignment::Alignment::End)
+                            .align_y(alignment::Alignment::Center),
+                    ]
+                    .width(Length::FillPortion(6)),
+                    button("Open")
+                        .on_press(Message::OpenSRCNWindow(srn))
+                        .width(60),
                 ]
-                .width(Length::FillPortion(6)),
-                stack![
-                    progress_bar(0.0..=127.0, param.noteon_velocity as f32).style(
-                        |theme: &Theme| progress_bar::Style {
-                            background: iced::Background::Color(theme.palette().background),
-                            bar: iced::Background::Color(theme.palette().success),
-                            border: Border::default().rounded(0.0)
-                        }
-                    ),
-                    text(format!("{}", param.noteon_velocity))
-                        .size(17.0)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .align_x(alignment::Alignment::End)
-                        .align_y(alignment::Alignment::Center),
-                ]
-                .width(Length::FillPortion(6)),
-                button("Open")
-                    .on_press(Message::OpenSRCNWindow(srn))
-                    .width(60),
-            ]
-            .spacing(10)
-            .width(Length::Fill)
-            .align_y(alignment::Alignment::Center)
-            .into()
-        };
+                .spacing(10);
+
+                Container::new(row)
+                    .width(Length::Fill)
+                    .align_y(alignment::Alignment::Center)
+                    .style(move |theme: &Theme| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb(
+                            theme.palette().background.r * bg_color_factor,
+                            theme.palette().background.g * bg_color_factor,
+                            theme.palette().background.b * bg_color_factor,
+                        ))),
+                        ..Default::default()
+                    })
+                    .into()
+            };
 
         // 音源リスト
         let mut srn_list = vec![];
         match self.sample_list_order {
-            DisplaySourceOrder::SPCChannel => {
+            SampleListOrder::SPCChannel => {
                 for spc_ch in 0..8 {
                     // spc_chで発音されているSRCNを集める
                     let mut srns = vec![];
@@ -433,39 +523,40 @@ impl SPC2MIDI2Window for MainWindow {
                     }
                     // spc_chで発音されているSRCNの情報表示
                     if self.showing_channel_srn_list[spc_ch] {
-                        for srn in srns {
-                            srn_list.push(create_srn_row(srn));
+                        for (idx, srn) in srns.iter().enumerate() {
+                            srn_list.push(create_srn_row(&self.row_color_style, idx, *srn));
                         }
                     }
                 }
             }
-            DisplaySourceOrder::AddressDescending | DisplaySourceOrder::AddressAscending => {
+            SampleListOrder::AddressDescending | SampleListOrder::AddressAscending => {
                 // アドレス順にソート
                 let mut srn_addrs = vec![];
                 for (srn, info) in infos.iter() {
                     srn_addrs.push((srn, info.start_address));
                 }
-                if self.sample_list_order == DisplaySourceOrder::AddressDescending {
+                if self.sample_list_order == SampleListOrder::AddressDescending {
                     srn_addrs.sort_by(|a, b| b.1.cmp(&a.1));
                 } else {
                     srn_addrs.sort_by(|a, b| a.1.cmp(&b.1));
                 }
-                for srn_addr in srn_addrs {
-                    srn_list.push(create_srn_row(*srn_addr.0));
+                for (idx, srn_addr) in srn_addrs.iter().enumerate() {
+                    srn_list.push(create_srn_row(&self.row_color_style, idx, *srn_addr.0));
                 }
             }
-            DisplaySourceOrder::SRCN => {
+            SampleListOrder::SRCN => {
                 // SRCN順にソート
                 let mut srns = vec![];
                 for (srn, _) in infos.iter() {
                     srns.push(srn);
                 }
                 srns.sort();
-                for srn in srns {
-                    srn_list.push(create_srn_row(*srn));
+                for (idx, srn) in srns.iter().enumerate() {
+                    srn_list.push(create_srn_row(&self.row_color_style, idx, **srn));
                 }
             }
         }
+
         // 表インデックス
         let srn_index = row![
             tooltip(
@@ -515,99 +606,123 @@ impl SPC2MIDI2Window for MainWindow {
         let volume_indicator = self.volume_indicator;
         let mut status_list: Vec<_> = (0..8)
             .map(|ch| {
-                row![
-                    text(format!("{}", ch)).width(10),
-                    checkbox((channel_mute_flags >> ch) & 1 != 0)
-                        .on_toggle(move |flag| Message::MuteChannel(ch as u8, flag))
-                        .width(10),
-                    button("S")
-                        .style(iced::widget::button::success)
-                        .on_press(Message::SoloChannel(ch as u8))
-                        .width(30),
-                    text(format!("{}", if status.noteon[ch] { "♪" } else { "" }))
-                        .align_y(alignment::Alignment::Center)
-                        .height(Length::Fill)
-                        .width(10),
-                    if let Some(info) = infos.get(&status.srn_no[ch]) {
-                        match *self.display_source_id_type.read().unwrap() {
-                            DisplaySourceIDType::StartAddress => {
-                                text(format!("{:04X}", info.start_address))
-                            }
-                            DisplaySourceIDType::SRCN => text(format!("{}", status.srn_no[ch])),
+                let bg_color_factor = match self.row_color_style {
+                    SampleListRowColorStyle::Stripe => {
+                        if ch % 2 == 0 {
+                            1.0
+                        } else {
+                            0.5
                         }
-                    } else {
-                        text(format!(""))
                     }
-                    .align_y(alignment::Alignment::Center)
-                    .height(Length::Fill)
-                    .size(14.0)
-                    .width(30),
-                    if let Some(param) = params.get(&status.srn_no[ch]) {
-                        button(
-                            Text::new(format!(
-                                "{}",
-                                if param.instrument_name != "" {
-                                    param.instrument_name.clone()
-                                } else {
-                                    param.program.to_string()
+                    SampleListRowColorStyle::Solid => 1.0,
+                };
+                Container::new(
+                    row![
+                        text(format!("{}", ch)).width(10),
+                        checkbox((channel_mute_flags >> ch) & 1 != 0)
+                            .on_toggle(move |flag| Message::MuteChannel(ch as u8, flag))
+                            .width(10),
+                        button("S")
+                            .style(iced::widget::button::success)
+                            .on_press(Message::SoloChannel(ch as u8))
+                            .width(30),
+                        text(format!("{}", if status.noteon[ch] { "♪" } else { "" }))
+                            .align_y(alignment::Alignment::Center)
+                            .height(Length::Fill)
+                            .width(10),
+                        if let Some(info) = infos.get(&status.srn_no[ch]) {
+                            match *self.display_source_id_type.read().unwrap() {
+                                DisplaySourceIDType::StartAddress => {
+                                    text(format!("{:04X}", info.start_address))
                                 }
-                            ))
-                            .color(if param.mute {
-                                self.theme.palette().warning
-                            } else {
-                                self.theme.palette().text
-                            })
-                            .size(14.0)
-                            .align_x(alignment::Alignment::Start)
-                            .align_y(alignment::Alignment::Center),
-                        )
-                        .on_press(Message::OpenSRCNWindow(status.srn_no[ch]))
-                    } else {
-                        button(Text::new(format!("")))
-                    }
-                    .style(|_, _| button::Style {
-                        background: Some(iced::Background::Color(self.theme.palette().background)),
-                        ..Default::default()
-                    })
-                    .padding(Padding::new(5.0).left(0.0))
-                    .height(Length::Fill)
-                    .width(Length::FillPortion(14)),
-                    {
-                        if let Some(param) = params.get(&status.srn_no[ch]) {
-                            text(format!("{}", param.channel_routing[ch])).color(
-                                if param.channel_mute[ch] {
-                                    self.theme.palette().warning
-                                } else {
-                                    self.theme.palette().text
-                                },
-                            )
+                                DisplaySourceIDType::SRCN => text(format!("{}", status.srn_no[ch])),
+                            }
                         } else {
                             text(format!(""))
                         }
-                    }
-                    .align_x(alignment::Alignment::Center)
-                    .align_y(alignment::Alignment::Center)
-                    .height(Length::Fill)
-                    .width(Length::FillPortion(2)),
-                    Canvas::new(pitch_indicator[ch])
+                        .align_y(alignment::Alignment::Center)
                         .height(Length::Fill)
-                        .width(Length::FillPortion(6)),
-                    Canvas::new(expression_indicator[ch])
+                        .size(14.0)
+                        .width(30),
+                        if let Some(param) = params.get(&status.srn_no[ch]) {
+                            button(
+                                Text::new(format!(
+                                    "{}",
+                                    if param.instrument_name != "" {
+                                        param.instrument_name.clone()
+                                    } else {
+                                        param.program.to_string()
+                                    }
+                                ))
+                                .color(if param.mute {
+                                    self.theme.palette().warning
+                                } else {
+                                    self.theme.palette().text
+                                })
+                                .size(14.0)
+                                .align_x(alignment::Alignment::Start)
+                                .align_y(alignment::Alignment::Center),
+                            )
+                            .on_press(Message::OpenSRCNWindow(status.srn_no[ch]))
+                        } else {
+                            button(Text::new(format!("")))
+                        }
+                        .style(move |theme: &Theme, _| button::Style {
+                            background: Some(iced::Background::Color(Color::from_rgb(
+                                theme.palette().background.r * bg_color_factor,
+                                theme.palette().background.g * bg_color_factor,
+                                theme.palette().background.b * bg_color_factor,
+                            ))),
+                            ..Default::default()
+                        })
+                        .padding(Padding::new(5.0).left(0.0))
                         .height(Length::Fill)
-                        .width(Length::FillPortion(6)),
-                    column![
-                        Canvas::new(volume_indicator[ch][0])
+                        .width(Length::FillPortion(14)),
+                        {
+                            if let Some(param) = params.get(&status.srn_no[ch]) {
+                                text(format!("{}", param.channel_routing[ch])).color(
+                                    if param.channel_mute[ch] {
+                                        self.theme.palette().warning
+                                    } else {
+                                        self.theme.palette().text
+                                    },
+                                )
+                            } else {
+                                text(format!(""))
+                            }
+                        }
+                        .align_x(alignment::Alignment::Center)
+                        .align_y(alignment::Alignment::Center)
+                        .height(Length::Fill)
+                        .width(Length::FillPortion(2)),
+                        Canvas::new(pitch_indicator[ch])
                             .height(Length::Fill)
-                            .width(Length::Fill),
-                        Canvas::new(volume_indicator[ch][1])
+                            .width(Length::FillPortion(6)),
+                        Canvas::new(expression_indicator[ch])
                             .height(Length::Fill)
-                            .width(Length::Fill),
+                            .width(Length::FillPortion(6)),
+                        column![
+                            Canvas::new(volume_indicator[ch][0])
+                                .height(Length::Fill)
+                                .width(Length::Fill),
+                            Canvas::new(volume_indicator[ch][1])
+                                .height(Length::Fill)
+                                .width(Length::Fill),
+                        ]
+                        .width(Length::FillPortion(7)),
                     ]
-                    .width(Length::FillPortion(7)),
-                ]
-                .spacing(10)
-                .width(Length::Fill)
-                .align_y(alignment::Alignment::Center)
+                    .spacing(10)
+                    .width(Length::Fill)
+                    .align_y(alignment::Alignment::Center),
+                )
+                .style(move |theme: &Theme| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgb(
+                        theme.palette().background.r * bg_color_factor,
+                        theme.palette().background.g * bg_color_factor,
+                        theme.palette().background.b * bg_color_factor,
+                    ))),
+                    ..Default::default()
+                })
                 .into()
             })
             .collect();
@@ -784,13 +899,6 @@ fn draw_indicator(
     formatter: fn(f32) -> String,
 ) {
     let center = bounds.center();
-
-    // 背景を塗りつぶす
-    frame.fill_rectangle(
-        Point::new(bounds.x, bounds.y),
-        Size::new(bounds.width, bounds.height),
-        theme.palette().background,
-    );
 
     assert!(min < max);
     let ratio = ((value - min) / (max - min)).clamp(0.0, 1.0);
