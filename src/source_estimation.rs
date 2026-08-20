@@ -269,6 +269,12 @@ pub fn estimate_bpm(onset_signal: &[f32], sampling_rate: f32) -> f32 {
     // 候補ラグ内でのピーク
     let min_lag = ((60.0 * sampling_rate) / (MAX_ESTIMATED_BPM * frame_size as f32)) as usize;
     let max_lag = ((60.0 * sampling_rate) / (MIN_ESTIMATED_BPM * frame_size as f32)) as usize;
+
+    // 信号が短すぎるなどしたときは最小値を推定
+    if auto_corr.len() <= min_lag {
+        return MIN_ESTIMATED_BPM;
+    }
+
     let max_lag = max_lag.min(auto_corr.len() - 1);
     let max = auto_corr[min_lag..=max_lag]
         .iter()

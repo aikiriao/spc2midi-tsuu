@@ -122,7 +122,7 @@ impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
                 text("Song Duration (msec)"),
                 number_input(
                     &midi_output_configure.output_duration_msec,
-                    1000..=(3600 * 1000),
+                    0..=(3600 * 1000),
                     move |duration| { Message::MIDIOutputDurationChanged(duration) },
                 )
                 .step(100),
