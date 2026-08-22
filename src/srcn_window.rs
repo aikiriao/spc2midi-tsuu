@@ -222,6 +222,15 @@ impl SPC2MIDI2Window for SRCNWindow {
                     Message::PitchBendWidthChanged(srn_no, width)
                 },)
                 .step(1),
+                checkbox(param.retrigger_noteon_on_exceed_pitch_bend_width)
+                    .label("Re-trigger NoteOn when exceed width")
+                    .on_toggle_maybe(if param.enable_pitch_bend {
+                        Some(move |flag| {
+                            Message::RetriggerNoteOnExceedPitchBendWidthFlagToggled(srn_no, flag)
+                        })
+                    } else {
+                        None
+                    }),
             ]
             .spacing(10)
             .width(Length::Fill)

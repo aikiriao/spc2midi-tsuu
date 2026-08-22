@@ -153,6 +153,7 @@ pub enum Message {
     FixedReverbSendChanged(u8, u8),
     ChorusSendChanged(u8, u8),
     UpdateParameterAfterNoteOnFlagToggled(u8, bool),
+    RetriggerNoteOnExceedPitchBendWidthFlagToggled(u8, bool),
     ChannelRoutingMuteChanged(u8, u8, bool),
     ChannelRoutingChanged(u8, u8, u8),
     ChannelRoutingReseted(u8),
@@ -943,6 +944,15 @@ impl App {
                     });
                 }
             }
+            Message::RetriggerNoteOnExceedPitchBendWidthFlagToggled(srn_no, flag) => {
+                let mut params = self.source_parameter.write().unwrap();
+                if let Some(param) = params.get_mut(&srn_no) {
+                    param.retrigger_noteon_on_exceed_pitch_bend_width = flag;
+                    return Task::perform(async {}, move |_| {
+                        Message::ReceivedSourceParameterUpdate
+                    });
+                }
+            }
             Message::SRCNCenterNoteOctaveUpClicked(srn_no) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
@@ -1512,6 +1522,7 @@ impl App {
                     enable_pitch_bend: !is_drum,
                     echo_as_reverb_send: false,
                     update_parameter_after_noteon: true,
+                    retrigger_noteon_on_exceed_pitch_bend_width: true,
                     channel_routing: if is_drum {
                         [9; 8]
                     } else {
@@ -2286,6 +2297,9 @@ fn apply_source_parameter(
         }
         if param.update_parameter_after_noteon {
             flag |= 0x20;
+        }
+        if param.retrigger_noteon_on_exceed_pitch_bend_width {
+            flag |= 0x10;
         }
         spc.dsp.write_register(ram, DSP_ADDRESS_SRCN_FLAG, flag);
         spc.dsp

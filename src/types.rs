@@ -140,6 +140,8 @@ pub struct SourceParameter {
     pub echo_as_reverb_send: bool,
     /// ノートオン後に再生パラメータを更新するか
     pub update_parameter_after_noteon: bool,
+    /// ピッチベンドがピッチベンド幅を越えたときにノートオフとオンを打ちなおすか
+    pub retrigger_noteon_on_exceed_pitch_bend_width: bool,
     /// 出力チャンネル（SPCの出力チャンネルをインデックス、出力先MIDIチャンネルが値）
     pub channel_routing: [u8; 8],
     /// 出力チャンネルミュート（各SPCの出力チャンネルでのミュートフラグ）
