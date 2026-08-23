@@ -11,6 +11,7 @@ pub struct SRCNChannelRoutingWindow {
     srn_no: u8,
     source_info: Arc<SourceInformation>,
     source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
+    midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
 }
 
 impl SPC2MIDI2Window for SRCNChannelRoutingWindow {
@@ -21,11 +22,16 @@ impl SPC2MIDI2Window for SRCNChannelRoutingWindow {
     fn view(&self) -> Element<'_, Message> {
         let params = self.source_parameter.read().unwrap();
         let param = params.get(&self.srn_no).unwrap();
+        let midi_config = self.midi_output_configure.read().unwrap();
+
+        let drum_channels = &midi_config.drum_channels;
+        let mut melody_ch_list: Vec<u8> = (0..=15).collect();
+        melody_ch_list.retain(|ch| !drum_channels.contains(ch));
         // ドラム音色が選択されているときはチャンネル候補を絞る
         let output_midi_channel_list = if (param.program.clone() as u8) >= 0x80 {
-            vec![9]
+            drum_channels 
         } else {
-            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15]
+            &melody_ch_list
         };
         let mut status_list: Vec<_> = (0..8)
             .map(|ch| {
@@ -101,12 +107,14 @@ impl SRCNChannelRoutingWindow {
         srn_no: u8,
         source_info: &SourceInformation,
         source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
+        midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
     ) -> Self {
         Self {
             title: title,
             srn_no: srn_no,
             source_info: source_info.clone().into(),
             source_parameter: source_parameter,
+            midi_output_configure: midi_output_configure,
         }
     }
 }

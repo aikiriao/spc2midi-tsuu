@@ -27,20 +27,20 @@ pub enum VolumeCurve {
     /// 平方根
     SquareRoot,
     /// 対数
-    Log, 
+    Log,
     /// 線形
     Linear,
 }
 
 /// 再生MIDISystem
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MIDISystem {
     /// 指定なし
     NONE,
     /// GM Level 1
-    GMLevel1, 
+    GMLevel1,
     /// GM Level 2
-    GMLevel2, 
+    GMLevel2,
     /// GS
     GS,
     /// XG
@@ -53,14 +53,14 @@ pub enum DisplaySourceIDType {
     /// 波形開始アドレス（デフォルト）
     StartAddress,
     /// SRCN
-    SRCN, 
+    SRCN,
 }
 
 /// ノート番号の表示タイプ
 #[derive(Debug, Clone, PartialEq)]
 pub enum DisplayNoteType {
     /// ノート番号
-    NoteNumber, 
+    NoteNumber,
     /// ノート名（中央CがC4）
     NoteNameMiddleC4,
 }
@@ -71,18 +71,18 @@ pub enum SampleListOrder {
     /// SPCチャンネル
     SPCChannel,
     /// アドレス降順（spc2midi準拠）
-    AddressDescending, 
+    AddressDescending,
     /// アドレス昇順
-    AddressAscending, 
+    AddressAscending,
     /// SRCN
-    SRCN, 
+    SRCN,
 }
 
 /// メインウィンドウの行の色の使い分け
 #[derive(Debug, Clone, PartialEq)]
 pub enum SampleListRowColorStyle {
     /// ストライプ
-    Stripe, 
+    Stripe,
     /// 単色
     Solid,
 }
@@ -162,7 +162,7 @@ pub struct MIDIOutputConfigure {
     /// 四分の一音符当たりのティック数
     pub ticks_per_quarter: u16,
     /// SPC700のクロックアップ倍率
-    pub spc_clockup_factor: u32, 
+    pub spc_clockup_factor: u32,
     /// ボリュームカーブ
     pub volume_curve: VolumeCurve,
     /// ターゲットMIDIシステム
@@ -171,6 +171,8 @@ pub struct MIDIOutputConfigure {
     pub split_drum_into_separate_tracks: bool,
     /// 先頭のイベントがない区間を取り除くか
     pub trim_leading_nonevents_period: bool,
+    /// ドラムとして使用するMIDIチャンネル
+    pub drum_channels: Vec<u8>,
 }
 
 /// 再生中の状態
@@ -228,6 +230,7 @@ impl MIDIOutputConfigure {
             midi_system: MIDISystem::NONE,
             split_drum_into_separate_tracks: false,
             trim_leading_nonevents_period: false,
+            drum_channels: vec![9u8],
         }
     }
 }
