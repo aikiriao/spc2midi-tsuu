@@ -235,8 +235,29 @@ pub enum LoadedFile {
     JSONFile(String),
 }
 
+/// GSのパートモード
+#[repr(u8)]
+#[derive(Debug, Clone)]
+enum GSPartMode {
+    Normal = 0x00,
+    RhythmMAP1 = 0x01,
+    RhythmMAP2 = 0x02,
+}
+
+/// XGのパートモード
+#[repr(u8)]
+#[derive(Debug, Clone)]
+enum XGPartMode {
+    Normal = 0x00,
+    Drum = 0x01,
+    DrumSetup1 = 0x02,
+    DrumSetup2 = 0x03,
+    DrumSetup3 = 0x04,
+    DrumSetup4 = 0x05,
+}
+
 /// GSでchをドラムパートのMAP1に設定するSystem Exclusiveメッセージを生成
-fn gs_set_drum_part_map1(ch: u8) -> Vec<u8> {
+fn generate_gs_part_mode_sysex_message(ch: u8, mode: &GSPartMode) -> Vec<u8> {
     /// GSチェックサムの計算
     fn gs_checksum(data: &[u8]) -> u8 {
         let sum: u16 = data.iter().map(|&x| x as u16).sum();
@@ -254,8 +275,8 @@ fn gs_set_drum_part_map1(ch: u8) -> Vec<u8> {
 
     let address = [0x40, 0x10 | part_nibble, 0x15];
 
-    // パートモードの設定。一旦MAP1に固定
-    let data = [0x01];
+    // パートモード
+    let data = mode.clone() as u8;
 
     vec![
         0xF0,
@@ -266,20 +287,20 @@ fn gs_set_drum_part_map1(ch: u8) -> Vec<u8> {
         address[0],
         address[1],
         address[2],
-        data[0], // パートモード。 00 = normal part, 01 = rhythm part MAP1, 02 = rhythm part MAP2
-        gs_checksum(&[address[0], address[1], address[2], data[0]]),
+        data, 
+        gs_checksum(&[address[0], address[1], address[2], data]),
         0xF7,
     ]
 }
 
 /// XGでchをドラムパートのDrum setup2に設定するSystem Exclusiveメッセージを生成
-fn xg_set_drum_part_setup2(ch: u8) -> Vec<u8> {
+fn generate_xg_part_mode_sysex_message(ch: u8, mode: &XGPartMode) -> Vec<u8> {
     vec![
         0xF0, 0x43, // Yamaha ID
         0x10, // Device number
         0x4C, // XG model ID
         0x08, ch, 0x07,
-        0x03, // パートモード: 00 = normal, 01 = drum, 02 = drum setup 1, 03 = drum setup 2, 04 = drum setup 3, 05 = drum setup 4
+        mode.clone() as u8,
         0xF7,
     ]
 }
@@ -1848,8 +1869,8 @@ impl App {
                 MIDISystem::GS | MIDISystem::XG => {
                     for drum_ch in &config.drum_channels {
                         let mut sysex = match config.midi_system {
-                            MIDISystem::GS => gs_set_drum_part_map1(*drum_ch),
-                            MIDISystem::XG => xg_set_drum_part_setup2(*drum_ch),
+                            MIDISystem::GS => generate_gs_part_mode_sysex_message(*drum_ch, &GSPartMode::RhythmMAP1),
+                            MIDISystem::XG => generate_xg_part_mode_sysex_message(*drum_ch, &XGPartMode::DrumSetup1),
                             _ => unreachable!("invalid MIDI system!"),
                         };
                         // System Exclusiveのサイズを付加
