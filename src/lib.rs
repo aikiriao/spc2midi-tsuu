@@ -247,6 +247,7 @@ enum GSPartMode {
 /// XGのパートモード
 #[repr(u8)]
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum XGPartMode {
     Normal = 0x00,
     Drum = 0x01,
@@ -1191,6 +1192,8 @@ impl App {
                         }
                     }
                     config.midi_system = system;
+                    // システム変更時にチャンネル（パート）モードを更新
+                    self.send_channel_mode_sysex_message(&config);
                 }
             }
             Message::MIDIOutputUpdatePeriodChanged(period) => {
@@ -1264,49 +1267,10 @@ impl App {
                         }
                         channels.retain(|val| *val != ch);
                     }
+                    // 一意性を保持するためソート
                     channels.sort();
-                    // チャンネルモードの再設定
-                    match config.midi_system {
-                        MIDISystem::GS | MIDISystem::XG => {
-                            for ch in 0..16 {
-                                // System Exclusiveメッセージの生成
-                                let sysex = match config.midi_system {
-                                    MIDISystem::GS => {
-                                        let mode = if config.drum_channels.contains(&ch) {
-                                            if ch == 9 {
-                                                GSPartMode::RhythmMAP1
-                                            } else {
-                                                GSPartMode::RhythmMAP2
-                                            }
-                                        } else {
-                                            GSPartMode::Normal
-                                        };
-                                        generate_gs_part_mode_sysex_message(ch, &mode)
-                                    }
-                                    MIDISystem::XG => {
-                                        let mode = if config.drum_channels.contains(&ch) {
-                                            if ch == 9 {
-                                                XGPartMode::DrumSetup1
-                                            } else {
-                                                XGPartMode::DrumSetup2
-                                            }
-                                        } else {
-                                            XGPartMode::Normal
-                                        };
-                                        generate_xg_part_mode_sysex_message(ch, &mode)
-                                    }
-                                    _ => unreachable!("invalid MIDI system!"),
-                                };
-                                // System Exclusiveメッセージ送信
-                                if let Some(midi_out_conn_ref) = &self.midi_out_conn {
-                                    let midi_out_conn = midi_out_conn_ref.clone();
-                                    let mut conn_out = midi_out_conn.lock().unwrap();
-                                    conn_out.send(&sysex).unwrap();
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
+                    // チャンネルの変更をMIDIデバイスに反映
+                    self.send_channel_mode_sysex_message(&config);
                 }
             }
             Message::MuteChannel(ch, flag) => {
@@ -2423,6 +2387,52 @@ impl App {
                     .send(&[MIDIMSG_MODE | ch, MIDIMSG_MODE_ALL_SOUND_OFF, 0])
                     .unwrap();
             }
+        }
+    }
+
+    // チャンネル（パート）モードを設定するSystem Exclusiveを送信
+    fn send_channel_mode_sysex_message(&self, config: &MIDIOutputConfigure) {
+        // チャンネルモードの再設定
+        match config.midi_system {
+            MIDISystem::GS | MIDISystem::XG => {
+                for ch in 0..16 {
+                    // System Exclusiveメッセージの生成
+                    let sysex = match config.midi_system {
+                        MIDISystem::GS => {
+                            let mode = if config.drum_channels.contains(&ch) {
+                                if ch == 9 {
+                                    GSPartMode::RhythmMAP1
+                                } else {
+                                    GSPartMode::RhythmMAP2
+                                }
+                            } else {
+                                GSPartMode::Normal
+                            };
+                            generate_gs_part_mode_sysex_message(ch, &mode)
+                        }
+                        MIDISystem::XG => {
+                            let mode = if config.drum_channels.contains(&ch) {
+                                if ch == 9 {
+                                    XGPartMode::DrumSetup1
+                                } else {
+                                    XGPartMode::DrumSetup2
+                                }
+                            } else {
+                                XGPartMode::Normal
+                            };
+                            generate_xg_part_mode_sysex_message(ch, &mode)
+                        }
+                        _ => unreachable!("invalid MIDI system!"),
+                    };
+                    // System Exclusiveメッセージ送信
+                    if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+                        let midi_out_conn = midi_out_conn_ref.clone();
+                        let mut conn_out = midi_out_conn.lock().unwrap();
+                        conn_out.send(&sysex).unwrap();
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
