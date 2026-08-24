@@ -154,8 +154,7 @@ impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
             column![text("Drum Channel"), {
                 let available_ch = |system: &MIDISystem, ch: u8| -> bool {
                     match system {
-                        MIDISystem::NONE | MIDISystem::GMLevel1 => ch == 9,
-                        MIDISystem::GMLevel2 => ch == 9 || ch == 10,
+                        MIDISystem::NONE | MIDISystem::GMLevel1 | MIDISystem::GMLevel2 => ch == 9,
                         MIDISystem::GS | MIDISystem::XG => true,
                     }
                 };
@@ -164,7 +163,7 @@ impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
                         checkbox(midi_output_configure.drum_channels.contains(&ch))
                             .label(format!("{}", ch))
                             .on_toggle_maybe(
-                                if available_ch(&midi_output_configure.midi_system, ch) {
+                                if ch != 9 && available_ch(&midi_output_configure.midi_system, ch) {
                                     Some(move |flag| Message::MIDIDrumChannelFlagToggled(ch, flag))
                                 } else {
                                     None

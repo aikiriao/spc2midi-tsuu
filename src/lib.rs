@@ -287,7 +287,7 @@ fn generate_gs_part_mode_sysex_message(ch: u8, mode: &GSPartMode) -> Vec<u8> {
         address[0],
         address[1],
         address[2],
-        data, 
+        data,
         gs_checksum(&[address[0], address[1], address[2], data]),
         0xF7,
     ]
@@ -296,10 +296,13 @@ fn generate_gs_part_mode_sysex_message(ch: u8, mode: &GSPartMode) -> Vec<u8> {
 /// XGでchをドラムパートのDrum setup2に設定するSystem Exclusiveメッセージを生成
 fn generate_xg_part_mode_sysex_message(ch: u8, mode: &XGPartMode) -> Vec<u8> {
     vec![
-        0xF0, 0x43, // Yamaha ID
+        0xF0,
+        0x43, // Yamaha ID
         0x10, // Device number
         0x4C, // XG model ID
-        0x08, ch, 0x07,
+        0x08,
+        ch,
+        0x07,
         mode.clone() as u8,
         0xF7,
     ]
@@ -1154,16 +1157,9 @@ impl App {
                         {
                             let channels = &config.drum_channels;
                             match system {
-                                MIDISystem::NONE | MIDISystem::GMLevel1 => {
+                                MIDISystem::NONE | MIDISystem::GMLevel1 | MIDISystem::GMLevel2 => {
                                     if channels.len() > 1
                                         || channels.iter().find(|&v| *v != 9).is_some()
-                                    {
-                                        return Task::none();
-                                    }
-                                }
-                                MIDISystem::GMLevel2 => {
-                                    if channels.len() > 2
-                                        || channels.iter().find(|&v| *v != 9 && *v != 10).is_some()
                                     {
                                         return Task::none();
                                     }
@@ -1234,6 +1230,10 @@ impl App {
                         if channels.contains(&ch) {
                             return Task::none();
                         }
+                        // 2チャンネル以上は登録させない
+                        if channels.len() >= 2 {
+                            return Task::none();
+                        }
                         // 追加しようとしているチャンネルに出力している波形がある場合は追加しない
                         if let Ok(params) = self.source_parameter.read() {
                             for (srcn, param) in params.iter() {
@@ -1249,6 +1249,10 @@ impl App {
                         if channels.len() == 1 {
                             return Task::none();
                         }
+                        // デフォルトのドラムチャンネルは消さない
+                        if ch == 9 {
+                            return Task::none();
+                        }
                         // 消そうとしているチャンネルに出力している波形がある場合は消さない
                         if let Ok(params) = self.source_parameter.read() {
                             for (srcn, param) in params.iter() {
@@ -1261,6 +1265,48 @@ impl App {
                         channels.retain(|val| *val != ch);
                     }
                     channels.sort();
+                    // チャンネルモードの再設定
+                    match config.midi_system {
+                        MIDISystem::GS | MIDISystem::XG => {
+                            for ch in 0..16 {
+                                // System Exclusiveメッセージの生成
+                                let sysex = match config.midi_system {
+                                    MIDISystem::GS => {
+                                        let mode = if config.drum_channels.contains(&ch) {
+                                            if ch == 9 {
+                                                GSPartMode::RhythmMAP1
+                                            } else {
+                                                GSPartMode::RhythmMAP2
+                                            }
+                                        } else {
+                                            GSPartMode::Normal
+                                        };
+                                        generate_gs_part_mode_sysex_message(ch, &mode)
+                                    }
+                                    MIDISystem::XG => {
+                                        let mode = if config.drum_channels.contains(&ch) {
+                                            if ch == 9 {
+                                                XGPartMode::DrumSetup1
+                                            } else {
+                                                XGPartMode::DrumSetup2
+                                            }
+                                        } else {
+                                            XGPartMode::Normal
+                                        };
+                                        generate_xg_part_mode_sysex_message(ch, &mode)
+                                    }
+                                    _ => unreachable!("invalid MIDI system!"),
+                                };
+                                // System Exclusiveメッセージ送信
+                                if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+                                    let midi_out_conn = midi_out_conn_ref.clone();
+                                    let mut conn_out = midi_out_conn.lock().unwrap();
+                                    conn_out.send(&sysex).unwrap();
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
             Message::MuteChannel(ch, flag) => {
@@ -1851,7 +1897,7 @@ impl App {
             }
             // ドラムチャンネルの設定
             match config.midi_system {
-                MIDISystem::NONE | MIDISystem::GMLevel1 => {
+                MIDISystem::NONE | MIDISystem::GMLevel1 | MIDISystem::GMLevel2 => {
                     if config.drum_channels.len() != 1 {
                         eprintln!("Failed to output SMF; multiple drum channel detected");
                     }
@@ -1861,16 +1907,25 @@ impl App {
                         );
                     }
                 }
-                MIDISystem::GMLevel2 => {
-                    // FIXME:
-                    // GM2はプログラムチェンジにバンク切り替えを入れなければならず冗長。未対応とする。
-                    assert!(false);
-                }
                 MIDISystem::GS | MIDISystem::XG => {
                     for drum_ch in &config.drum_channels {
                         let mut sysex = match config.midi_system {
-                            MIDISystem::GS => generate_gs_part_mode_sysex_message(*drum_ch, &GSPartMode::RhythmMAP1),
-                            MIDISystem::XG => generate_xg_part_mode_sysex_message(*drum_ch, &XGPartMode::DrumSetup1),
+                            MIDISystem::GS => generate_gs_part_mode_sysex_message(
+                                *drum_ch,
+                                if *drum_ch == 9 {
+                                    &GSPartMode::RhythmMAP1
+                                } else {
+                                    &GSPartMode::RhythmMAP2
+                                },
+                            ),
+                            MIDISystem::XG => generate_xg_part_mode_sysex_message(
+                                *drum_ch,
+                                if *drum_ch == 9 {
+                                    &XGPartMode::DrumSetup1
+                                } else {
+                                    &XGPartMode::DrumSetup2
+                                },
+                            ),
                             _ => unreachable!("invalid MIDI system!"),
                         };
                         // System Exclusiveのサイズを付加
