@@ -47,6 +47,80 @@ pub enum MIDISystem {
     XG,
 }
 
+/// GMのパートモード
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GMPartMode {
+    Normal,
+    Drum,
+}
+
+/// GSのパートモード
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GSPartMode {
+    Normal = 0x00,
+    RhythmMAP1 = 0x01,
+    RhythmMAP2 = 0x02,
+}
+
+/// XGのパートモード
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum XGPartMode {
+    Normal = 0x00,
+    Drum = 0x01,
+    DrumSetup1 = 0x02,
+    DrumSetup2 = 0x03,
+    DrumSetup3 = 0x04,
+    DrumSetup4 = 0x05,
+}
+
+/// パート種別
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MIDIPartMode {
+    /// GM
+    GM(GMPartMode),
+    /// GS
+    GS(GSPartMode),
+    /// XG
+    XG(XGPartMode),
+}
+
+impl MIDIPartMode {
+    /// ドラムパートかどうか判定
+    pub fn is_drum_part(&self) -> bool {
+        match self {
+            MIDIPartMode::GM(mode) => *mode == GMPartMode::Drum,
+            MIDIPartMode::GS(mode) => *mode != GSPartMode::Normal,
+            MIDIPartMode::XG(mode) => *mode != XGPartMode::Normal,
+        }
+    }
+}
+
+impl std::fmt::Display for MIDIPartMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            MIDIPartMode::GM(mode) => match mode {
+                GMPartMode::Normal => "Normal",
+                GMPartMode::Drum => "Drum",
+            }
+            MIDIPartMode::GS(mode) => match mode {
+                GSPartMode::Normal => "Normal",
+                GSPartMode::RhythmMAP1 => "DrumMAP1",
+                GSPartMode::RhythmMAP2 => "DrumMAP2",
+            }
+            MIDIPartMode::XG(mode) => match mode {
+                XGPartMode::Normal => "Normal",
+                XGPartMode::Drum => "Drum",
+                XGPartMode::DrumSetup1 => "DrumSetup1",
+                XGPartMode::DrumSetup2 => "DrumSetup2",
+                XGPartMode::DrumSetup3 => "DrumSetup3",
+                XGPartMode::DrumSetup4 => "DrumSetup4",
+            }
+        })
+    }
+}
+
 /// 波形を区別するIDの表示種別
 #[derive(Debug, Clone, PartialEq)]
 pub enum DisplaySourceIDType {
@@ -171,8 +245,8 @@ pub struct MIDIOutputConfigure {
     pub split_drum_into_separate_tracks: bool,
     /// 先頭のイベントがない区間を取り除くか
     pub trim_leading_nonevents_period: bool,
-    /// ドラムとして使用するMIDIチャンネル
-    pub drum_channels: Vec<u8>,
+    /// 各MIDIチャンネルのパート種別
+    pub part_mode: [MIDIPartMode; 16],
 }
 
 /// 再生中の状態
@@ -230,7 +304,24 @@ impl MIDIOutputConfigure {
             midi_system: MIDISystem::NONE,
             split_drum_into_separate_tracks: false,
             trim_leading_nonevents_period: false,
-            drum_channels: vec![9u8],
+            part_mode: [
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Drum), // 10chのみドラム
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+                MIDIPartMode::GM(GMPartMode::Normal),
+            ],
         }
     }
 }

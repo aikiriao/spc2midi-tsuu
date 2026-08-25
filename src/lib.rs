@@ -1,6 +1,7 @@
 pub mod cli;
 mod device_setting_window;
 mod main_window;
+mod midi_drum_channel_assignment_window;
 mod midi_output_configuration_window;
 mod program;
 mod source_estimation;
@@ -10,6 +11,7 @@ mod types;
 
 use crate::device_setting_window::*;
 use crate::main_window::*;
+use crate::midi_drum_channel_assignment_window::*;
 use crate::midi_output_configuration_window::*;
 use crate::program::*;
 use crate::source_estimation::*;
@@ -116,6 +118,8 @@ pub enum Message {
     SRCNWindowOpened(window::Id),
     OpenSRCNChannelRoutingWindow(u8),
     SRCNChannelRoutingWindowOpened(window::Id),
+    OpenMIDIDrumChannelAssignmentWindow,
+    MIDIDrumChannelAssignmentWindowOpened(window::Id),
     WindowClosed(window::Id),
     OpenFile,
     FileOpened(Result<(PathBuf, LoadedFile), Error>),
@@ -173,7 +177,7 @@ pub enum Message {
     MIDIOutputSPC700ClockUpFactorChanged(u32),
     MIDIOutputSplitDrumIntoSeparateTracksChanged(bool),
     MIDIOutputTrimLeadingNonEventsPeriodChanged(bool),
-    MIDIDrumChannelFlagToggled(u8, bool),
+    MIDIPartModeChanged(u8, MIDIPartMode),
     MuteChannel(u8, bool),
     SoloChannel(u8),
     ReceivedBpmAnalyzeRequest,
@@ -233,28 +237,6 @@ struct ExportInformation {
 pub enum LoadedFile {
     SPCFile(Vec<u8>),
     JSONFile(String),
-}
-
-/// GSのパートモード
-#[repr(u8)]
-#[derive(Debug, Clone)]
-enum GSPartMode {
-    Normal = 0x00,
-    RhythmMAP1 = 0x01,
-    RhythmMAP2 = 0x02,
-}
-
-/// XGのパートモード
-#[repr(u8)]
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-enum XGPartMode {
-    Normal = 0x00,
-    Drum = 0x01,
-    DrumSetup1 = 0x02,
-    DrumSetup2 = 0x03,
-    DrumSetup3 = 0x04,
-    DrumSetup4 = 0x05,
 }
 
 /// GSでchをドラムパートのMAP1に設定するSystem Exclusiveメッセージを生成
@@ -523,6 +505,19 @@ impl App {
                 }
             }
             Message::SRCNChannelRoutingWindowOpened(_id) => {}
+            Message::OpenMIDIDrumChannelAssignmentWindow => {
+                let (id, open) = window::open(window::Settings {
+                    size: iced::Size::new(300.0, 300.0),
+                    ..Default::default()
+                });
+                let window = MIDIDrumChannelAssignmentWindow::new(
+                    format!("Drum Channel Assignment"),
+                    self.midi_output_configure.clone(),
+                );
+                self.windows.insert(id, Box::new(window));
+                return open.map(Message::SRCNChannelRoutingWindowOpened);
+            }
+            Message::MIDIDrumChannelAssignmentWindowOpened(_id) => {}
             Message::WindowClosed(id) => {
                 if id == self.main_window_id {
                     return iced::exit();
@@ -1155,18 +1150,82 @@ impl App {
                 if let Ok(mut config) = self.midi_output_configure.write() {
                     if let Some(midi_out_conn_ref) = &self.midi_out_conn {
                         // ドラムチャンネルに互換がないときは変更しない
-                        {
-                            let channels = &config.drum_channels;
-                            match system {
-                                MIDISystem::NONE | MIDISystem::GMLevel1 | MIDISystem::GMLevel2 => {
-                                    if channels.len() > 1
-                                        || channels.iter().find(|&v| *v != 9).is_some()
+                        match system {
+                            MIDISystem::NONE | MIDISystem::GMLevel1 | MIDISystem::GMLevel2 => {
+                                for ch in 0..16 {
+                                    if (ch != 9 && config.part_mode[ch].is_drum_part())
+                                        || (ch == 9 && !config.part_mode[ch].is_drum_part())
                                     {
                                         return Task::none();
                                     }
                                 }
-                                MIDISystem::GS | MIDISystem::XG => {}
                             }
+                            MIDISystem::GS | MIDISystem::XG => {}
+                        }
+                        // パートモードの変換
+                        match (config.midi_system.clone(), system.clone()) {
+                            // GM -> GS
+                            (MIDISystem::NONE, MIDISystem::GS)
+                            | (MIDISystem::GMLevel1, MIDISystem::GS)
+                            | (MIDISystem::GMLevel2, MIDISystem::GS) => {
+                                for ch in 0..16 {
+                                    config.part_mode[ch] = MIDIPartMode::GS(GSPartMode::Normal);
+                                }
+                                config.part_mode[9] = MIDIPartMode::GS(GSPartMode::RhythmMAP1);
+                            }
+                            // GS -> GM, XG -> GM
+                            (MIDISystem::GS, MIDISystem::NONE)
+                            | (MIDISystem::GS, MIDISystem::GMLevel1)
+                            | (MIDISystem::GS, MIDISystem::GMLevel2)
+                            | (MIDISystem::XG, MIDISystem::NONE)
+                            | (MIDISystem::XG, MIDISystem::GMLevel1)
+                            | (MIDISystem::XG, MIDISystem::GMLevel2) => {
+                                config.part_mode[9] = MIDIPartMode::GM(GMPartMode::Drum);
+                            }
+                            // GM -> XG
+                            (MIDISystem::NONE, MIDISystem::XG)
+                            | (MIDISystem::GMLevel1, MIDISystem::XG)
+                            | (MIDISystem::GMLevel2, MIDISystem::XG) => {
+                                for ch in 0..16 {
+                                    config.part_mode[ch] = MIDIPartMode::XG(XGPartMode::Normal);
+                                }
+                                config.part_mode[9] = MIDIPartMode::XG(XGPartMode::DrumSetup1);
+                            }
+                            // XG -> GS
+                            (MIDISystem::XG, MIDISystem::GS) => {
+                                for ch in 0..16 {
+                                    config.part_mode[ch] = match config.part_mode[ch] {
+                                        MIDIPartMode::XG(XGPartMode::Normal) => {
+                                            MIDIPartMode::GS(GSPartMode::Normal)
+                                        }
+                                        MIDIPartMode::XG(XGPartMode::DrumSetup1) => {
+                                            MIDIPartMode::GS(GSPartMode::RhythmMAP1)
+                                        }
+                                        MIDIPartMode::XG(XGPartMode::DrumSetup2) => {
+                                            MIDIPartMode::GS(GSPartMode::RhythmMAP2)
+                                        }
+                                        _ => unreachable!("Invalid mode!"),
+                                    };
+                                }
+                            }
+                            // GS -> XG
+                            (MIDISystem::GS, MIDISystem::XG) => {
+                                for ch in 0..16 {
+                                    config.part_mode[ch] = match config.part_mode[ch] {
+                                        MIDIPartMode::GS(GSPartMode::Normal) => {
+                                            MIDIPartMode::XG(XGPartMode::Normal)
+                                        }
+                                        MIDIPartMode::GS(GSPartMode::RhythmMAP1) => {
+                                            MIDIPartMode::XG(XGPartMode::DrumSetup1)
+                                        }
+                                        MIDIPartMode::GS(GSPartMode::RhythmMAP2) => {
+                                            MIDIPartMode::XG(XGPartMode::DrumSetup2)
+                                        }
+                                        _ => unreachable!("Invalid mode!"),
+                                    };
+                                }
+                            }
+                            _ => {}
                         }
                         // プレビュー向けにシステムを切り替える
                         let midi_out_conn = midi_out_conn_ref.clone();
@@ -1225,50 +1284,41 @@ impl App {
                     config.trim_leading_nonevents_period = flag;
                 }
             }
-            Message::MIDIDrumChannelFlagToggled(ch, flag) => {
+            Message::MIDIPartModeChanged(ch, mode) => {
                 if let Ok(mut config) = self.midi_output_configure.write() {
-                    let channels = &mut config.drum_channels;
-                    if flag {
-                        // すでにある場合は追加しない
-                        if channels.contains(&ch) {
-                            return Task::none();
-                        }
-                        // 2チャンネル以上は登録させない
-                        if channels.len() >= 2 {
-                            return Task::none();
-                        }
-                        // 追加しようとしているチャンネルに出力している波形がある場合は追加しない
-                        if let Ok(params) = self.source_parameter.read() {
-                            for (srcn, param) in params.iter() {
-                                if param.channel_routing.to_vec().contains(&ch) {
-                                    eprintln!("Failed to remove drum channel {}; SRCN {} contains MIDI channel output", ch, srcn);
-                                    return Task::none();
-                                }
+                    // 編集しようとしているチャンネルに出力しているチャンネルがあり、リズムとドラムに変化するときは編集しない
+                    if let Ok(params) = self.source_parameter.read() {
+                        for (srcn, param) in params.iter() {
+                            if param.channel_routing.to_vec().contains(&ch)
+                                && mode.is_drum_part() != config.part_mode[ch as usize].is_drum_part()
+                            {
+                                eprintln!("Failed to edit drum channel {}; SRCN {} contains MIDI channel output", ch, srcn);
+                                return Task::none();
                             }
                         }
-                        channels.push(ch);
-                    } else {
-                        // 1つしかチャンネルがないときは消さない
-                        if channels.len() == 1 {
-                            return Task::none();
-                        }
-                        // デフォルトのドラムチャンネルは消さない
-                        if ch == 9 {
-                            return Task::none();
-                        }
-                        // 消そうとしているチャンネルに出力している波形がある場合は消さない
-                        if let Ok(params) = self.source_parameter.read() {
-                            for (srcn, param) in params.iter() {
-                                if param.channel_routing.to_vec().contains(&ch) {
-                                    eprintln!("Failed to remove drum channel {}; SRCN {} contains MIDI channel output", ch, srcn);
-                                    return Task::none();
-                                }
-                            }
-                        }
-                        channels.retain(|val| *val != ch);
                     }
-                    // 一意性を保持するためソート
-                    channels.sort();
+                    // システムとチャンネル（パート）モードのチェック
+                    match mode {
+                        MIDIPartMode::GM(..) => {
+                            assert!(
+                                (config.midi_system == MIDISystem::NONE)
+                                    || (config.midi_system == MIDISystem::GMLevel1)
+                                    || (config.midi_system == MIDISystem::GMLevel2)
+                            );
+                            if (ch == 9 && mode != MIDIPartMode::GM(GMPartMode::Drum))
+                                || (ch != 9 && mode != MIDIPartMode::GM(GMPartMode::Normal))
+                            {
+                                eprintln!(
+                                    "Failed to edit drum channel {}; cannot edit GM drum setting",
+                                    ch
+                                );
+                                return Task::none();
+                            }
+                        }
+                        MIDIPartMode::GS(..) => assert_eq!(MIDISystem::GS, config.midi_system),
+                        MIDIPartMode::XG(..) => assert_eq!(MIDISystem::XG, config.midi_system),
+                    }
+                    config.part_mode[ch as usize] = mode;
                     // チャンネルの変更をMIDIデバイスに反映
                     self.send_channel_mode_sysex_message(&config);
                 }
@@ -1862,35 +1912,51 @@ impl App {
             // ドラムチャンネルの設定
             match config.midi_system {
                 MIDISystem::NONE | MIDISystem::GMLevel1 | MIDISystem::GMLevel2 => {
-                    if config.drum_channels.len() != 1 {
-                        eprintln!("Failed to output SMF; multiple drum channel detected");
-                    }
-                    if config.drum_channels[0] != 9 {
-                        eprintln!(
-                            "Failed to output SMF; GM Level1 cannot output to other than channel 9"
-                        );
+                    // チェックのみ行う
+                    for ch in 0..16 {
+                        match &config.part_mode[ch] {
+                            MIDIPartMode::GM(mode) => {
+                                if ch == 9 {
+                                    if *mode != GMPartMode::Drum {
+                                        eprintln!(
+                                            "Failed to output SMF; channel 9 is not set as drum mode"
+                                        );
+                                        return None;
+                                    }
+                                } else {
+                                    if *mode != GMPartMode::Normal {
+                                        eprintln!(
+                                            "Failed to output SMF; channel {} is not set as normal (malodic) mode", ch
+                                        );
+                                        return None;
+                                    }
+                                }
+                            }
+                            _ => {
+                                eprintln!(
+                                    "Failed to output SMF; mismatch MIDI system and Channel mode system"
+                                );
+                                return None;
+                            }
+                        }
                     }
                 }
                 MIDISystem::GS | MIDISystem::XG => {
-                    for drum_ch in &config.drum_channels {
-                        let mut sysex = match config.midi_system {
-                            MIDISystem::GS => generate_gs_part_mode_sysex_message(
-                                *drum_ch,
-                                if *drum_ch == 9 {
-                                    &GSPartMode::RhythmMAP1
-                                } else {
-                                    &GSPartMode::RhythmMAP2
-                                },
-                            ),
-                            MIDISystem::XG => generate_xg_part_mode_sysex_message(
-                                *drum_ch,
-                                if *drum_ch == 9 {
-                                    &XGPartMode::DrumSetup1
-                                } else {
-                                    &XGPartMode::DrumSetup2
-                                },
-                            ),
-                            _ => unreachable!("invalid MIDI system!"),
+                    // 全チャンネル（パート）のモードを設定
+                    for ch in 0..16 {
+                        let mut sysex = match &config.part_mode[ch] {
+                            MIDIPartMode::GS(mode) => {
+                                generate_gs_part_mode_sysex_message(ch as u8, &mode)
+                            }
+                            MIDIPartMode::XG(mode) => {
+                                generate_xg_part_mode_sysex_message(ch as u8, &mode)
+                            }
+                            _ => {
+                                eprintln!(
+                                    "Failed to output SMF; mismatch MIDI system and Channel mode system"
+                                );
+                                return None;
+                            }
                         };
                         // System Exclusiveのサイズを付加
                         sysex.insert(1, sysex.len() as u8 - 1u8);
@@ -1926,7 +1992,8 @@ impl App {
             // MIDIチャンネルごとに出力
             for midi_ch in 0..16 {
                 // ドラム音色をトラックに分ける場合はいったんスキップ
-                if config.drum_channels.contains(&midi_ch) && config.split_drum_into_separate_tracks
+                if config.part_mode[midi_ch].is_drum_part()
+                    && config.split_drum_into_separate_tracks
                 {
                     continue;
                 }
@@ -1953,7 +2020,7 @@ impl App {
                 for (srn_no, param) in params.iter() {
                     let mut exist_routing = false;
                     for ch in 0..8 {
-                        if param.channel_routing[ch] != midi_ch {
+                        if param.channel_routing[ch] != midi_ch as u8 {
                             let value = 0x80 | ((ch << 4) as u8) | param.channel_routing[ch];
                             spc.dsp
                                 .write_register(&[0u8], DSP_ADDRESS_SRCN_TARGET, *srn_no);
@@ -2000,7 +2067,7 @@ impl App {
                     if (param.program.clone() as u8) >= 0x80 {
                         for midi_ch in 0..16 {
                             // ドラム音色を含まないチャンネルはスキップ
-                            if !config.drum_channels.contains(&midi_ch) {
+                            if !config.part_mode[midi_ch].is_drum_part() {
                                 continue;
                             }
 
@@ -2035,7 +2102,7 @@ impl App {
                             // 出力先チャンネルがmidi_ch以外になっているルーティングをミュート
                             let mut exist_routing = false;
                             for ch in 0..8 {
-                                if param.channel_routing[ch] != midi_ch {
+                                if param.channel_routing[ch] != midi_ch as u8 {
                                     let value =
                                         0x80 | ((ch << 4) as u8) | param.channel_routing[ch];
                                     spc.dsp.write_register(
@@ -2397,30 +2464,12 @@ impl App {
             MIDISystem::GS | MIDISystem::XG => {
                 for ch in 0..16 {
                     // System Exclusiveメッセージの生成
-                    let sysex = match config.midi_system {
-                        MIDISystem::GS => {
-                            let mode = if config.drum_channels.contains(&ch) {
-                                if ch == 9 {
-                                    GSPartMode::RhythmMAP1
-                                } else {
-                                    GSPartMode::RhythmMAP2
-                                }
-                            } else {
-                                GSPartMode::Normal
-                            };
-                            generate_gs_part_mode_sysex_message(ch, &mode)
+                    let sysex = match &config.part_mode[ch] {
+                        MIDIPartMode::GS(mode) => {
+                            generate_gs_part_mode_sysex_message(ch as u8, &mode)
                         }
-                        MIDISystem::XG => {
-                            let mode = if config.drum_channels.contains(&ch) {
-                                if ch == 9 {
-                                    XGPartMode::DrumSetup1
-                                } else {
-                                    XGPartMode::DrumSetup2
-                                }
-                            } else {
-                                XGPartMode::Normal
-                            };
-                            generate_xg_part_mode_sysex_message(ch, &mode)
+                        MIDIPartMode::XG(mode) => {
+                            generate_xg_part_mode_sysex_message(ch as u8, &mode)
                         }
                         _ => unreachable!("invalid MIDI system!"),
                     };

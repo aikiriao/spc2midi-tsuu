@@ -151,29 +151,33 @@ impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
             .padding(10)
             .align_y(alignment::Alignment::Center)
             .width(Length::Fill),
-            column![text("Drum Channel"), {
-                let available_ch = |system: &MIDISystem, ch: u8| -> bool {
-                    match system {
-                        MIDISystem::NONE | MIDISystem::GMLevel1 | MIDISystem::GMLevel2 => ch == 9,
-                        MIDISystem::GS | MIDISystem::XG => true,
-                    }
-                };
-                let row_vec = (8..=15)
-                    .map(|ch| -> Element<'_, Message> {
-                        checkbox(midi_output_configure.drum_channels.contains(&ch))
-                            .label(format!("{}", ch))
-                            .on_toggle_maybe(
-                                if ch != 9 && available_ch(&midi_output_configure.midi_system, ch) {
-                                    Some(move |flag| Message::MIDIDrumChannelFlagToggled(ch, flag))
-                                } else {
-                                    None
-                                },
-                            )
-                            .into()
-                    })
-                    .collect();
-                Row::from_vec(row_vec).spacing(10)
-            }]
+            column![
+                row![
+                    text("Drum Channel"),
+                    button("Edit Drum Channel")
+                        .on_press(Message::OpenMIDIDrumChannelAssignmentWindow)
+                        .width(160),
+                ]
+                .spacing(10)
+                .align_y(alignment::Alignment::Center)
+                .width(Length::Fill),
+                {
+                    let row_vec = (8..12)
+                        .map(|ch| -> Element<'_, Message> {
+                            text(format!("{}: {}", ch, midi_output_configure.part_mode[ch])).size(15.0).into()
+                        })
+                        .collect();
+                    Row::from_vec(row_vec).spacing(5)
+                },
+                {
+                    let row_vec = (12..16)
+                        .map(|ch| -> Element<'_, Message> {
+                            text(format!("{}: {}", ch, midi_output_configure.part_mode[ch])).size(15.0).into()
+                        })
+                        .collect();
+                    Row::from_vec(row_vec).spacing(5)
+                }
+            ]
             .spacing(10)
             .padding(10)
             .width(Length::Fill),

@@ -24,14 +24,12 @@ impl SPC2MIDI2Window for SRCNChannelRoutingWindow {
         let param = params.get(&self.srn_no).unwrap();
         let midi_config = self.midi_output_configure.read().unwrap();
 
-        let drum_channels = &midi_config.drum_channels;
-        let mut melody_ch_list: Vec<u8> = (0..=15).collect();
-        melody_ch_list.retain(|ch| !drum_channels.contains(ch));
-        // ドラム音色が選択されているときはチャンネル候補を絞る
-        let output_midi_channel_list = if (param.program.clone() as u8) >= 0x80 {
-            drum_channels 
+        let part_mode = &midi_config.part_mode;
+        // 選択可能なチャンネルリスト
+        let output_midi_channel_list: Vec<_> = if (param.program.clone() as u8) >= 0x80 {
+            (0..=15).filter(|ch| part_mode[*ch as usize].is_drum_part()).collect()
         } else {
-            &melody_ch_list
+            (0..=15).filter(|ch| !part_mode[*ch as usize].is_drum_part()).collect()
         };
         let mut status_list: Vec<_> = (0..8)
             .map(|ch| {
