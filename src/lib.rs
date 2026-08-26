@@ -2469,21 +2469,21 @@ impl App {
         // チャンネルモードの再設定
         match config.midi_system {
             MIDISystem::GS | MIDISystem::XG => {
-                for ch in 0..16 {
-                    // System Exclusiveメッセージの生成
-                    let sysex = match &config.part_mode[ch] {
-                        MIDIPartMode::GS(mode) => {
-                            generate_gs_part_mode_sysex_message(ch as u8, &mode)
-                        }
-                        MIDIPartMode::XG(mode) => {
-                            generate_xg_part_mode_sysex_message(ch as u8, &mode)
-                        }
-                        _ => unreachable!("invalid MIDI system!"),
-                    };
-                    // System Exclusiveメッセージ送信
-                    if let Some(midi_out_conn_ref) = &self.midi_out_conn {
-                        let midi_out_conn = midi_out_conn_ref.clone();
-                        let mut conn_out = midi_out_conn.lock().unwrap();
+                if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+                    let midi_out_conn = midi_out_conn_ref.clone();
+                    let mut conn_out = midi_out_conn.lock().unwrap();
+                    for ch in 0..16 {
+                        // System Exclusiveメッセージの生成
+                        let sysex = match &config.part_mode[ch] {
+                            MIDIPartMode::GS(mode) => {
+                                generate_gs_part_mode_sysex_message(ch as u8, &mode)
+                            }
+                            MIDIPartMode::XG(mode) => {
+                                generate_xg_part_mode_sysex_message(ch as u8, &mode)
+                            }
+                            _ => unreachable!("invalid MIDI system!"),
+                        };
+                        // System Exclusiveメッセージ送信
                         conn_out.send(&sysex).unwrap();
                     }
                 }
