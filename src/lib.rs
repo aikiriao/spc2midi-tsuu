@@ -96,7 +96,7 @@ const MIDIMSG_SYSEX_GS_RESET: [u8; 11] = [
 /// MIDI System Exclusive：XGシステムオン
 const MIDIMSG_SYSEX_XG_SYSTEM_ON: [u8; 9] = [0xF0, 0x43, 0x10, 0x4C, 0x00, 0x00, 0x7E, 0x00, 0xF7];
 /// MIDIをプレビューする際に使用するチャンネル
-const MIDI_PREVIEW_CHANNEL: u8 = 15;
+const MIDI_PREVIEW_CHANNEL: u8 = 0;
 /// MIDIをプレビューする時間(msec)
 const MIDI_PREVIEW_DURATION_MSEC: u64 = 500;
 /// デフォルトの音源の分析時間(sec)
@@ -1297,7 +1297,8 @@ impl App {
                     if let Ok(params) = self.source_parameter.read() {
                         for (srcn, param) in params.iter() {
                             if param.channel_routing.to_vec().contains(&ch)
-                                && mode.is_drum_part() != config.part_mode[ch as usize].is_drum_part()
+                                && mode.is_drum_part()
+                                    != config.part_mode[ch as usize].is_drum_part()
                             {
                                 eprintln!("Failed to edit drum channel {}; SRCN {} contains MIDI channel output", ch, srcn);
                                 return Task::none();
@@ -2534,6 +2535,17 @@ impl App {
         };
         let mut conn_out = midi_out_conn.lock().unwrap();
 
+        // 最初に見つかったドラムパートでプレビューする
+        let mut drum_preview_channel = 8u8;
+        if let Ok(config) = self.midi_output_configure.read() {
+            for ch in 8..16 {
+                if config.part_mode[ch].is_drum_part() {
+                    drum_preview_channel = ch as u8;
+                    break;
+                }
+            }
+        }
+
         // ノートオン
         if program < 0x80 {
             // ピッチベンド設定
@@ -2568,7 +2580,11 @@ impl App {
         } else {
             // ドラム音色
             conn_out
-                .send(&[MIDIMSG_NOTE_ON | 0x9, program - 0x80, velocity])
+                .send(&[
+                    MIDIMSG_NOTE_ON | drum_preview_channel,
+                    program - 0x80,
+                    velocity,
+                ])
                 .unwrap();
         }
 
@@ -2583,7 +2599,7 @@ impl App {
         } else {
             // ドラム音色
             conn_out
-                .send(&[MIDIMSG_NOTE_OFF | 0x9, program - 0x80, 0])
+                .send(&[MIDIMSG_NOTE_OFF | drum_preview_channel, program - 0x80, 0])
                 .unwrap();
         }
     }
