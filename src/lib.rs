@@ -241,22 +241,29 @@ pub enum LoadedFile {
 
 /// GSでchをドラムパートのMAP1に設定するSystem Exclusiveメッセージを生成
 fn generate_gs_part_mode_sysex_message(ch: u8, mode: &GSPartMode) -> Vec<u8> {
-    /// GSチェックサムの計算
+    // GSチェックサムの計算
     fn gs_checksum(data: &[u8]) -> u8 {
         let sum: u16 = data.iter().map(|&x| x as u16).sum();
         ((128 - (sum % 128)) % 128) as u8
     }
-    // パートのアドレスに変換:
-    // Part 1  -> 1
-    // ...
-    // Part 9  -> 9
-    // Part 10 -> 0
-    // Part 11 -> A
-    // ...
-    // Part 16 -> F
-    let part_nibble = if ch == 9 { 0x00 } else { ch };
 
-    let address = [0x40, 0x10 | part_nibble, 0x15];
+    // パートのアドレスに変換:
+    // ch 0  -> 1
+    // ...
+    // ch 8  -> 9
+    // ch 9  -> 0
+    // ch 10 -> A
+    // ...
+    // ch 16 -> F
+    let part = if ch == 9 {
+        0x00
+    } else if ch < 9 {
+        ch + 1
+    } else {
+        ch
+    };
+
+    let address = [0x40, 0x10 | part, 0x15];
 
     // パートモード
     let data = mode.clone() as u8;
