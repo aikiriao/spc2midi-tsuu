@@ -156,7 +156,7 @@ impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
                     text("Drum Channel"),
                     button("Edit Drum Channel")
                         .on_press(Message::OpenMIDIDrumChannelAssignmentWindow)
-                        .width(160),
+                        .width(155),
                 ]
                 .spacing(10)
                 .align_y(alignment::Alignment::Center)
@@ -164,7 +164,16 @@ impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
                 {
                     let row_vec = (8..12)
                         .map(|ch| -> Element<'_, Message> {
-                            text(format!("{}: {}", ch, midi_output_configure.part_mode[ch])).size(15.0).into()
+                            row![
+                                text(format!("{}: ", ch))
+                                    .width(25.0)
+                                    .align_x(alignment::Alignment::End)
+                                    .align_y(alignment::Alignment::Center),
+                                text(format!("{}", midi_output_configure.part_mode[ch]))
+                                    .width(90.0)
+                                    .align_y(alignment::Alignment::Center)
+                            ]
+                            .into()
                         })
                         .collect();
                     Row::from_vec(row_vec).spacing(5)
@@ -172,7 +181,16 @@ impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
                 {
                     let row_vec = (12..16)
                         .map(|ch| -> Element<'_, Message> {
-                            text(format!("{}: {}", ch, midi_output_configure.part_mode[ch])).size(15.0).into()
+                            row![
+                                text(format!("{}: ", ch))
+                                    .width(25.0)
+                                    .align_x(alignment::Alignment::End)
+                                    .align_y(alignment::Alignment::Center),
+                                text(format!("{}", midi_output_configure.part_mode[ch]))
+                                    .width(90.0)
+                                    .align_y(alignment::Alignment::Center)
+                            ]
+                            .into()
                         })
                         .collect();
                     Row::from_vec(row_vec).spacing(5)
