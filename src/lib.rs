@@ -514,7 +514,7 @@ impl App {
             Message::SRCNChannelRoutingWindowOpened(_id) => {}
             Message::OpenMIDIDrumChannelAssignmentWindow => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(300.0, 300.0),
+                    size: iced::Size::new(300.0, 350.0),
                     ..Default::default()
                 });
                 let window = MIDIDrumChannelAssignmentWindow::new(

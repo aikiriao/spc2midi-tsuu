@@ -1,7 +1,7 @@
 use crate::types::*;
 use crate::Message;
 use iced::widget::{column, pick_list, row, text, Column};
-use iced::{alignment, Element, Length};
+use iced::{alignment, Border, Element, Length, Theme};
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug)]
@@ -52,6 +52,12 @@ impl SPC2MIDI2Window for MIDIDrumChannelAssignmentWindow {
                         Some(midi_config.part_mode[ch].clone()),
                         move |mode| Message::MIDIPartModeChanged(ch as u8, mode)
                     )
+                    .menu_style(|theme: &Theme| {
+                        let mut style = iced::overlay::menu::default(theme);
+                        style.border = Border::default().rounded(6.0);
+                        style.background = iced::Background::Color(theme.palette().background);
+                        style
+                    })
                     .width(Length::FillPortion(3)),
                 ]
                 .spacing(10)
@@ -76,7 +82,7 @@ impl SPC2MIDI2Window for MIDIDrumChannelAssignmentWindow {
 
         status_list.insert(0, ch_index.into());
 
-        column![Column::from_vec(status_list).width(Length::Fill),].into()
+        column![Column::from_vec(status_list).spacing(5).width(Length::Fill),].into()
     }
 }
 
