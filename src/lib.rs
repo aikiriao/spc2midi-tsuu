@@ -1952,26 +1952,28 @@ impl App {
                 MIDISystem::GS | MIDISystem::XG => {
                     // 全チャンネル（パート）のモードを設定
                     for ch in 0..16 {
-                        let mut sysex = match &config.part_mode[ch] {
-                            MIDIPartMode::GS(mode) => {
-                                generate_gs_part_mode_sysex_message(ch as u8, &mode)
-                            }
-                            MIDIPartMode::XG(mode) => {
-                                generate_xg_part_mode_sysex_message(ch as u8, &mode)
-                            }
-                            _ => {
-                                eprintln!(
+                        if config.part_mode[ch].is_drum_part() {
+                            let mut sysex = match &config.part_mode[ch] {
+                                MIDIPartMode::GS(mode) => {
+                                    generate_gs_part_mode_sysex_message(ch as u8, &mode)
+                                }
+                                MIDIPartMode::XG(mode) => {
+                                    generate_xg_part_mode_sysex_message(ch as u8, &mode)
+                                }
+                                _ => {
+                                    eprintln!(
                                     "Failed to output SMF; mismatch MIDI system and Channel mode system"
                                 );
-                                return None;
-                            }
-                        };
-                        // System Exclusiveのサイズを付加
-                        sysex.insert(1, sysex.len() as u8 - 1u8);
-                        smf.tracks[0].events.push(TrackEvent {
-                            vtime: 0,
-                            event: MidiEvent::Midi(MidiMessage::from_bytes(sysex)),
-                        });
+                                    return None;
+                                }
+                            };
+                            // System Exclusiveのサイズを付加
+                            sysex.insert(1, sysex.len() as u8 - 1u8);
+                            smf.tracks[0].events.push(TrackEvent {
+                                vtime: 0,
+                                event: MidiEvent::Midi(MidiMessage::from_bytes(sysex)),
+                            });
+                        }
                     }
                 }
             }
