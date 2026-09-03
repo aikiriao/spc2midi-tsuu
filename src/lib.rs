@@ -1166,110 +1166,87 @@ impl App {
             }
             Message::MIDISystemChanged(system) => {
                 if let Ok(mut config) = self.midi_output_configure.write() {
-                    if let Some(midi_out_conn_ref) = &self.midi_out_conn {
-                        // ドラムチャンネルに互換がないときは変更しない
-                        match system {
-                            MIDISystem::NONE | MIDISystem::GMLevel1 | MIDISystem::GMLevel2 => {
-                                for ch in 0..16 {
-                                    if (ch != 9 && config.part_mode[ch].is_drum_part())
-                                        || (ch == 9 && !config.part_mode[ch].is_drum_part())
-                                    {
-                                        return Task::none();
+                    // ドラムチャンネルに互換がないときは変更しない
+                    match system {
+                        MIDISystem::NONE | MIDISystem::GMLevel1 | MIDISystem::GMLevel2 => {
+                            for ch in 0..16 {
+                                if (ch != 9 && config.part_mode[ch].is_drum_part())
+                                    || (ch == 9 && !config.part_mode[ch].is_drum_part())
+                                {
+                                    return Task::none();
+                                }
+                            }
+                        }
+                        MIDISystem::GS | MIDISystem::XG => {}
+                    }
+                    // パートモードの変換
+                    match (config.midi_system.clone(), system.clone()) {
+                        // GM -> GS
+                        (MIDISystem::NONE, MIDISystem::GS)
+                        | (MIDISystem::GMLevel1, MIDISystem::GS)
+                        | (MIDISystem::GMLevel2, MIDISystem::GS) => {
+                            for ch in 0..16 {
+                                config.part_mode[ch] = MIDIPartMode::GS(GSPartMode::Normal);
+                            }
+                            config.part_mode[9] = MIDIPartMode::GS(GSPartMode::RhythmMAP1);
+                        }
+                        // GS -> GM, XG -> GM
+                        (MIDISystem::GS, MIDISystem::NONE)
+                        | (MIDISystem::GS, MIDISystem::GMLevel1)
+                        | (MIDISystem::GS, MIDISystem::GMLevel2)
+                        | (MIDISystem::XG, MIDISystem::NONE)
+                        | (MIDISystem::XG, MIDISystem::GMLevel1)
+                        | (MIDISystem::XG, MIDISystem::GMLevel2) => {
+                            config.part_mode[9] = MIDIPartMode::GM(GMPartMode::Drum);
+                        }
+                        // GM -> XG
+                        (MIDISystem::NONE, MIDISystem::XG)
+                        | (MIDISystem::GMLevel1, MIDISystem::XG)
+                        | (MIDISystem::GMLevel2, MIDISystem::XG) => {
+                            for ch in 0..16 {
+                                config.part_mode[ch] = MIDIPartMode::XG(XGPartMode::Normal);
+                            }
+                            config.part_mode[9] = MIDIPartMode::XG(XGPartMode::DrumSetup1);
+                        }
+                        // XG -> GS
+                        (MIDISystem::XG, MIDISystem::GS) => {
+                            for ch in 0..16 {
+                                config.part_mode[ch] = match config.part_mode[ch] {
+                                    MIDIPartMode::XG(XGPartMode::Normal) => {
+                                        MIDIPartMode::GS(GSPartMode::Normal)
                                     }
-                                }
-                            }
-                            MIDISystem::GS | MIDISystem::XG => {}
-                        }
-                        // パートモードの変換
-                        match (config.midi_system.clone(), system.clone()) {
-                            // GM -> GS
-                            (MIDISystem::NONE, MIDISystem::GS)
-                            | (MIDISystem::GMLevel1, MIDISystem::GS)
-                            | (MIDISystem::GMLevel2, MIDISystem::GS) => {
-                                for ch in 0..16 {
-                                    config.part_mode[ch] = MIDIPartMode::GS(GSPartMode::Normal);
-                                }
-                                config.part_mode[9] = MIDIPartMode::GS(GSPartMode::RhythmMAP1);
-                            }
-                            // GS -> GM, XG -> GM
-                            (MIDISystem::GS, MIDISystem::NONE)
-                            | (MIDISystem::GS, MIDISystem::GMLevel1)
-                            | (MIDISystem::GS, MIDISystem::GMLevel2)
-                            | (MIDISystem::XG, MIDISystem::NONE)
-                            | (MIDISystem::XG, MIDISystem::GMLevel1)
-                            | (MIDISystem::XG, MIDISystem::GMLevel2) => {
-                                config.part_mode[9] = MIDIPartMode::GM(GMPartMode::Drum);
-                            }
-                            // GM -> XG
-                            (MIDISystem::NONE, MIDISystem::XG)
-                            | (MIDISystem::GMLevel1, MIDISystem::XG)
-                            | (MIDISystem::GMLevel2, MIDISystem::XG) => {
-                                for ch in 0..16 {
-                                    config.part_mode[ch] = MIDIPartMode::XG(XGPartMode::Normal);
-                                }
-                                config.part_mode[9] = MIDIPartMode::XG(XGPartMode::DrumSetup1);
-                            }
-                            // XG -> GS
-                            (MIDISystem::XG, MIDISystem::GS) => {
-                                for ch in 0..16 {
-                                    config.part_mode[ch] = match config.part_mode[ch] {
-                                        MIDIPartMode::XG(XGPartMode::Normal) => {
-                                            MIDIPartMode::GS(GSPartMode::Normal)
-                                        }
-                                        MIDIPartMode::XG(XGPartMode::DrumSetup1) => {
-                                            MIDIPartMode::GS(GSPartMode::RhythmMAP1)
-                                        }
-                                        MIDIPartMode::XG(XGPartMode::DrumSetup2) => {
-                                            MIDIPartMode::GS(GSPartMode::RhythmMAP2)
-                                        }
-                                        _ => unreachable!("Invalid mode!"),
-                                    };
-                                }
-                            }
-                            // GS -> XG
-                            (MIDISystem::GS, MIDISystem::XG) => {
-                                for ch in 0..16 {
-                                    config.part_mode[ch] = match config.part_mode[ch] {
-                                        MIDIPartMode::GS(GSPartMode::Normal) => {
-                                            MIDIPartMode::XG(XGPartMode::Normal)
-                                        }
-                                        MIDIPartMode::GS(GSPartMode::RhythmMAP1) => {
-                                            MIDIPartMode::XG(XGPartMode::DrumSetup1)
-                                        }
-                                        MIDIPartMode::GS(GSPartMode::RhythmMAP2) => {
-                                            MIDIPartMode::XG(XGPartMode::DrumSetup2)
-                                        }
-                                        _ => unreachable!("Invalid mode!"),
-                                    };
-                                }
-                            }
-                            _ => {}
-                        }
-                        // プレビュー向けにシステムを切り替える
-                        let midi_out_conn = midi_out_conn_ref.clone();
-                        let mut conn_out = midi_out_conn.lock().unwrap();
-                        match system {
-                            MIDISystem::NONE => {
-                                // GM1システムオンしてからオフ
-                                conn_out.send(&MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_ON).unwrap();
-                                conn_out.send(&MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_OFF).unwrap();
-                            }
-                            MIDISystem::GMLevel1 => {
-                                conn_out.send(&MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_ON).unwrap();
-                            }
-                            MIDISystem::GMLevel2 => {
-                                conn_out.send(&MIDIMSG_SYSEX_GMLEVEL2_SYSTEM_ON).unwrap();
-                            }
-                            MIDISystem::GS => {
-                                conn_out.send(&MIDIMSG_SYSEX_GS_RESET).unwrap();
-                            }
-                            MIDISystem::XG => {
-                                conn_out.send(&MIDIMSG_SYSEX_XG_SYSTEM_ON).unwrap();
+                                    MIDIPartMode::XG(XGPartMode::DrumSetup1) => {
+                                        MIDIPartMode::GS(GSPartMode::RhythmMAP1)
+                                    }
+                                    MIDIPartMode::XG(XGPartMode::DrumSetup2) => {
+                                        MIDIPartMode::GS(GSPartMode::RhythmMAP2)
+                                    }
+                                    _ => unreachable!("Invalid mode!"),
+                                };
                             }
                         }
+                        // GS -> XG
+                        (MIDISystem::GS, MIDISystem::XG) => {
+                            for ch in 0..16 {
+                                config.part_mode[ch] = match config.part_mode[ch] {
+                                    MIDIPartMode::GS(GSPartMode::Normal) => {
+                                        MIDIPartMode::XG(XGPartMode::Normal)
+                                    }
+                                    MIDIPartMode::GS(GSPartMode::RhythmMAP1) => {
+                                        MIDIPartMode::XG(XGPartMode::DrumSetup1)
+                                    }
+                                    MIDIPartMode::GS(GSPartMode::RhythmMAP2) => {
+                                        MIDIPartMode::XG(XGPartMode::DrumSetup2)
+                                    }
+                                    _ => unreachable!("Invalid mode!"),
+                                };
+                            }
+                        }
+                        _ => {}
                     }
                     config.midi_system = system;
-                    // システム変更時にチャンネル（パート）モードを更新
+                    // プレビュー向けにシステムを切り替え、チャンネル（パート）モードを更新
+                    self.send_midi_system_sysex_message(&config);
                     self.send_channel_mode_sysex_message(&config);
                 }
             }
@@ -2333,6 +2310,12 @@ impl App {
             Err(_) => return Err(PlayStreamError::DeviceNotAvailable),
         };
 
+        // MIDIのシステムとチャンネルモードを設定
+        if let Ok(config) = self.midi_output_configure.read() {
+            self.send_midi_system_sysex_message(&config);
+            self.send_channel_mode_sysex_message(&config);
+        }
+
         // MIDI再生スレッド生成
         let is_playing = self.stream_is_playing.clone();
         let midi_output_configure = self.midi_output_configure.clone();
@@ -2502,6 +2485,33 @@ impl App {
                 conn_out
                     .send(&[MIDIMSG_MODE | ch, MIDIMSG_MODE_ALL_SOUND_OFF, 0])
                     .unwrap();
+            }
+        }
+    }
+
+    // MIDIシステムを切り替えるSystem Exclusiveを送信
+    fn send_midi_system_sysex_message(&self, config: &MIDIOutputConfigure) {
+        if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+            let midi_out_conn = midi_out_conn_ref.clone();
+            let mut conn_out = midi_out_conn.lock().unwrap();
+            match config.midi_system {
+                MIDISystem::NONE => {
+                    // GM1システムオンしてからオフ
+                    conn_out.send(&MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_ON).unwrap();
+                    conn_out.send(&MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_OFF).unwrap();
+                }
+                MIDISystem::GMLevel1 => {
+                    conn_out.send(&MIDIMSG_SYSEX_GMLEVEL1_SYSTEM_ON).unwrap();
+                }
+                MIDISystem::GMLevel2 => {
+                    conn_out.send(&MIDIMSG_SYSEX_GMLEVEL2_SYSTEM_ON).unwrap();
+                }
+                MIDISystem::GS => {
+                    conn_out.send(&MIDIMSG_SYSEX_GS_RESET).unwrap();
+                }
+                MIDISystem::XG => {
+                    conn_out.send(&MIDIMSG_SYSEX_XG_SYSTEM_ON).unwrap();
+                }
             }
         }
     }
