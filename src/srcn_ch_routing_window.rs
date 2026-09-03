@@ -1,7 +1,8 @@
 use crate::types::*;
 use crate::Message;
 use iced::widget::{button, checkbox, column, pick_list, row, text, tooltip, Column};
-use iced::{alignment, Color, Element, Length};
+use iced::Border;
+use iced::{alignment, Color, Element, Length, Theme};
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
@@ -27,9 +28,13 @@ impl SPC2MIDI2Window for SRCNChannelRoutingWindow {
         let part_mode = &midi_config.part_mode;
         // 選択可能なチャンネルリスト
         let output_midi_channel_list: Vec<_> = if (param.program.clone() as u8) >= 0x80 {
-            (0..=15).filter(|ch| part_mode[*ch as usize].is_drum_part()).collect()
+            (0..=15)
+                .filter(|ch| part_mode[*ch as usize].is_drum_part())
+                .collect()
         } else {
-            (0..=15).filter(|ch| !part_mode[*ch as usize].is_drum_part()).collect()
+            (0..=15)
+                .filter(|ch| !part_mode[*ch as usize].is_drum_part())
+                .collect()
         };
         let mut status_list: Vec<_> = (0..8)
             .map(|ch| {
@@ -58,6 +63,12 @@ impl SPC2MIDI2Window for SRCNChannelRoutingWindow {
                             Message::ChannelRoutingChanged(self.srn_no, ch as u8, dst_ch)
                         }
                     )
+                    .menu_style(|theme: &Theme| {
+                        let mut style = iced::overlay::menu::default(theme);
+                        style.border = Border::default().rounded(6.0);
+                        style.background = iced::Background::Color(theme.palette().background);
+                        style
+                    })
                     .width(Length::FillPortion(1)),
                 ]
                 .spacing(10)
@@ -92,7 +103,7 @@ impl SPC2MIDI2Window for SRCNChannelRoutingWindow {
         ),];
 
         column![
-            Column::from_vec(status_list).width(Length::Fill),
+            Column::from_vec(status_list).spacing(5).width(Length::Fill),
             controller,
         ]
         .into()

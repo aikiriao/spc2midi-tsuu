@@ -495,7 +495,7 @@ impl App {
             Message::SRCNWindowOpened(_id) => {}
             Message::OpenSRCNChannelRoutingWindow(srn_no) => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(350.0, 300.0),
+                    size: iced::Size::new(350.0, 350.0),
                     ..Default::default()
                 });
                 let infos = self.source_infos.read().unwrap();
