@@ -958,7 +958,18 @@ impl App {
                 if let Some(param) = params.get_mut(&srn_no) {
                     for ch in 0..8 {
                         param.channel_routing[ch] = if (param.program.clone() as u8) >= 0x80 {
-                            9u8
+                            if let Ok(config) = self.midi_output_configure.read() {
+                                let mut drum_ch = 9u8;
+                                for ch in 8..16 {
+                                    if config.part_mode[ch].is_drum_part() {
+                                        drum_ch = ch as u8;
+                                        break;
+                                    }
+                                }
+                                drum_ch
+                            } else {
+                                9u8
+                            }
                         } else {
                             ch as u8
                         };
@@ -1304,6 +1315,20 @@ impl App {
                                 return Task::none();
                             }
                         }
+                    }
+                    // ドラムチャンネルは最低でも1つ維持
+                    if !mode.is_drum_part()
+                        && config.part_mode[ch as usize].is_drum_part()
+                        && (0..16)
+                            .filter(|ch| config.part_mode[*ch as usize].is_drum_part())
+                            .count()
+                            == 1
+                    {
+                        eprintln!(
+                            "Failed to edit drum channel {}; at least 1 drum channel",
+                            ch
+                        );
+                        return Task::none();
                     }
                     // システムとチャンネル（パート）モードのチェック
                     match mode {
@@ -1674,6 +1699,20 @@ impl App {
             config.beats_per_minute = Self::round_bpm(bpm);
         }
 
+        // デフォルトのドラムチャンネル
+        let default_drum_channel = if let Ok(config) = self.midi_output_configure.read() {
+            let mut drum_ch = 9u8;
+            for ch in 8..16 {
+                if config.part_mode[ch].is_drum_part() {
+                    drum_ch = ch as u8;
+                    break;
+                }
+            }
+            drum_ch
+        } else {
+            9u8
+        };
+
         // 波形情報の読み込み
         for (srn, dir_address) in start_address_map.iter() {
             let mut decoder = Decoder::new();
@@ -1736,7 +1775,7 @@ impl App {
                     update_parameter_after_noteon: true,
                     retrigger_noteon_on_exceed_pitch_bend_width: true,
                     channel_routing: if is_drum {
-                        [9; 8]
+                        [default_drum_channel; 8]
                     } else {
                         [0, 1, 2, 3, 4, 5, 6, 7]
                     },

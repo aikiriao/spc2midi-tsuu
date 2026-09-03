@@ -4170,7 +4170,7 @@ dependencies = [
 
 [[package]]
 name = "spc2midi-tsuu"
-version = "0.2.93"
+version = "0.2.94"
 dependencies = [
  "clap",
  "cpal",
