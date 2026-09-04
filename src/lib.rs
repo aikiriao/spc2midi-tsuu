@@ -802,8 +802,14 @@ impl App {
                             param.channel_routing[ch] = ch as u8;
                         }
                     } else if !prev_is_drum && curr_is_drum {
+                        let drum_ch_list = self.get_drum_channels_list();
+                        // 出力できるドラムチャンネルがない場合は変更しない
+                        if drum_ch_list.len() == 0 {
+                            return Task::none();
+                        }
+                        // 先頭のドラムチャンネルに割当
                         for ch in 0..8 {
-                            param.channel_routing[ch] = 9u8;
+                            param.channel_routing[ch] = drum_ch_list[0];
                         }
                     }
                     param.program = program.clone();
@@ -956,20 +962,11 @@ impl App {
             Message::ChannelRoutingReseted(srn_no) => {
                 let mut params = self.source_parameter.write().unwrap();
                 if let Some(param) = params.get_mut(&srn_no) {
+                    let drum_channels = self.get_drum_channels_list();
                     for ch in 0..8 {
                         param.channel_routing[ch] = if (param.program.clone() as u8) >= 0x80 {
-                            if let Ok(config) = self.midi_output_configure.read() {
-                                let mut drum_ch = 9u8;
-                                for ch in 8..16 {
-                                    if config.part_mode[ch].is_drum_part() {
-                                        drum_ch = ch as u8;
-                                        break;
-                                    }
-                                }
-                                drum_ch
-                            } else {
-                                9u8
-                            }
+                            // ドラムチャンネル先頭に設定
+                            drum_channels[0]
                         } else {
                             ch as u8
                         };
@@ -1292,20 +1289,6 @@ impl App {
                                 return Task::none();
                             }
                         }
-                    }
-                    // ドラムチャンネルは最低でも1つ維持
-                    if !mode.is_drum_part()
-                        && config.part_mode[ch as usize].is_drum_part()
-                        && (0..16)
-                            .filter(|ch| config.part_mode[*ch as usize].is_drum_part())
-                            .count()
-                            == 1
-                    {
-                        eprintln!(
-                            "Failed to edit drum channel {}; at least 1 drum channel",
-                            ch
-                        );
-                        return Task::none();
                     }
                     // システムとチャンネル（パート）モードのチェック
                     match mode {
@@ -1676,20 +1659,6 @@ impl App {
             config.beats_per_minute = Self::round_bpm(bpm);
         }
 
-        // デフォルトのドラムチャンネル
-        let default_drum_channel = if let Ok(config) = self.midi_output_configure.read() {
-            let mut drum_ch = 9u8;
-            for ch in 8..16 {
-                if config.part_mode[ch].is_drum_part() {
-                    drum_ch = ch as u8;
-                    break;
-                }
-            }
-            drum_ch
-        } else {
-            9u8
-        };
-
         // 波形情報の読み込み
         for (srn, dir_address) in start_address_map.iter() {
             let mut decoder = Decoder::new();
@@ -1728,6 +1697,10 @@ impl App {
             infos.insert(*srn, source_info.clone());
             // ドラム音とピッチの推定
             let (is_drum, center_note) = estimate_drum_and_note(&source_info);
+            // ドラム音はドラムチャンネルがあることを要求
+            // ドラムチャンネルをなくした状態で読む場合があるため
+            let drum_channels_list = self.get_drum_channels_list();
+            let is_drum = is_drum & (drum_channels_list.len() > 0);
             params.insert(
                 *srn,
                 SourceParameter {
@@ -1752,7 +1725,7 @@ impl App {
                     update_parameter_after_noteon: true,
                     retrigger_noteon_on_exceed_pitch_bend_width: true,
                     channel_routing: if is_drum {
-                        [default_drum_channel; 8]
+                        [drum_channels_list[0]; 8]
                     } else {
                         [0, 1, 2, 3, 4, 5, 6, 7]
                     },
@@ -2669,6 +2642,19 @@ impl App {
                 &self.spc_file.as_ref().unwrap().ram,
             );
         }
+    }
+
+    // ドラムパートのチャンネルを得る
+    fn get_drum_channels_list(&self) -> Vec<u8> {
+        let mut drum_ch = vec![];
+        if let Ok(config) = self.midi_output_configure.read() {
+            for ch in 8..16 {
+                if config.part_mode[ch].is_drum_part() {
+                    drum_ch.push(ch as u8);
+                }
+            }
+        }
+        drum_ch
     }
 }
 
