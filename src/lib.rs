@@ -1941,14 +1941,21 @@ impl App {
                 MIDISystem::GS | MIDISystem::XG => {
                     // 全チャンネル（パート）のモードを設定
                     for ch in 0..16 {
-                        let is_drum_part = config.part_mode[ch].is_drum_part();
+                        let mode = &config.part_mode[ch];
+                        let is_drum_part = mode.is_drum_part();
                         // デフォルトがドラムパートに指定されている10chは変更があった場合明示的に送信
-                        if is_drum_part || ((ch == 9) && (!is_drum_part)) {
+                        if is_drum_part || ((ch == 9) && !is_drum_part) {
                             let mut sysex = match &config.part_mode[ch] {
                                 MIDIPartMode::GS(mode) => {
+                                    if (ch == 9) && (*mode == GSPartMode::RhythmMAP1) {
+                                        continue;
+                                    }
                                     generate_gs_part_mode_sysex_message(ch as u8, &mode)
                                 }
                                 MIDIPartMode::XG(mode) => {
+                                    if (ch == 9) && (*mode == XGPartMode::DrumSetup1) {
+                                        continue;
+                                    }
                                     generate_xg_part_mode_sysex_message(ch as u8, &mode)
                                 }
                                 _ => {
