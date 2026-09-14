@@ -1,7 +1,8 @@
 use crate::types::*;
 use crate::Message;
 use iced::widget::{button, checkbox, column, pick_list, row, text, tooltip, Column};
-use iced::{alignment, Color, Element, Length};
+use iced::Border;
+use iced::{alignment, Color, Element, Length, Theme};
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
@@ -11,6 +12,7 @@ pub struct SRCNChannelRoutingWindow {
     srn_no: u8,
     source_info: Arc<SourceInformation>,
     source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
+    midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
 }
 
 impl SPC2MIDI2Window for SRCNChannelRoutingWindow {
@@ -21,11 +23,18 @@ impl SPC2MIDI2Window for SRCNChannelRoutingWindow {
     fn view(&self) -> Element<'_, Message> {
         let params = self.source_parameter.read().unwrap();
         let param = params.get(&self.srn_no).unwrap();
-        // ドラム音色が選択されているときはチャンネル候補を絞る
-        let output_midi_channel_list = if (param.program.clone() as u8) >= 0x80 {
-            vec![9]
+        let midi_config = self.midi_output_configure.read().unwrap();
+
+        let part_mode = &midi_config.part_mode;
+        // 選択可能なチャンネルリスト
+        let output_midi_channel_list: Vec<_> = if (param.program.clone() as u8) >= 0x80 {
+            (0..=15)
+                .filter(|ch| part_mode[*ch as usize].is_drum_part())
+                .collect()
         } else {
-            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15]
+            (0..=15)
+                .filter(|ch| !part_mode[*ch as usize].is_drum_part())
+                .collect()
         };
         let mut status_list: Vec<_> = (0..8)
             .map(|ch| {
@@ -54,6 +63,12 @@ impl SPC2MIDI2Window for SRCNChannelRoutingWindow {
                             Message::ChannelRoutingChanged(self.srn_no, ch as u8, dst_ch)
                         }
                     )
+                    .menu_style(|theme: &Theme| {
+                        let mut style = iced::overlay::menu::default(theme);
+                        style.border = Border::default().rounded(6.0);
+                        style.background = iced::Background::Color(theme.palette().background);
+                        style
+                    })
                     .width(Length::FillPortion(1)),
                 ]
                 .spacing(10)
@@ -88,7 +103,7 @@ impl SPC2MIDI2Window for SRCNChannelRoutingWindow {
         ),];
 
         column![
-            Column::from_vec(status_list).width(Length::Fill),
+            Column::from_vec(status_list).spacing(5).width(Length::Fill),
             controller,
         ]
         .into()
@@ -101,12 +116,14 @@ impl SRCNChannelRoutingWindow {
         srn_no: u8,
         source_info: &SourceInformation,
         source_parameter: Arc<RwLock<BTreeMap<u8, SourceParameter>>>,
+        midi_output_configure: Arc<RwLock<MIDIOutputConfigure>>,
     ) -> Self {
         Self {
             title: title,
             srn_no: srn_no,
             source_info: source_info.clone().into(),
             source_parameter: source_parameter,
+            midi_output_configure: midi_output_configure,
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::types::*;
 use crate::Message;
-use iced::widget::{button, checkbox, column, combo_box, row, text, tooltip};
+use iced::widget::{button, checkbox, column, combo_box, row, text, tooltip, Row};
 use iced::{alignment, Element, Length};
 use iced_aw::number_input;
 use std::sync::{Arc, RwLock};
@@ -28,7 +28,13 @@ impl std::fmt::Display for VolumeCurve {
 }
 
 impl MIDISystem {
-    pub const ALL: [MIDISystem; 5] = [Self::NONE, Self::GMLevel1, Self::GMLevel2, Self::GS, Self::XG];
+    pub const ALL: [MIDISystem; 5] = [
+        Self::NONE,
+        Self::GMLevel1,
+        Self::GMLevel2,
+        Self::GS,
+        Self::XG,
+    ];
 }
 
 impl std::fmt::Display for MIDISystem {
@@ -145,6 +151,54 @@ impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
             .padding(10)
             .align_y(alignment::Alignment::Center)
             .width(Length::Fill),
+            column![
+                row![
+                    text("Drum Channel"),
+                    button("Edit Drum Channel")
+                        .on_press(Message::OpenMIDIDrumChannelAssignmentWindow)
+                        .width(155),
+                ]
+                .spacing(10)
+                .align_y(alignment::Alignment::Center)
+                .width(Length::Fill),
+                {
+                    let row_vec = (8..12)
+                        .map(|ch| -> Element<'_, Message> {
+                            row![
+                                text(format!("{}: ", ch))
+                                    .width(25.0)
+                                    .align_x(alignment::Alignment::End)
+                                    .align_y(alignment::Alignment::Center),
+                                text(format!("{}", midi_output_configure.part_mode[ch]))
+                                    .width(90.0)
+                                    .align_y(alignment::Alignment::Center)
+                            ]
+                            .into()
+                        })
+                        .collect();
+                    Row::from_vec(row_vec).spacing(5)
+                },
+                {
+                    let row_vec = (12..16)
+                        .map(|ch| -> Element<'_, Message> {
+                            row![
+                                text(format!("{}: ", ch))
+                                    .width(25.0)
+                                    .align_x(alignment::Alignment::End)
+                                    .align_y(alignment::Alignment::Center),
+                                text(format!("{}", midi_output_configure.part_mode[ch]))
+                                    .width(90.0)
+                                    .align_y(alignment::Alignment::Center)
+                            ]
+                            .into()
+                        })
+                        .collect();
+                    Row::from_vec(row_vec).spacing(5)
+                }
+            ]
+            .spacing(10)
+            .padding(10)
+            .width(Length::Fill),
             row![
                 text("SPC700 Clock-Up Factor"),
                 number_input(
@@ -158,20 +212,22 @@ impl SPC2MIDI2Window for MIDIOutputConfigurationWindow {
             .align_y(alignment::Alignment::Center)
             .width(Length::Fill),
             row![
-                text("Split Drum Notes Into Separate Tracks"),
-                checkbox(midi_output_configure.split_drum_into_separate_tracks).on_toggle(
-                    move |flag| Message::MIDIOutputSplitDrumIntoSeparateTracksChanged(flag)
-                )
+                checkbox(midi_output_configure.split_drum_into_separate_tracks)
+                    .label("Split Drum Notes Into Separate Tracks")
+                    .on_toggle(
+                        move |flag| Message::MIDIOutputSplitDrumIntoSeparateTracksChanged(flag)
+                    )
             ]
             .spacing(10)
             .padding(10)
             .align_y(alignment::Alignment::Center)
             .width(Length::Fill),
             row![
-                text("Trim Leading Non-Event Period"),
-                checkbox(midi_output_configure.trim_leading_nonevents_period).on_toggle(
-                    move |flag| Message::MIDIOutputTrimLeadingNonEventsPeriodChanged(flag)
-                )
+                checkbox(midi_output_configure.trim_leading_nonevents_period)
+                    .label("Trim Leading Non-Event Period")
+                    .on_toggle(
+                        move |flag| Message::MIDIOutputTrimLeadingNonEventsPeriodChanged(flag)
+                    )
             ]
             .spacing(10)
             .padding(10)
