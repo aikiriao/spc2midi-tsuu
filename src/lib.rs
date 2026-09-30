@@ -754,8 +754,8 @@ impl App {
                     let flags = self.channel_mute_flags.load(Ordering::Relaxed);
                     let mut spc = pcm_spc.lock().unwrap();
                     // 全チャンネルミュートorフラグを復帰
-                    spc.dsp.write_register(
-                        &[0u8],
+                    write_dsp_register(
+                        &mut spc,
                         DSP_ADDRESS_CHANNEL_MUTE,
                         if flag { flags } else { 0xFF },
                     );
@@ -769,8 +769,8 @@ impl App {
                     let flags = self.channel_mute_flags.load(Ordering::Relaxed);
                     let mut spc = midi_spc.lock().unwrap();
                     // 全チャンネルミュートorフラグを復帰
-                    spc.dsp.write_register(
-                        &[0u8],
+                    write_dsp_register(
+                        &mut spc,
                         DSP_ADDRESS_CHANNEL_MUTE,
                         if flag { flags } else { 0xFF },
                     );
@@ -1327,15 +1327,15 @@ impl App {
                     };
                     let midi_on = self.midi_spc_on.load(Ordering::Relaxed);
                     let mut midi_spc = midi_spc.lock().unwrap();
-                    midi_spc.dsp.write_register(
-                        &[0u8],
+                    write_dsp_register(
+                        &mut midi_spc,
                         DSP_ADDRESS_CHANNEL_MUTE,
                         if midi_on { new_flags } else { 0xFF },
                     );
                     let pcm_on = self.pcm_spc_on.load(Ordering::Relaxed);
                     let mut pcm_spc = pcm_spc.lock().unwrap();
-                    pcm_spc.dsp.write_register(
-                        &[0u8],
+                    write_dsp_register(
+                        &mut pcm_spc,
                         DSP_ADDRESS_CHANNEL_MUTE,
                         if pcm_on { new_flags } else { 0xFF },
                     );
@@ -1361,15 +1361,15 @@ impl App {
                     };
                     let pcm_on = self.pcm_spc_on.load(Ordering::Relaxed);
                     let mut pcm_spc = pcm_spc.lock().unwrap();
-                    pcm_spc.dsp.write_register(
-                        &[0u8],
+                    write_dsp_register(
+                        &mut pcm_spc,
                         DSP_ADDRESS_CHANNEL_MUTE,
                         if pcm_on { new_flags } else { 0xFF },
                     );
                     let midi_on = self.midi_spc_on.load(Ordering::Relaxed);
                     let mut midi_spc = midi_spc.lock().unwrap();
-                    midi_spc.dsp.write_register(
-                        &[0u8],
+                    write_dsp_register(
+                        &mut midi_spc,
                         DSP_ADDRESS_CHANNEL_MUTE,
                         if midi_on { new_flags } else { 0xFF },
                     );
@@ -1450,9 +1450,9 @@ impl App {
                 // 再生情報取得
                 if let Some(midi_spc_ref) = &self.midi_spc {
                     let midi_spc = midi_spc_ref.clone();
-                    let spc = midi_spc.lock().unwrap();
+                    let mut spc = midi_spc.lock().unwrap();
                     let mut status = self.playback_status.write().unwrap();
-                    *status = read_playback_status(&spc.dsp);
+                    *status = read_playback_status(&mut spc);
                 }
 
                 // 再生情報更新
@@ -1548,18 +1548,14 @@ impl App {
             // 64kHzティック処理
             if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
                 // ノートオンされていた音のボリュームの和をオンセット信号とする
-                let noteon = midispc.dsp.read_register(ram, DSP_ADDRESS_NOTEON);
+                let noteon = read_dsp_register(&mut midispc, DSP_ADDRESS_NOTEON);
                 let mut onset = 0.0;
                 for ch in 0..8 {
                     if ((channel_mute_flags >> ch) & 0x1) == 0 && ((noteon >> ch) & 0x1) != 0 {
-                        let lvol = midispc
-                            .dsp
-                            .read_register(ram, (ch << 4) | DSP_ADDRESS_V0VOLL)
-                            as f32;
-                        let rvol = midispc
-                            .dsp
-                            .read_register(ram, (ch << 4) | DSP_ADDRESS_V0VOLR)
-                            as f32;
+                        let lvol =
+                            read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0VOLL) as f32;
+                        let rvol =
+                            read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0VOLR) as f32;
                         onset += lvol.abs() + rvol.abs();
                     }
                 }
@@ -1605,15 +1601,14 @@ impl App {
             cycle_count += midispc.execute_step() as u32;
             // キーオンが打たれていた時のサンプル番号・チャンネル使用状況・ピッチを取得
             // DSPを動かすとキーオンフラグが落ちることがあるので64kHzティック前に調べる
-            let keyon = midispc.dsp.read_register(ram, DSP_ADDRESS_KON);
+            let keyon = read_dsp_register(&mut midispc, DSP_ADDRESS_KON);
             if keyon != 0 {
                 let brr_dir_base_address =
-                    (midispc.dsp.read_register(ram, DSP_ADDRESS_DIR) as u16) << 8;
+                    (read_dsp_register(&mut midispc, DSP_ADDRESS_DIR) as u16) << 8;
                 for ch in 0..8 {
                     if (keyon >> ch) & 1 != 0 {
-                        let sample_source = midispc
-                            .dsp
-                            .read_register(ram, (ch << 4) | DSP_ADDRESS_V0SRCN);
+                        let sample_source =
+                            read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0SRCN);
                         let dir_address =
                             (brr_dir_base_address + 4 * (sample_source as u16)) as usize;
                         start_address_map.insert(sample_source, dir_address);
@@ -1621,15 +1616,12 @@ impl App {
                             .entry(sample_source)
                             .and_modify(|keyon_ch| *keyon_ch |= 1 << ch)
                             .or_insert(1 << ch);
-                        let pitch = ((midispc
-                            .dsp
-                            .read_register(ram, (ch << 4) | DSP_ADDRESS_V0PITCHH)
-                            as u16)
-                            << 8)
-                            | (midispc
-                                .dsp
-                                .read_register(ram, (ch << 4) | DSP_ADDRESS_V0PITCHL)
-                                as u16);
+                        let pitch =
+                            ((read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0PITCHH)
+                                as u16)
+                                << 8)
+                                | (read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0PITCHL)
+                                    as u16);
                         pitch_sequence_map
                             .entry(sample_source)
                             .or_default()
@@ -1663,10 +1655,10 @@ impl App {
         for (srn, dir_address) in start_address_map.iter() {
             let mut decoder = Decoder::new();
             let mut signal = Vec::new();
-            decoder.keyon(ram, *dir_address);
+            decoder.keyon(&midispc.ram, *dir_address);
             // 原音ピッチで終端までデコード
             loop {
-                let pcm = decoder.process(ram, 0x1000) as f32;
+                let pcm = decoder.process(&midispc.ram, 0x1000) as f32;
                 signal.push(pcm * PCM_NORMALIZE_CONST);
                 // 最後のブロックはデコードしない（ループを繋ぐため）
                 if decoder.end {
@@ -1674,10 +1666,10 @@ impl App {
                 }
             }
             // データ追記
-            let start_address =
-                make_u16_from_u8(&ram[(*dir_address + 0)..(*dir_address + 2)]) as usize;
-            let loop_address =
-                make_u16_from_u8(&ram[(*dir_address + 2)..(*dir_address + 4)]) as usize;
+            let start_address = (midispc.read_ram_u8(*dir_address + 0) as usize)
+                | ((midispc.read_ram_u8(*dir_address + 1) as usize) << 8);
+            let loop_address = (midispc.read_ram_u8(*dir_address + 2) as usize)
+                | ((midispc.read_ram_u8(*dir_address + 3) as usize) << 8);
             let using_channel_flags = using_channel_map.get(srn).unwrap();
             let using_channel: [bool; 8] = (0..8)
                 .into_iter()
@@ -1990,7 +1982,7 @@ impl App {
                     &spc_file.ram,
                     &spc_file.dsp_register,
                 );
-                apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
+                apply_source_parameter(&mut spc, &config, &params);
 
                 Self::find_first_midi_event_time(&config, &mut spc)
             } else {
@@ -2020,7 +2012,7 @@ impl App {
                 );
 
                 // パラメータ適用
-                apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
+                apply_source_parameter(&mut spc, &config, &params);
 
                 // 出力先チャンネルがmidi_ch以外になっているルーティングをミュート
                 let mut track_names = vec![];
@@ -2030,10 +2022,8 @@ impl App {
                     for ch in 0..8 {
                         if param.channel_routing[ch] != midi_ch as u8 {
                             let value = 0x80 | ((ch << 4) as u8) | param.channel_routing[ch];
-                            spc.dsp
-                                .write_register(&[0u8], DSP_ADDRESS_SRCN_TARGET, *srn_no);
-                            spc.dsp
-                                .write_register(&[0u8], DSP_ADDRESS_SRCN_CHANNEL_ROUTING, value);
+                            write_dsp_register(&mut spc, DSP_ADDRESS_SRCN_TARGET, *srn_no);
+                            write_dsp_register(&mut spc, DSP_ADDRESS_SRCN_CHANNEL_ROUTING, value);
                         } else {
                             exist_routing = true;
                         }
@@ -2093,17 +2083,17 @@ impl App {
                             );
 
                             // パラメータ適用
-                            apply_source_parameter(&mut spc, &config, &params, &spc_file.ram);
+                            apply_source_parameter(&mut spc, &config, &params);
 
                             // srn_no以外を全てミュート
                             for (another_srn_no, _) in params.iter() {
                                 if another_srn_no != srn_no {
-                                    spc.dsp.write_register(
-                                        &[0u8],
+                                    write_dsp_register(
+                                        &mut spc,
                                         DSP_ADDRESS_SRCN_TARGET,
                                         *another_srn_no,
                                     );
-                                    spc.dsp.write_register(&[0u8], DSP_ADDRESS_SRCN_FLAG, 0x80);
+                                    write_dsp_register(&mut spc, DSP_ADDRESS_SRCN_FLAG, 0x80);
                                 }
                             }
 
@@ -2113,13 +2103,9 @@ impl App {
                                 if param.channel_routing[ch] != midi_ch as u8 {
                                     let value =
                                         0x80 | ((ch << 4) as u8) | param.channel_routing[ch];
-                                    spc.dsp.write_register(
-                                        &[0u8],
-                                        DSP_ADDRESS_SRCN_TARGET,
-                                        *srn_no,
-                                    );
-                                    spc.dsp.write_register(
-                                        &[0u8],
+                                    write_dsp_register(&mut spc, DSP_ADDRESS_SRCN_TARGET, *srn_no);
+                                    write_dsp_register(
+                                        &mut spc,
                                         DSP_ADDRESS_SRCN_CHANNEL_ROUTING,
                                         value,
                                     );
@@ -2217,13 +2203,13 @@ impl App {
             let midi_on = self.midi_spc_on.load(Ordering::Relaxed);
             let mut pcm_spc = pcm_spc.lock().unwrap();
             let mut midi_spc = midi_spc.lock().unwrap();
-            pcm_spc.dsp.write_register(
-                &[0u8],
+            write_dsp_register(
+                &mut pcm_spc,
                 DSP_ADDRESS_CHANNEL_MUTE,
                 if pcm_on { flags } else { 0xFF },
             );
-            midi_spc.dsp.write_register(
-                &[0u8],
+            write_dsp_register(
+                &mut midi_spc,
                 DSP_ADDRESS_CHANNEL_MUTE,
                 if midi_on { flags } else { 0xFF },
             );
@@ -2644,12 +2630,7 @@ impl App {
             let config = self.midi_output_configure.read().unwrap();
             let params = self.source_parameter.read().unwrap();
             let mut midispc = midi_spc.lock().unwrap();
-            apply_source_parameter(
-                &mut midispc,
-                &config,
-                &params,
-                &self.spc_file.as_ref().unwrap().ram,
-            );
+            apply_source_parameter(&mut midispc, &config, &params);
         }
     }
 
@@ -2667,17 +2648,49 @@ impl App {
     }
 }
 
+/// DSPレジスタ書き込み
+fn write_dsp_register<T>(spc: &mut spc700::spc::SPC<T>, address: u8, value: u8)
+where
+    T: SPCDSP,
+{
+    // アドレスをバックアップ
+    let address_backup = spc.read_ram_u8(SPC_ADDRESS_DSPADDR);
+
+    // DSPレジスタ書き込み
+    spc.write_ram_u8(SPC_ADDRESS_DSPADDR, address);
+    spc.write_ram_u8(SPC_ADDRESS_DSPDATA, value);
+
+    // レジスタを復帰
+    spc.write_ram_u8(SPC_ADDRESS_DSPADDR, address_backup);
+}
+
+/// DSPレジスタ読み込み
+fn read_dsp_register<T>(spc: &mut spc700::spc::SPC<T>, address: u8) -> u8
+where
+    T: SPCDSP,
+{
+    // アドレスをバックアップ
+    let address_backup = spc.read_ram_u8(SPC_ADDRESS_DSPADDR);
+
+    // DSPレジスタ読み込み
+    spc.write_ram_u8(SPC_ADDRESS_DSPADDR, address);
+    let ret = spc.read_ram_u8(SPC_ADDRESS_DSPDATA);
+
+    // レジスタを復帰
+    spc.write_ram_u8(SPC_ADDRESS_DSPADDR, address_backup);
+
+    ret
+}
+
 /// 音源パラメータをDSPに適用
 fn apply_source_parameter(
     spc: &mut spc700::spc::SPC<spc700::mididsp::MIDIDSP>,
     config: &MIDIOutputConfigure,
     source_params: &BTreeMap<u8, SourceParameter>,
-    ram: &[u8],
 ) {
     // 音源に依存するパラメータ
     for (srn_no, param) in source_params.iter() {
-        spc.dsp
-            .write_register(ram, DSP_ADDRESS_SRCN_TARGET, *srn_no);
+        write_dsp_register(spc, DSP_ADDRESS_SRCN_TARGET, *srn_no);
         let mut flag = 0;
         if param.mute {
             flag |= 0x80;
@@ -2691,38 +2704,36 @@ fn apply_source_parameter(
         if param.retrigger_noteon_on_exceed_pitch_bend_width {
             flag |= 0x10;
         }
-        spc.dsp.write_register(ram, DSP_ADDRESS_SRCN_FLAG, flag);
-        spc.dsp
-            .write_register(ram, DSP_ADDRESS_SRCN_PROGRAM, param.program.clone() as u8);
-        spc.dsp
-            .write_register(ram, DSP_ADDRESS_SRCN_NOTEON_VELOCITY, param.noteon_velocity);
-        spc.dsp.write_register(
-            ram,
+        write_dsp_register(spc, DSP_ADDRESS_SRCN_FLAG, flag);
+        write_dsp_register(spc, DSP_ADDRESS_SRCN_PROGRAM, param.program.clone() as u8);
+        write_dsp_register(spc, DSP_ADDRESS_SRCN_NOTEON_VELOCITY, param.noteon_velocity);
+        write_dsp_register(
+            spc,
             DSP_ADDRESS_SRCN_CENTER_NOTE_HIGH,
             ((param.center_note >> 8) & 0xFF) as u8,
         );
-        spc.dsp.write_register(
-            ram,
+        write_dsp_register(
+            spc,
             DSP_ADDRESS_SRCN_CENTER_NOTE_LOW,
             ((param.center_note >> 0) & 0xFF) as u8,
         );
-        spc.dsp.write_register(
-            ram,
+        write_dsp_register(
+            spc,
             DSP_ADDRESS_SRCN_VOLUME,
             if param.auto_volume { 0x80 } else { 0x00 } | param.fixed_volume,
         );
-        spc.dsp.write_register(
-            ram,
+        write_dsp_register(
+            spc,
             DSP_ADDRESS_SRCN_PAN,
             if param.auto_pan { 0x80 } else { 0x00 } | param.fixed_pan,
         );
-        spc.dsp.write_register(
-            ram,
+        write_dsp_register(
+            spc,
             DSP_ADDRESS_SRCN_PITCHBEND_SENSITIVITY,
             if param.enable_pitch_bend { 0x80 } else { 0x00 } | param.pitch_bend_width,
         );
-        spc.dsp.write_register(
-            ram,
+        write_dsp_register(
+            spc,
             DSP_ADDRESS_SRCN_REVERB_SEND,
             if param.echo_as_reverb_send {
                 0x80
@@ -2730,19 +2741,17 @@ fn apply_source_parameter(
                 0x00
             } | param.fixed_reverb_send,
         );
-        spc.dsp
-            .write_register(ram, DSP_ADDRESS_SRCN_CHORUS_SEND, param.chorus_send);
+        write_dsp_register(spc, DSP_ADDRESS_SRCN_CHORUS_SEND, param.chorus_send);
         for ch in 0..8 {
             let value = if param.channel_mute[ch] { 0x80 } else { 0x00 }
                 | (ch << 4) as u8
                 | param.channel_routing[ch];
-            spc.dsp
-                .write_register(ram, DSP_ADDRESS_SRCN_CHANNEL_ROUTING, value);
+            write_dsp_register(spc, DSP_ADDRESS_SRCN_CHANNEL_ROUTING, value);
         }
     }
     // 音源に依存しないパラメータ
-    spc.dsp.write_register(
-        ram,
+    write_dsp_register(
+        spc,
         DSP_ADDRESS_PLAYBACK_PARAMETER_UPDATE_PERIOD,
         config.playback_parameter_update_period,
     );
@@ -2752,8 +2761,7 @@ fn apply_source_parameter(
         VolumeCurve::Log => flag |= 0x40,
         VolumeCurve::Linear => flag |= 0x80,
     }
-    spc.dsp
-        .write_register(ram, DSP_ADDRESS_CONFIGURE_FLAG, flag);
+    write_dsp_register(spc, DSP_ADDRESS_CONFIGURE_FLAG, flag);
 }
 
 #[derive(Debug, Clone)]
@@ -2831,20 +2839,23 @@ async fn save_json(default_file_name: String, json: serde_json::Value) -> Result
 }
 
 // 再生情報の読み取り
-fn read_playback_status(midi_dsp: &spc700::mididsp::MIDIDSP) -> PlaybackStatus {
+fn read_playback_status<T>(spc: &mut spc700::spc::SPC<T>) -> PlaybackStatus
+where
+    T: SPCDSP,
+{
     let mut status = PlaybackStatus::new();
 
-    let noteon_flags = midi_dsp.read_register(&[0u8], DSP_ADDRESS_NOTEON);
+    let noteon_flags = read_dsp_register(spc, DSP_ADDRESS_NOTEON);
     for ch in 0..8 {
         let ch_nibble = (ch as u8) << 4;
         status.noteon[ch] = ((noteon_flags >> ch) & 1) != 0;
-        status.srn_no[ch] = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0SRCN | ch_nibble);
-        let pitch_high = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0PITCHH | ch_nibble);
-        let pitch_low = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0PITCHL | ch_nibble);
+        status.srn_no[ch] = read_dsp_register(spc, DSP_ADDRESS_V0SRCN | ch_nibble);
+        let pitch_high = read_dsp_register(spc, DSP_ADDRESS_V0PITCHH | ch_nibble);
+        let pitch_low = read_dsp_register(spc, DSP_ADDRESS_V0PITCHL | ch_nibble);
         status.pitch[ch] = ((pitch_high as u16) << 8) | (pitch_low as u16);
-        status.envelope[ch] = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0ENVX | ch_nibble);
-        status.volume[ch][0] = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0VOLL | ch_nibble) as i8;
-        status.volume[ch][1] = midi_dsp.read_register(&[0u8], DSP_ADDRESS_V0VOLR | ch_nibble) as i8;
+        status.envelope[ch] = read_dsp_register(spc, DSP_ADDRESS_V0ENVX | ch_nibble);
+        status.volume[ch][0] = read_dsp_register(spc, DSP_ADDRESS_V0VOLL | ch_nibble) as i8;
+        status.volume[ch][1] = read_dsp_register(spc, DSP_ADDRESS_V0VOLR | ch_nibble) as i8;
     }
 
     status
