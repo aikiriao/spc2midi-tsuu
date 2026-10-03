@@ -495,6 +495,13 @@ impl SPC2MIDI2Window for MainWindow {
                     }
                     .width(40)
                     .align_x(alignment::Alignment::Start),
+                    checkbox(param.mute)
+                        .on_toggle(move |flag| Message::SRCNMuteFlagToggled(srn, flag))
+                        .width(20),
+                    button("S")
+                        .style(iced::widget::button::success)
+                        .on_press(Message::SoloSRCN(srn))
+                        .width(30),
                     pick_list(
                         Program::ALL.to_vec(),
                         Some(param.program.clone()),
@@ -532,7 +539,7 @@ impl SPC2MIDI2Window for MainWindow {
                             .align_x(alignment::Alignment::End)
                             .align_y(alignment::Alignment::Center),
                     ]
-                    .width(Length::FillPortion(6)),
+                    .width(Length::FillPortion(5)),
                     stack![
                         progress_bar(0.0..=127.0, param.noteon_velocity as f32).style(
                             move |theme: &Theme| progress_bar::Style {
@@ -552,11 +559,12 @@ impl SPC2MIDI2Window for MainWindow {
                             .align_x(alignment::Alignment::End)
                             .align_y(alignment::Alignment::Center),
                     ]
-                    .width(Length::FillPortion(6)),
+                    .width(Length::FillPortion(5)),
                     button("Open")
                         .on_press(Message::OpenSRCNWindow(srn))
                         .width(60),
                 ]
+                .align_y(alignment::Alignment::Center)
                 .spacing(10);
 
                 Container::new(row)
@@ -648,14 +656,15 @@ impl SPC2MIDI2Window for MainWindow {
             })
             .align_x(alignment::Alignment::Start)
             .width(40),
+            text("Mute").width(50).align_x(alignment::Alignment::Start),
             text("Program")
                 .width(Length::FillPortion(17))
                 .align_x(alignment::Alignment::Start),
             text("C.Note")
-                .width(Length::FillPortion(6))
+                .width(Length::FillPortion(5))
                 .align_x(alignment::Alignment::Start),
             text("Velocity")
-                .width(Length::FillPortion(6))
+                .width(Length::FillPortion(5))
                 .align_x(alignment::Alignment::Start),
             text("Config")
                 .width(60)

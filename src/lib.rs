@@ -138,6 +138,7 @@ pub enum Message {
     SPCMuteFlagToggled(bool),
     MIDIMuteFlagToggled(bool),
     SRCNMuteFlagToggled(u8, bool),
+    SoloSRCN(u8),
     ProgramSelected(u8, Program, Option<window::Id>),
     ProgramSearchboxInputed(window::Id, String),
     ProgramSearchboxClosed(window::Id),
@@ -783,9 +784,35 @@ impl App {
                 }
             }
             Message::SRCNMuteFlagToggled(srn_no, flag) => {
-                let mut params = self.source_parameter.write().unwrap();
-                if let Some(param) = params.get_mut(&srn_no) {
-                    param.mute = flag;
+                if let Ok(mut params) = self.source_parameter.write() {
+                    if let Some(param) = params.get_mut(&srn_no) {
+                        param.mute = flag;
+                        return Task::perform(async {}, move |_| {
+                            Message::ReceivedSourceParameterUpdate
+                        });
+                    }
+                }
+            }
+            Message::SoloSRCN(srn_no) => {
+                if let Ok(mut params) = self.source_parameter.write() {
+                    let mut already_solo = true;
+                    // すでにソロ状態（1つのSRCNだけミュート解除されている）かチェック
+                    for param in params.iter() {
+                        if ((*param.0 == srn_no) && (param.1.mute))
+                            || ((*param.0 != srn_no) && (!param.1.mute))
+                        {
+                            already_solo = false;
+                            break;
+                        }
+                    }
+                    // ミュートフラグ操作
+                    for param in params.iter_mut() {
+                        param.1.mute = if already_solo {
+                            false
+                        } else {
+                            *param.0 != srn_no
+                        };
+                    }
                     return Task::perform(async {}, move |_| {
                         Message::ReceivedSourceParameterUpdate
                     });
