@@ -46,7 +46,6 @@ use std::time::Instant;
 use std::{cmp, io};
 
 use spc700::decoder::*;
-use spc700::mididsp::*;
 use spc700::spc::*;
 use spc700::spc_file::*;
 use spc700::types::*;
@@ -2652,12 +2651,22 @@ impl App {
 
     // 音源パラメータをDSPに適用
     fn apply_source_parameter(&mut self) {
-        if let Some(midi_spc_ref) = &self.midi_spc {
-            let midi_spc = midi_spc_ref.clone();
-            let config = self.midi_output_configure.read().unwrap();
-            let params = self.source_parameter.read().unwrap();
-            let mut midispc = midi_spc.lock().unwrap();
-            apply_source_parameter(&mut midispc, &config, &params);
+        if let (Ok(config), Ok(params)) = (
+            self.midi_output_configure.read(),
+            self.source_parameter.read(),
+        ) {
+            if let Some(midi_spc_ref) = &self.midi_spc {
+                let midi_spc = midi_spc_ref.clone();
+                if let Ok(mut midispc) = midi_spc.lock() {
+                    apply_source_parameter(&mut midispc, &config, &params);
+                }
+            }
+            if let Some(pcm_spc_ref) = &self.pcm_spc {
+                let pcm_spc = pcm_spc_ref.clone();
+                if let Ok(mut pcmspc) = pcm_spc.lock() {
+                    apply_source_parameter(&mut pcmspc, &config, &params);
+                }
+            }
         }
     }
 
@@ -2710,11 +2719,13 @@ where
 }
 
 /// 音源パラメータをDSPに適用
-fn apply_source_parameter(
-    spc: &mut spc700::spc::SPC<spc700::mididsp::MIDIDSP>,
+fn apply_source_parameter<T>(
+    spc: &mut spc700::spc::SPC<T>,
     config: &MIDIOutputConfigure,
     source_params: &BTreeMap<u8, SourceParameter>,
-) {
+) where
+    T: SPCDSP,
+{
     // 音源に依存するパラメータ
     for (srn_no, param) in source_params.iter() {
         write_dsp_register(spc, DSP_ADDRESS_SRCN_TARGET, *srn_no);
