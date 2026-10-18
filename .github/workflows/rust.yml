@@ -27,7 +27,7 @@ jobs:
     - name: Install LLVM
       uses: KyleMayes/install-llvm-action@v2
       with:
-        version: '15'
+        version: '20'
     - name: Preparation on Linux
       if: runner.os == 'Linux'
       run: |
