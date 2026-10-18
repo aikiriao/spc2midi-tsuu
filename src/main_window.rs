@@ -839,6 +839,10 @@ impl SPC2MIDI2Window for MainWindow {
         status_list.insert(0, status_index.into());
 
         let playback_speed_list = vec![0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0, 4.0];
+        let playback_speed_str_list: Vec<String> = playback_speed_list
+            .iter()
+            .map(|&v| format!("x{}", v).to_string())
+            .collect();
         let preview_control = row![
             tooltip(
                 button(
@@ -870,10 +874,25 @@ impl SPC2MIDI2Window for MainWindow {
                 .on_toggle(|flag| Message::MIDIMuteFlagToggled(flag))
                 .width(Length::FillPortion(4)),
             pick_list(
-                playback_speed_list,
-                Some(self.preview_playback_speed.load(Ordering::Relaxed)),
-                move |speed| Message::PreviewPlaybackSpeedChanged(speed)
+                playback_speed_str_list,
+                Some(format!(
+                    "x {}",
+                    self.preview_playback_speed.load(Ordering::Relaxed)
+                )),
+                move |speed: String| { Message::PreviewPlaybackSpeedChanged(speed[1..].parse().unwrap()) }
             )
+            .style(move |theme: &Theme, _| pick_list::Style {
+                text_color: theme.palette().text,
+                placeholder_color: theme.palette().text,
+                handle_color: theme.palette().text,
+                background: iced::Background::Color(Color::from_rgb(
+                    theme.palette().background.r,
+                    theme.palette().background.g,
+                    theme.palette().background.b,
+                )),
+                border: Border::default().rounded(0.0)
+            })
+            .padding(5)
             .width(Length::FillPortion(5)),
             text(format!("{:8.02}sec", self.playback_time_sec))
                 .width(Length::FillPortion(7))
