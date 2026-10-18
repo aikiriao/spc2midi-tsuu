@@ -37,7 +37,7 @@ jobs:
       if: runner.os == 'macOS'
       run: |
         brew update
-        brew install soundtouch
+        brew install sound-touch
         SDK_PATH=$(xcrun --show-sdk-path --sdk iphoneos)
         echo "SDKROOT=$SDK_PATH" >> $GITHUB_ENV
     - name: Get crate version on *nix platforms
