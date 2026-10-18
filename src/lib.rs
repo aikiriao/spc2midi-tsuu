@@ -18,6 +18,7 @@ use crate::source_estimation::*;
 use crate::srcn_ch_routing_window::*;
 use crate::srcn_window::*;
 use crate::types::*;
+use atomic_float::AtomicF64;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, PauseStreamError, PlayStreamError, Stream, StreamConfig};
 use fixed_resample::ReadStatus;
@@ -32,6 +33,7 @@ use rimd::{
 use samplerate::{convert, ConverterType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use soundtouch::SoundTouch;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::File;
@@ -142,6 +144,7 @@ pub enum Message {
     ProgramSearchboxInputed(window::Id, String),
     ProgramSearchboxClosed(window::Id),
     SRCNMIDIPreviewFlagToggled(bool),
+    PreviewPlaybackSpeedChanged(f64),
     ReceivedMIDIPreviewRequest(u8),
     CenterNoteIntChanged(u8, u8),
     CenterNoteFractionChanged(u8, f32),
@@ -220,6 +223,7 @@ pub struct App {
     midi_out_port_name: Arc<RwLock<Option<String>>>,
     display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
     display_note_type: Arc<RwLock<DisplayNoteType>>,
+    preview_playback_speed: Arc<AtomicF64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -371,6 +375,7 @@ impl Default for App {
             midi_out_port_name: Arc::new(RwLock::new(midi_out_port_name)),
             display_source_id_type: Arc::new(RwLock::new(DisplaySourceIDType::StartAddress)),
             display_note_type: Arc::new(RwLock::new(DisplayNoteType::NoteNumber)),
+            preview_playback_speed: Arc::new(AtomicF64::new(1.0)),
         }
     }
 }
@@ -418,6 +423,8 @@ impl App {
                     self.channel_mute_flags.clone(),
                     self.display_source_id_type.clone(),
                     self.display_note_type.clone(),
+                    self.preview_playback_speed.clone(),
+                    self.stream_is_playing.clone(),
                 );
                 self.main_window_id = id;
                 self.windows.insert(id, Box::new(window));
@@ -699,6 +706,9 @@ impl App {
             }
             Message::SRCNMIDIPreviewFlagToggled(flag) => {
                 self.midi_preview.store(flag, Ordering::Relaxed);
+            }
+            Message::PreviewPlaybackSpeedChanged(speed) => {
+                self.preview_playback_speed.store(speed, Ordering::Relaxed);
             }
             Message::ReceivedPlayStartRequest => {
                 if self.stream_is_playing.load(Ordering::Relaxed) {
@@ -2208,7 +2218,13 @@ impl App {
             return Err(PlayStreamError::DeviceNotAvailable);
         };
 
-        // リサンプラ初期化 32k -> デバイスの出力レート変換となるように
+        // タイムストレッチ初期化
+        let mut soundtouch = SoundTouch::new();
+        soundtouch
+            .set_channels(NUM_CHANNELS as u32)
+            .set_sample_rate(SPC_SAMPLING_RATE);
+
+        // リサンプラ初期化 32kHz -> デバイスの出力レート変換となるように
         let latency = self.audio_output_latency_msec.load(Ordering::Relaxed) as f64 / 1000.0;
         let (mut prod, mut cons) = fixed_resample::resampling_channel::<f32, NUM_CHANNELS>(
             NonZero::new(NUM_CHANNELS).unwrap(),
@@ -2248,13 +2264,21 @@ impl App {
         let played_samples = self.stream_played_samples.clone();
         let midi_output_bytes = self.midi_output_bytes.clone();
 
+        // 再生速度
+        let pcm_playback_speed = self.preview_playback_speed.clone();
+
         // 再生ストリーム作成
         let mut spc_cycle_count = 0;
         let stream = match stream_device.build_output_stream(
             &stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                const TS_BUFFER_SIZE: usize = 8192;
+                let mut ts_buffer = vec![0.0; TS_BUFFER_SIZE];
                 let mut progress = played_samples.load(Ordering::Relaxed);
                 let buffer_num_samples = buffer.len() / NUM_CHANNELS;
+
+                // 再生速度設定
+                soundtouch.set_tempo(pcm_playback_speed.load(Ordering::Relaxed));
 
                 // バッファを出力サンプルで埋める
                 buffer.fill(0.0);
@@ -2262,17 +2286,33 @@ impl App {
                 while buffer_progress < buffer_num_samples {
                     // 入力キューがいっぱいになるまで出力計算
                     if let Ok(mut spc) = pcm_spc.lock() {
-                        let nsamples = prod.available_frames();
-                        for _ in 0..nsamples {
+                        let mut nsamples = prod.available_frames();
+                        while nsamples > 0 {
                             spc_cycle_count += spc.execute_step() as u32;
                             if spc_cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
                                 spc_cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
                                 // PCM出力
                                 if let Some(pcm) = spc.clock_tick_64k_hz() {
-                                    prod.push_interleaved(&[
-                                        (pcm[0] as f32) * PCM_NORMALIZE_CONST,
-                                        (pcm[1] as f32) * PCM_NORMALIZE_CONST,
-                                    ]);
+                                    // タイムストレッチモジュールにpush
+                                    soundtouch.put_samples(
+                                        &[
+                                            (pcm[0] as f32) * PCM_NORMALIZE_CONST,
+                                            (pcm[1] as f32) * PCM_NORMALIZE_CONST,
+                                        ],
+                                        1,
+                                    );
+                                    // タイムストレッチが出力可能ならば処理
+                                    if soundtouch.is_empty() == 0 {
+                                        let ts_output_frames = soundtouch.receive_samples(
+                                            &mut ts_buffer,
+                                            (TS_BUFFER_SIZE / NUM_CHANNELS).min(nsamples),
+                                        );
+                                        // レート変換にpush
+                                        prod.push_interleaved(
+                                            &ts_buffer[..ts_output_frames * NUM_CHANNELS],
+                                        );
+                                        nsamples = prod.available_frames();
+                                    }
                                 }
                             }
                         }
@@ -2314,19 +2354,25 @@ impl App {
         let is_playing = self.stream_is_playing.clone();
         let midi_output_configure = self.midi_output_configure.clone();
         let mut midi_cycle_count = 0;
+        let midi_playback_speed = self.preview_playback_speed.clone();
         let _midi_thread = thread::spawn(move || {
-            let interval = Duration::from_nanos(CLOCK_TICK_CYCLE_64KHZ_NANOSEC);
             let mut next = Instant::now();
             while is_playing.load(Ordering::Relaxed) {
+                // 再生速度に合わせて更新間隔を変更
+                let speed = midi_playback_speed.load(Ordering::Relaxed);
+                let interval_ns = CLOCK_TICK_CYCLE_64KHZ_NANOSEC as f64 / speed;
+                let interval = Duration::from_nanos(interval_ns.round() as u64);
                 {
                     let mut midispc = midi_spc.lock().unwrap();
                     let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
-                    // 64kHzのサイクル数
-                    let spc_64k_hz_cycle = if let Ok(config) = midi_output_configure.read() {
+                    // 64kHzのサイクル数 再生速度に依存して決める
+                    let spc_64k_hz_cycle = (if let Ok(config) = midi_output_configure.read() {
                         config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ
                     } else {
                         CLOCK_TICK_CYCLE_64KHZ
-                    };
+                    } as f64
+                        * speed)
+                        .round() as u32;
                     // 64kHzタイマーティックするまで処理
                     while midi_cycle_count < spc_64k_hz_cycle {
                         midi_cycle_count += midispc.execute_step() as u32;

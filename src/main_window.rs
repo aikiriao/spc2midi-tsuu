@@ -1,6 +1,7 @@
 use crate::types::*;
 use crate::Message;
 use crate::Program;
+use atomic_float::AtomicF64;
 use iced::border::Radius;
 use iced::widget::canvas::{self, Canvas, Event, Frame, Geometry};
 use iced::widget::{
@@ -31,6 +32,8 @@ pub struct MainWindow {
     channel_mute_flags: Arc<AtomicU8>,
     display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
     display_note_type: Arc<RwLock<DisplayNoteType>>,
+    preview_playback_is_playing: Arc<AtomicBool>,
+    preview_playback_speed: Arc<AtomicF64>,
     pub row_color_style: SampleListRowColorStyle,
     pub sample_list_order: SampleListOrder,
     pub playback_time_sec: f32,
@@ -90,6 +93,8 @@ impl MainWindow {
         channel_mute_flags: Arc<AtomicU8>,
         display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
         display_note_type: Arc<RwLock<DisplayNoteType>>,
+        preview_playback_speed: Arc<AtomicF64>,
+        preview_playback_is_playing: Arc<AtomicBool>,
     ) -> Self {
         Self {
             title: title.clone(),
@@ -118,6 +123,8 @@ impl MainWindow {
             showing_channel_srn_list: [true; 8],
             display_source_id_type: display_source_id_type,
             display_note_type: display_note_type,
+            preview_playback_speed: preview_playback_speed,
+            preview_playback_is_playing: preview_playback_is_playing,
         }
     }
 
@@ -831,9 +838,21 @@ impl SPC2MIDI2Window for MainWindow {
         .align_y(alignment::Alignment::Center);
         status_list.insert(0, status_index.into());
 
+        let playback_speed_list = vec![0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0, 4.0];
         let preview_control = row![
             tooltip(
-                button("Play/Pause").on_press(Message::ReceivedPlayStartRequest),
+                button(
+                    Text::new(
+                        if self.preview_playback_is_playing.load(Ordering::Relaxed) {
+                            "Pause"
+                        } else {
+                            "Play"
+                        }
+                    )
+                    .align_x(alignment::Horizontal::Center)
+                )
+                .width(Length::FillPortion(5))
+                .on_press(Message::ReceivedPlayStartRequest),
                 "(F5)",
                 tooltip::Position::FollowCursor,
             ),
@@ -844,12 +863,20 @@ impl SPC2MIDI2Window for MainWindow {
             ),
             checkbox(self.pcm_spc_on.clone().load(Ordering::Relaxed))
                 .label("SPC")
-                .on_toggle(|flag| Message::SPCMuteFlagToggled(flag)),
+                .on_toggle(|flag| Message::SPCMuteFlagToggled(flag))
+                .width(Length::FillPortion(4)),
             checkbox(self.midi_spc_on.clone().load(Ordering::Relaxed))
                 .label("MIDI")
-                .on_toggle(|flag| Message::MIDIMuteFlagToggled(flag)),
+                .on_toggle(|flag| Message::MIDIMuteFlagToggled(flag))
+                .width(Length::FillPortion(4)),
+            pick_list(
+                playback_speed_list,
+                Some(self.preview_playback_speed.load(Ordering::Relaxed)),
+                move |speed| Message::PreviewPlaybackSpeedChanged(speed)
+            )
+            .width(Length::FillPortion(5)),
             text(format!("{:8.02}sec", self.playback_time_sec))
-                .width(90)
+                .width(Length::FillPortion(7))
                 .align_x(alignment::Alignment::End),
             text(format!("{:8.02}kbps", self.midi_bit_rate / 1000.0))
                 .color(if self.midi_bit_rate > 31_500.0 {
@@ -857,7 +884,8 @@ impl SPC2MIDI2Window for MainWindow {
                 } else {
                     self.theme.palette().text
                 })
-                .width(90)
+                .size(14.0)
+                .width(Length::FillPortion(6))
                 .align_x(alignment::Alignment::End),
         ]
         .spacing(10)
