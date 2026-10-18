@@ -76,6 +76,8 @@ const MIDIMSG_MODE: u8 = 0xB0;
 const MIDIMSG_PITCH_BEND: u8 = 0xE0;
 /// MIDIチェンネルモードメッセージ：オールサウンドオフ
 const MIDIMSG_MODE_ALL_SOUND_OFF: u8 = 0x78;
+/// MIDIチェンネルモードメッセージ：オールノートオフ
+const MIDIMSG_MODE_ALL_NOTES_OFF: u8 = 0x7B;
 /// MIDIコントロールチェンジ：RPN LSB
 const MIDICC_RPN_LSB: u8 = 0x64;
 /// MIDIコントロールチェンジ：RPN MSB
@@ -209,6 +211,7 @@ pub struct App {
     stream_played_samples: Arc<AtomicUsize>,
     midi_output_bytes: Arc<AtomicUsize>,
     stream_is_playing: Arc<AtomicBool>,
+    midi_thread_running: Arc<AtomicBool>,
     audio_output_latency_msec: Arc<AtomicUsize>,
     midi_out_conn: Option<Arc<Mutex<MidiOutputConnection>>>,
     pcm_spc: Option<Arc<Mutex<Box<spc700::spc::SPC<spc700::sdsp::SDSP>>>>>,
@@ -350,6 +353,7 @@ impl Default for App {
             stream_played_samples: Arc::new(AtomicUsize::new(0)),
             midi_output_bytes: Arc::new(AtomicUsize::new(0)),
             stream_is_playing: Arc::new(AtomicBool::new(false)),
+            midi_thread_running: Arc::new(AtomicBool::new(false)),
             audio_output_latency_msec: Arc::new(AtomicUsize::new(200)),
             midi_out_conn: midi_out_conn,
             pcm_spc: None,
@@ -712,8 +716,11 @@ impl App {
             }
             Message::ReceivedPlayStartRequest => {
                 if self.stream_is_playing.load(Ordering::Relaxed) {
-                    // 再生中の場合は止める
-                    self.stream_play_stop().expect("Failed to stop play");
+                    // 再生中の場合は一時停止
+                    self.stream_play_pause().expect("Failed to stop play");
+                } else if self.stream.is_some() {
+                    // 一時停止中の場合は再生再開
+                    self.stream_play_resume().expect("Failed to resume play");
                 } else {
                     // 再生開始
                     if let Err(_) = self.play_start() {
@@ -789,7 +796,7 @@ impl App {
                 }
                 // ミュートの時は音を止める
                 if !flag {
-                    self.stop_midi_all_sound();
+                    self.stop_midi_all_notes();
                 }
             }
             Message::SRCNMuteFlagToggled(srn_no, flag) => {
@@ -1129,7 +1136,12 @@ impl App {
                 self.apply_source_parameter();
             }
             Message::ReceivedMIDIPreviewRequest(srn_no) => {
-                self.preview_midi_sound(srn_no);
+                if self.stream_is_playing.load(Ordering::Relaxed) {
+                    // 再生中の場合は止める
+                    self.stream_play_stop().expect("Failed to stop play");
+                } else {
+                    self.preview_midi_sound(srn_no);
+                }
             }
             Message::AudioOutputDeviceSelected(device_name) => {
                 let mut audio_out_device_name = self.audio_out_device_name.write().unwrap();
@@ -2350,50 +2362,55 @@ impl App {
             self.send_channel_mode_sysex_message(&config);
         }
 
+        self.midi_thread_running.store(true, Ordering::Relaxed);
+
         // MIDI再生スレッド生成
+        let midi_thread_running = self.midi_thread_running.clone();
         let is_playing = self.stream_is_playing.clone();
         let midi_output_configure = self.midi_output_configure.clone();
         let mut midi_cycle_count = 0;
         let midi_playback_speed = self.preview_playback_speed.clone();
         let _midi_thread = thread::spawn(move || {
-            let mut next = Instant::now();
-            while is_playing.load(Ordering::Relaxed) {
-                // 再生速度に合わせて更新間隔を変更
-                let speed = midi_playback_speed.load(Ordering::Relaxed);
-                let interval_ns = CLOCK_TICK_CYCLE_64KHZ_NANOSEC as f64 / speed;
-                let interval = Duration::from_nanos(interval_ns.round() as u64);
-                {
-                    let mut midispc = midi_spc.lock().unwrap();
-                    let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
-                    // 64kHzのサイクル数 再生速度に依存して決める
-                    let spc_64k_hz_cycle = (if let Ok(config) = midi_output_configure.read() {
-                        config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ
-                    } else {
-                        CLOCK_TICK_CYCLE_64KHZ
-                    } as f64
-                        * speed)
-                        .round() as u32;
-                    // 64kHzタイマーティックするまで処理
-                    while midi_cycle_count < spc_64k_hz_cycle {
-                        midi_cycle_count += midispc.execute_step() as u32;
-                    }
-                    midi_cycle_count -= spc_64k_hz_cycle;
-                    // MIDI出力
-                    if let Some(msgs) = midispc.clock_tick_64k_hz() {
-                        // MIDI出力のロック
-                        let mut conn_out = midi_out_conn.lock().unwrap();
-                        for i in 0..msgs.num_messages {
-                            let msg = msgs.messages[i];
-                            conn_out.send(&msg.data[..msg.length]).unwrap();
-                            midi_bytes += msg.length;
+            while midi_thread_running.load(Ordering::Relaxed) {
+                let mut next = Instant::now();
+                while is_playing.load(Ordering::Relaxed) {
+                    // 再生速度に合わせて更新間隔を変更
+                    let speed = midi_playback_speed.load(Ordering::Relaxed);
+                    let interval_ns = CLOCK_TICK_CYCLE_64KHZ_NANOSEC as f64 / speed;
+                    let interval = Duration::from_nanos(interval_ns.round() as u64);
+                    {
+                        let mut midispc = midi_spc.lock().unwrap();
+                        let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
+                        // 64kHzのサイクル数 再生速度に依存して決める
+                        let spc_64k_hz_cycle = (if let Ok(config) = midi_output_configure.read() {
+                            config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ
+                        } else {
+                            CLOCK_TICK_CYCLE_64KHZ
+                        } as f64
+                            * speed)
+                            .round() as u32;
+                        // 64kHzタイマーティックするまで処理
+                        while midi_cycle_count < spc_64k_hz_cycle {
+                            midi_cycle_count += midispc.execute_step() as u32;
                         }
+                        midi_cycle_count -= spc_64k_hz_cycle;
+                        // MIDI出力
+                        if let Some(msgs) = midispc.clock_tick_64k_hz() {
+                            // MIDI出力のロック
+                            let mut conn_out = midi_out_conn.lock().unwrap();
+                            for i in 0..msgs.num_messages {
+                                let msg = msgs.messages[i];
+                                conn_out.send(&msg.data[..msg.length]).unwrap();
+                                midi_bytes += msg.length;
+                            }
+                        }
+                        midi_output_bytes.store(midi_bytes, Ordering::Relaxed);
                     }
-                    midi_output_bytes.store(midi_bytes, Ordering::Relaxed);
-                }
-                // ビジーループで待つ
-                next += interval;
-                while Instant::now() < next {
-                    thread::yield_now();
+                    // ビジーループで待つ
+                    next += interval;
+                    while Instant::now() < next {
+                        thread::yield_now();
+                    }
                 }
             }
         });
@@ -2529,6 +2546,19 @@ impl App {
         }
     }
 
+    // MIDIの全てのノートを止める
+    fn stop_midi_all_notes(&mut self) {
+        if let Some(midi_out_conn_ref) = &self.midi_out_conn {
+            let midi_out_conn = midi_out_conn_ref.clone();
+            let mut conn_out = midi_out_conn.lock().unwrap();
+            for ch in 0..16 {
+                conn_out
+                    .send(&[MIDIMSG_MODE | ch, MIDIMSG_MODE_ALL_NOTES_OFF, 0])
+                    .unwrap();
+            }
+        }
+    }
+
     // MIDIシステムを切り替えるSystem Exclusiveを送信
     fn send_midi_system_sysex_message(&self, config: &MIDIOutputConfigure) {
         if let Some(midi_out_conn_ref) = &self.midi_out_conn {
@@ -2603,7 +2633,27 @@ impl App {
             stream.pause()?;
             self.stream = None;
         }
+        self.midi_thread_running.store(false, Ordering::Relaxed);
         self.stop_midi_all_sound();
+        Ok(())
+    }
+
+    // 再生一時停止
+    fn stream_play_pause(&mut self) -> Result<(), PauseStreamError> {
+        if let Some(stream) = &self.stream {
+            self.stream_is_playing.store(false, Ordering::Relaxed);
+            stream.pause()?;
+        }
+        self.stop_midi_all_notes();
+        Ok(())
+    }
+
+    // 再生再開
+    fn stream_play_resume(&mut self) -> Result<(), PlayStreamError> {
+        self.stream_is_playing.store(true, Ordering::Relaxed);
+        if let Some(stream) = &self.stream {
+            stream.play()?;
+        }
         Ok(())
     }
 
