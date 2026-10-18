@@ -32,14 +32,11 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install libgtk-3-dev libasound2-dev jq libsoundtouch-dev
+        sudo apt-get install libgtk-3-dev libasound2-dev jq
     - name: Preparation on Mac
       if: runner.os == 'macOS'
       run: |
         brew update
-        brew install sound-touch
-        SDK_PATH=$(xcrun --show-sdk-path --sdk iphoneos)
-        echo "SDKROOT=$SDK_PATH" >> $GITHUB_ENV
     - name: Get crate version on *nix platforms
       id: get_version_unix
       if: runner.os == 'Linux' || runner.os == 'macOS'
