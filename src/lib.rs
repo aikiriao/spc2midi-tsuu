@@ -40,7 +40,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::num::NonZero;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -209,6 +209,7 @@ pub struct App {
     stream_config: Option<StreamConfig>,
     stream: Option<Stream>,
     stream_played_samples: Arc<AtomicUsize>,
+    spc_64khz_ticks: Arc<AtomicU64>,
     midi_output_bytes: Arc<AtomicUsize>,
     stream_is_playing: Arc<AtomicBool>,
     midi_thread_running: Arc<AtomicBool>,
@@ -351,6 +352,7 @@ impl Default for App {
             stream_device: device.clone(),
             stream: None,
             stream_played_samples: Arc::new(AtomicUsize::new(0)),
+            spc_64khz_ticks: Arc::new(AtomicU64::new(0)),
             midi_output_bytes: Arc::new(AtomicUsize::new(0)),
             stream_is_playing: Arc::new(AtomicBool::new(false)),
             midi_thread_running: Arc::new(AtomicBool::new(false)),
@@ -597,6 +599,7 @@ impl App {
                                 }))));
                                 // 再生サンプル数・MIDI出力サイズをリセット
                                 self.stream_played_samples.store(0, Ordering::Relaxed);
+                                self.spc_64khz_ticks.store(0, Ordering::Relaxed);
                                 self.midi_output_bytes.store(0, Ordering::Relaxed);
                                 // メインウィンドウの表示更新
                                 if let Some(window) = self.windows.get_mut(&self.main_window_id) {
@@ -756,6 +759,7 @@ impl App {
                 }
                 // Stopの場合は再生サンプル数をリセット
                 self.stream_played_samples.store(0, Ordering::Relaxed);
+                self.spc_64khz_ticks.store(0, Ordering::Relaxed);
                 self.midi_output_bytes.store(0, Ordering::Relaxed);
             }
             Message::SRCNChannelListFlagToggled(spc_ch, flag) => {
@@ -2279,6 +2283,9 @@ impl App {
         // 再生速度
         let pcm_playback_speed = self.preview_playback_speed.clone();
 
+        // 64kHzティックカウント
+        let pcm_64khz_ticks = self.spc_64khz_ticks.clone();
+
         // 再生ストリーム作成
         let mut spc_cycle_count = 0;
         let stream = match stream_device.build_output_stream(
@@ -2326,6 +2333,7 @@ impl App {
                                         nsamples = prod.available_frames();
                                     }
                                 }
+                                pcm_64khz_ticks.fetch_add(1, Ordering::Relaxed);
                             }
                         }
                     }
@@ -2362,6 +2370,11 @@ impl App {
             self.send_channel_mode_sysex_message(&config);
         }
 
+        // 64kHzティックカウント
+        let mut midi_64khz_ticks = 0;
+        let master_64khz_ticks = self.spc_64khz_ticks.clone();
+
+        // MIDI再生スレッドを有効に
         self.midi_thread_running.store(true, Ordering::Relaxed);
 
         // MIDI再生スレッド生成
@@ -2378,17 +2391,23 @@ impl App {
                     let speed = midi_playback_speed.load(Ordering::Relaxed);
                     let interval_ns = CLOCK_TICK_CYCLE_64KHZ_NANOSEC as f64 / speed;
                     let interval = Duration::from_nanos(interval_ns.round() as u64);
-                    {
+                    let master_ticks = master_64khz_ticks.load(Ordering::Relaxed);
+                    // MIDIのティックカウントが遅れていたら2倍速にして追従
+                    let diff_ticks = if midi_64khz_ticks < master_ticks {
+                        2
+                    } else {
+                        1
+                    };
+                    let target_ticks = midi_64khz_ticks + diff_ticks;
+                    while midi_64khz_ticks < target_ticks {
                         let mut midispc = midi_spc.lock().unwrap();
                         let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
-                        // 64kHzのサイクル数 再生速度に依存して決める
-                        let spc_64k_hz_cycle = (if let Ok(config) = midi_output_configure.read() {
+                        // 64kHzのサイクル数
+                        let spc_64k_hz_cycle = if let Ok(config) = midi_output_configure.read() {
                             config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ
                         } else {
                             CLOCK_TICK_CYCLE_64KHZ
-                        } as f64
-                            * speed)
-                            .round() as u32;
+                        };
                         // 64kHzタイマーティックするまで処理
                         while midi_cycle_count < spc_64k_hz_cycle {
                             midi_cycle_count += midispc.execute_step() as u32;
@@ -2405,6 +2424,7 @@ impl App {
                             }
                         }
                         midi_output_bytes.store(midi_bytes, Ordering::Relaxed);
+                        midi_64khz_ticks += 1;
                     }
                     // ビジーループで待つ
                     next += interval;
