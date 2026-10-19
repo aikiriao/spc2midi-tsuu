@@ -757,10 +757,6 @@ impl App {
                         );
                     }
                 }
-                // Stopの場合は再生サンプル数をリセット
-                self.stream_played_samples.store(0, Ordering::Relaxed);
-                self.spc_64khz_ticks.store(0, Ordering::Relaxed);
-                self.midi_output_bytes.store(0, Ordering::Relaxed);
             }
             Message::SRCNChannelListFlagToggled(spc_ch, flag) => {
                 if let Some(window) = self.windows.get_mut(&self.main_window_id) {
@@ -2655,6 +2651,12 @@ impl App {
         }
         self.midi_thread_running.store(false, Ordering::Relaxed);
         self.stop_midi_all_sound();
+
+        // Stopの場合は再生サンプル数をリセット
+        self.stream_played_samples.store(0, Ordering::Relaxed);
+        self.spc_64khz_ticks.store(0, Ordering::Relaxed);
+        self.midi_output_bytes.store(0, Ordering::Relaxed);
+
         Ok(())
     }
 

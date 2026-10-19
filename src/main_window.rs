@@ -838,7 +838,9 @@ impl SPC2MIDI2Window for MainWindow {
         .align_y(alignment::Alignment::Center);
         status_list.insert(0, status_index.into());
 
-        let playback_speed_list = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 2.0, 4.0];
+        let playback_speed_list = vec![
+            0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 2.0, 4.0,
+        ];
         let playback_speed_str_list: Vec<String> = playback_speed_list
             .iter()
             .map(|&v| format!("x{}", v).to_string())
@@ -879,7 +881,9 @@ impl SPC2MIDI2Window for MainWindow {
                     "x {}",
                     self.preview_playback_speed.load(Ordering::Relaxed)
                 )),
-                move |speed: String| { Message::PreviewPlaybackSpeedChanged(speed[1..].parse().unwrap()) }
+                move |speed: String| {
+                    Message::PreviewPlaybackSpeedChanged(speed[1..].parse().unwrap())
+                }
             )
             .style(move |theme: &Theme, _| pick_list::Style {
                 text_color: theme.palette().text,
