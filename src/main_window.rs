@@ -838,7 +838,7 @@ impl SPC2MIDI2Window for MainWindow {
         .align_y(alignment::Alignment::Center);
         status_list.insert(0, status_index.into());
 
-        let playback_speed_list = vec![0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0, 4.0];
+        let playback_speed_list = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 2.0, 4.0];
         let playback_speed_str_list: Vec<String> = playback_speed_list
             .iter()
             .map(|&v| format!("x{}", v).to_string())
