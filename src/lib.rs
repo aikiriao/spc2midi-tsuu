@@ -33,7 +33,6 @@ use rimd::{
 use samplerate::{convert, ConverterType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use soundtouch::SoundTouch;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::File;
@@ -2221,17 +2220,6 @@ impl App {
             return Err(PlayStreamError::DeviceNotAvailable);
         };
 
-        // タイムストレッチ初期化
-        let mut soundtouch = SoundTouch::new();
-        soundtouch
-            .set_channels(NUM_CHANNELS as u32)
-            .set_sample_rate(SPC_SAMPLING_RATE)
-            .set_setting(soundtouch::Setting::UseAaFilter, 1)
-            .set_setting(soundtouch::Setting::AaFilterLength, 128)
-            .set_setting(soundtouch::Setting::SequenceMs, 100)
-            .set_setting(soundtouch::Setting::SeekwindowMs, 20)
-            .set_setting(soundtouch::Setting::OverlapMs, 20);
-
         // リサンプラ初期化 32kHz -> デバイスの出力レート変換となるように
         let latency = self.audio_output_latency_msec.load(Ordering::Relaxed) as f64 / 1000.0;
         let (mut prod, mut cons) = fixed_resample::resampling_channel::<f32, NUM_CHANNELS>(
@@ -2280,16 +2268,13 @@ impl App {
 
         // 再生ストリーム作成
         let mut spc_cycle_count = 0;
+        let mut accum_32khz_ticks = 0.0;
         let stream = match stream_device.build_output_stream(
             &stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                const TS_BUFFER_SIZE: usize = 8192;
-                let mut ts_buffer = vec![0.0; TS_BUFFER_SIZE];
                 let mut progress = played_samples.load(Ordering::Relaxed);
+                let speed = pcm_playback_speed.load(Ordering::Relaxed);
                 let buffer_num_samples = buffer.len() / NUM_CHANNELS;
-
-                // 再生速度設定
-                soundtouch.set_tempo(pcm_playback_speed.load(Ordering::Relaxed));
 
                 // バッファを出力サンプルで埋める
                 buffer.fill(0.0);
@@ -2297,35 +2282,25 @@ impl App {
                 while buffer_progress < buffer_num_samples {
                     // 入力キューがいっぱいになるまで出力計算
                     if let Ok(mut spc) = pcm_spc.lock() {
-                        let mut nsamples = prod.available_frames();
-                        while nsamples > 0 {
-                            execute_spc_until_32k_hz_clock_tick(
-                                &mut spc,
-                                &mut spc_cycle_count,
-                                CLOCK_TICK_CYCLE_64KHZ,
-                            );
+                        let nsamples = prod.available_frames();
+                        for _ in 0..nsamples {
+                            // 発音スピード分32kHzティック
+                            accum_32khz_ticks += speed;
+                            while accum_32khz_ticks > 1.0 {
+                                execute_spc_until_32k_hz_clock_tick(
+                                    &mut spc,
+                                    &mut spc_cycle_count,
+                                    CLOCK_TICK_CYCLE_64KHZ,
+                                );
+                                accum_32khz_ticks -= 1.0;
+                            }
                             // PCM出力
                             if let Some(pcm) = spc.clock_tick_dsp() {
-                                // タイムストレッチモジュールにpush
-                                soundtouch.put_samples(
-                                    &[
-                                        (pcm[0] as f32) * PCM_NORMALIZE_CONST,
-                                        (pcm[1] as f32) * PCM_NORMALIZE_CONST,
-                                    ],
-                                    1,
-                                );
-                                // タイムストレッチが出力可能ならば処理
-                                if soundtouch.is_empty() == 0 {
-                                    let ts_output_frames = soundtouch.receive_samples(
-                                        &mut ts_buffer,
-                                        (TS_BUFFER_SIZE / NUM_CHANNELS).min(nsamples),
-                                    );
-                                    // レート変換にpush
-                                    prod.push_interleaved(
-                                        &ts_buffer[..ts_output_frames * NUM_CHANNELS],
-                                    );
-                                    nsamples = prod.available_frames();
-                                }
+                                // レート変換にpush
+                                prod.push_interleaved(&[
+                                    (pcm[0] as f32) * PCM_NORMALIZE_CONST,
+                                    (pcm[1] as f32) * PCM_NORMALIZE_CONST,
+                                ]);
                             }
                             pcm_32khz_ticks.fetch_add(1, Ordering::Relaxed);
                         }
@@ -2375,6 +2350,7 @@ impl App {
         let is_playing = self.stream_is_playing.clone();
         let midi_output_configure = self.midi_output_configure.clone();
         let mut midi_cycle_count = 0;
+        let mut midi_accum_32khz_ticks = 0.0;
         let midi_playback_speed = self.preview_playback_speed.clone();
         let _midi_thread = thread::spawn(move || {
             while midi_thread_running.load(Ordering::Relaxed) {
@@ -2382,30 +2358,34 @@ impl App {
                 while is_playing.load(Ordering::Relaxed) {
                     // 再生速度に合わせて更新間隔を変更
                     let speed = midi_playback_speed.load(Ordering::Relaxed);
-                    let interval_ns = CLOCK_TICK_CYCLE_32KHZ_NANOSEC as f64 / speed;
-                    let interval = Duration::from_nanos(interval_ns.round() as u64);
-                    // MIDIのティックカウントが遅れていたら2倍速にして追従
-                    let diff_ticks = if midi_32khz_ticks < master_32khz_ticks.load(Ordering::Relaxed) {
-                        2
+                    let interval = Duration::from_nanos(CLOCK_TICK_CYCLE_32KHZ_NANOSEC);
+                    // 64kHzのサイクル数
+                    let spc_64k_hz_cycle = if let Ok(config) = midi_output_configure.read() {
+                        config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ
                     } else {
-                        1
+                        CLOCK_TICK_CYCLE_64KHZ
                     };
+                    // MIDIのティックカウントが遅れていたら2倍速にして追従
+                    let diff_ticks =
+                        if midi_32khz_ticks < master_32khz_ticks.load(Ordering::Relaxed) {
+                            2
+                        } else {
+                            1
+                        };
                     let target_ticks = midi_32khz_ticks + diff_ticks;
                     while midi_32khz_ticks < target_ticks {
                         let mut midispc = midi_spc.lock().unwrap();
                         let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
-                        // 64kHzのサイクル数
-                        let spc_64k_hz_cycle = if let Ok(config) = midi_output_configure.read() {
-                            config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ
-                        } else {
-                            CLOCK_TICK_CYCLE_64KHZ
-                        };
-                        // 32kHzタイマーティックするまで処理
-                        execute_spc_until_32k_hz_clock_tick(
-                            &mut midispc,
-                            &mut midi_cycle_count,
-                            spc_64k_hz_cycle,
-                        );
+                        // 発音スピード分32kHzティック
+                        midi_accum_32khz_ticks += speed;
+                        while midi_accum_32khz_ticks > 1.0 {
+                            execute_spc_until_32k_hz_clock_tick(
+                                &mut midispc,
+                                &mut midi_cycle_count,
+                                spc_64k_hz_cycle,
+                            );
+                            midi_accum_32khz_ticks -= 1.0;
+                        }
                         // MIDI出力
                         if let Some(msgs) = midispc.clock_tick_dsp() {
                             // MIDI出力のロック
