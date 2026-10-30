@@ -898,7 +898,7 @@ impl SPC2MIDI2Window for MainWindow {
             })
             .padding(5)
             .width(Length::FillPortion(5)),
-            text(format!("{:8.02}sec", self.playback_time_sec))
+            text(format!("{:8.02}s", self.playback_time_sec))
                 .width(Length::FillPortion(7))
                 .align_x(alignment::Alignment::End),
             text(format!("{:8.02}kbps", self.midi_bit_rate / 1000.0))
