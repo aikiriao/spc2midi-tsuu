@@ -1592,27 +1592,24 @@ impl App {
 
         let mut onset_signal = vec![];
         while tick64khz_count < analyze_duration_64khz_ticks {
-            cycle_count += midispc.execute_step() as u32;
             // 64kHzティック処理
-            if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
-                // ノートオンされていた音のボリュームの和をオンセット信号とする
-                let noteon = read_dsp_register(&mut midispc, DSP_ADDRESS_NOTEON);
-                let mut onset = 0.0;
-                for ch in 0..8 {
-                    if ((channel_mute_flags >> ch) & 0x1) == 0 && ((noteon >> ch) & 0x1) != 0 {
-                        let lvol =
-                            read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0VOLL) as f32;
-                        let rvol =
-                            read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0VOLR) as f32;
-                        onset += lvol.abs() + rvol.abs();
-                    }
+            execute_spc_until_next_clock(&mut midispc, &mut cycle_count, CLOCK_TICK_CYCLE_64KHZ);
+            // ノートオンされていた音のボリュームの和をオンセット信号とする
+            let noteon = read_dsp_register(&mut midispc, DSP_ADDRESS_NOTEON);
+            let mut onset = 0.0;
+            for ch in 0..8 {
+                if ((channel_mute_flags >> ch) & 0x1) == 0 && ((noteon >> ch) & 0x1) != 0 {
+                    let lvol =
+                        read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0VOLL) as f32;
+                    let rvol =
+                        read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0VOLR) as f32;
+                    onset += lvol.abs() + rvol.abs();
                 }
-                onset_signal.push(onset);
-                // ティック
-                midispc.clock_tick_64k_hz();
-                cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
-                tick64khz_count += 1;
             }
+            onset_signal.push(onset);
+            // ティック
+            midispc.clock_tick_64k_hz();
+            tick64khz_count += 1;
         }
 
         Self::round_bpm(estimate_bpm(&onset_signal, 64_000.0))
@@ -1646,9 +1643,9 @@ impl App {
         let mut using_channel_map = BTreeMap::new();
         let mut pitch_sequence_map: BTreeMap<u8, Vec<u16>> = BTreeMap::new();
         while tick64khz_count < analyze_duration_64khz_ticks {
-            cycle_count += midispc.execute_step() as u32;
             // キーオンが打たれていた時のサンプル番号・チャンネル使用状況・ピッチを取得
             // DSPを動かすとキーオンフラグが落ちることがあるので64kHzティック前に調べる
+            execute_spc_until_next_clock(&mut midispc, &mut cycle_count, CLOCK_TICK_CYCLE_64KHZ);
             let keyon = read_dsp_register(&mut midispc, DSP_ADDRESS_KON);
             if keyon != 0 {
                 let brr_dir_base_address =
@@ -1678,11 +1675,8 @@ impl App {
                 }
             }
             // 64kHzティック処理
-            if cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
-                midispc.clock_tick_64k_hz();
-                cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
-                tick64khz_count += 1;
-            }
+            midispc.clock_tick_64k_hz();
+            tick64khz_count += 1;
         }
 
         // BPM（テンポ）推定
@@ -1787,10 +1781,7 @@ impl App {
 
         while first_event_time_nanosec < config.output_duration_msec * 1000_000 {
             // 64kHzタイマーティックするまで処理
-            while cycle_count < spc_64k_hz_cycle {
-                cycle_count += spc.execute_step() as u32;
-            }
-            cycle_count -= spc_64k_hz_cycle;
+            execute_spc_until_next_clock(spc, &mut cycle_count, spc_64k_hz_cycle);
             if let Some(_) = spc.clock_tick_64k_hz() {
                 return first_event_time_nanosec;
             }
@@ -1819,10 +1810,7 @@ impl App {
         let mut total_elapsed_time_nanosec = 0;
         while total_elapsed_time_nanosec < first_event_time_nanosec {
             // 64kHzタイマーティックするまで処理
-            while cycle_count < spc_64k_hz_cycle {
-                cycle_count += spc.execute_step() as u32;
-            }
-            cycle_count -= spc_64k_hz_cycle;
+            execute_spc_until_next_clock(spc, &mut cycle_count, spc_64k_hz_cycle);
             let _ = spc.clock_tick_64k_hz();
             // clock_tick_64k_hz実行後に64KHz周期がすぎるので、ここで時間を増加
             total_elapsed_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
@@ -1831,10 +1819,7 @@ impl App {
         total_elapsed_time_nanosec = 0;
         while total_elapsed_time_nanosec < config.output_duration_msec * 1000_000 {
             // 64kHzタイマーティックするまで処理
-            while cycle_count < spc_64k_hz_cycle {
-                cycle_count += spc.execute_step() as u32;
-            }
-            cycle_count -= spc_64k_hz_cycle;
+            execute_spc_until_next_clock(spc, &mut cycle_count, spc_64k_hz_cycle);
             // clock_tick_64k_hz実行後に64KHz周期がすぎるので、ここで時間を増加
             total_elapsed_time_nanosec += CLOCK_TICK_CYCLE_64KHZ_NANOSEC;
             // MIDI出力
@@ -2234,7 +2219,12 @@ impl App {
         let mut soundtouch = SoundTouch::new();
         soundtouch
             .set_channels(NUM_CHANNELS as u32)
-            .set_sample_rate(SPC_SAMPLING_RATE);
+            .set_sample_rate(SPC_SAMPLING_RATE)
+            .set_setting(soundtouch::Setting::UseAaFilter, 1)
+            .set_setting(soundtouch::Setting::AaFilterLength, 128)
+            .set_setting(soundtouch::Setting::SequenceMs, 100)
+            .set_setting(soundtouch::Setting::SeekwindowMs, 20)
+            .set_setting(soundtouch::Setting::OverlapMs, 20);
 
         // リサンプラ初期化 32kHz -> デバイスの出力レート変換となるように
         let latency = self.audio_output_latency_msec.load(Ordering::Relaxed) as f64 / 1000.0;
@@ -2303,34 +2293,35 @@ impl App {
                     if let Ok(mut spc) = pcm_spc.lock() {
                         let mut nsamples = prod.available_frames();
                         while nsamples > 0 {
-                            spc_cycle_count += spc.execute_step() as u32;
-                            if spc_cycle_count >= CLOCK_TICK_CYCLE_64KHZ {
-                                spc_cycle_count -= CLOCK_TICK_CYCLE_64KHZ;
-                                // PCM出力
-                                if let Some(pcm) = spc.clock_tick_64k_hz() {
-                                    // タイムストレッチモジュールにpush
-                                    soundtouch.put_samples(
-                                        &[
-                                            (pcm[0] as f32) * PCM_NORMALIZE_CONST,
-                                            (pcm[1] as f32) * PCM_NORMALIZE_CONST,
-                                        ],
-                                        1,
+                            execute_spc_until_next_clock(
+                                &mut spc,
+                                &mut spc_cycle_count,
+                                CLOCK_TICK_CYCLE_64KHZ,
+                            );
+                            // PCM出力
+                            if let Some(pcm) = spc.clock_tick_64k_hz() {
+                                // タイムストレッチモジュールにpush
+                                soundtouch.put_samples(
+                                    &[
+                                        (pcm[0] as f32) * PCM_NORMALIZE_CONST,
+                                        (pcm[1] as f32) * PCM_NORMALIZE_CONST,
+                                    ],
+                                    1,
+                                );
+                                // タイムストレッチが出力可能ならば処理
+                                if soundtouch.is_empty() == 0 {
+                                    let ts_output_frames = soundtouch.receive_samples(
+                                        &mut ts_buffer,
+                                        (TS_BUFFER_SIZE / NUM_CHANNELS).min(nsamples),
                                     );
-                                    // タイムストレッチが出力可能ならば処理
-                                    if soundtouch.is_empty() == 0 {
-                                        let ts_output_frames = soundtouch.receive_samples(
-                                            &mut ts_buffer,
-                                            (TS_BUFFER_SIZE / NUM_CHANNELS).min(nsamples),
-                                        );
-                                        // レート変換にpush
-                                        prod.push_interleaved(
-                                            &ts_buffer[..ts_output_frames * NUM_CHANNELS],
-                                        );
-                                        nsamples = prod.available_frames();
-                                    }
+                                    // レート変換にpush
+                                    prod.push_interleaved(
+                                        &ts_buffer[..ts_output_frames * NUM_CHANNELS],
+                                    );
+                                    nsamples = prod.available_frames();
                                 }
-                                pcm_64khz_ticks.fetch_add(1, Ordering::Relaxed);
                             }
+                            pcm_64khz_ticks.fetch_add(1, Ordering::Relaxed);
                         }
                     }
 
@@ -2405,10 +2396,11 @@ impl App {
                             CLOCK_TICK_CYCLE_64KHZ
                         };
                         // 64kHzタイマーティックするまで処理
-                        while midi_cycle_count < spc_64k_hz_cycle {
-                            midi_cycle_count += midispc.execute_step() as u32;
-                        }
-                        midi_cycle_count -= spc_64k_hz_cycle;
+                        execute_spc_until_next_clock(
+                            &mut midispc,
+                            &mut midi_cycle_count,
+                            spc_64k_hz_cycle,
+                        );
                         // MIDI出力
                         if let Some(msgs) = midispc.clock_tick_64k_hz() {
                             // MIDI出力のロック
@@ -2800,6 +2792,21 @@ impl App {
         }
         drum_ch
     }
+}
+
+/// 次のクロックサイクルまでSPCを実行
+fn execute_spc_until_next_clock<T>(
+    spc: &mut spc700::spc::SPC<T>,
+    accum_cycles: &mut u32,
+    clock_cycle: u32,
+) where
+    T: SPCDSP,
+{
+    while *accum_cycles < clock_cycle {
+        *accum_cycles += spc.execute_step() as u32;
+    }
+
+    *accum_cycles -= clock_cycle;
 }
 
 /// DSPレジスタ書き込み
