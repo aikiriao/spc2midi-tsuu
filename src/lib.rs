@@ -2357,10 +2357,13 @@ impl App {
                     let speed = midi_playback_speed.load(Ordering::Relaxed);
                     // MIDIのティックカウントを追従
                     let master_32k_ticks = master_32k_ticks.load(Ordering::Relaxed);
-                    const MIDI_TICK_MARGIN: u64 = 32;
+                    const MIDI_TICK_MARGIN: u64 = 320;
                     let loops = if (midi_32k_ticks + MIDI_TICK_MARGIN) < master_32k_ticks {
                         // MIDIが遅れている場合は2倍速
                         2
+                    } else if midi_32k_ticks > (master_32k_ticks + MIDI_TICK_MARGIN) {
+                        // MIDIが早すぎる場合はループを回さない
+                        0
                     } else {
                         // それ以外はタイマー精度を信じて1回処理
                         1
