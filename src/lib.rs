@@ -1660,8 +1660,7 @@ impl App {
                     as u16)
                     << 8)
                     | (read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0PITCHL) as u16);
-                let sample_source =
-                    read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0SRCN);
+                let sample_source = read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0SRCN);
                 let brr_dir_base_address =
                     (read_dsp_register(&mut midispc, DSP_ADDRESS_DIR) as u16) << 8;
                 if (keyon >> ch) & 1 != 0 {
@@ -1685,7 +1684,7 @@ impl App {
                 if pitch_base > 0 {
                     let mut width = pitch_to_semitone_width(pitch, pitch_base).ceil() as u8;
                     // 範囲クリップ
-                    width = width.max(1).min(48);
+                    width = width.min(48);
                     if let Some(w) = pitch_bend_width_map.get_mut(&sample_source) {
                         *w = *w.max(&mut width);
                     } else {
@@ -1757,8 +1756,10 @@ impl App {
             // ドラムチャンネルをなくした状態で読む場合があるため
             let drum_channels_list = self.get_drum_channels_list();
             let is_drum = is_drum & (drum_channels_list.len() > 0);
-            params.insert(
-                *srn,
+            params.insert(*srn, {
+                let pitch_bend_width = *pitch_bend_width_map
+                    .get(srn)
+                    .expect("Failed to find source");
                 SourceParameter {
                     mute: false,
                     program: if is_drum {
@@ -1768,7 +1769,7 @@ impl App {
                     },
                     center_note: f32::round(center_note * 512.0) as u16,
                     noteon_velocity: 100,
-                    pitch_bend_width: *pitch_bend_width_map.get(srn).expect("Failed to find source"),
+                    pitch_bend_width: pitch_bend_width.max(1),
                     envelope_as_expression: false,
                     auto_pan: true,
                     fixed_pan: 64,
@@ -1776,7 +1777,7 @@ impl App {
                     fixed_volume: 100,
                     fixed_reverb_send: 0,
                     chorus_send: 0,
-                    enable_pitch_bend: !is_drum,
+                    enable_pitch_bend: !is_drum && (pitch_bend_width > 0),
                     echo_as_reverb_send: false,
                     update_parameter_after_noteon: true,
                     retrigger_noteon_on_exceed_pitch_bend_width: true,
@@ -1787,8 +1788,8 @@ impl App {
                     },
                     channel_mute: [false; 8],
                     instrument_name: "".to_string(),
-                },
-            );
+                }
+            });
         }
     }
 
