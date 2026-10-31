@@ -2344,23 +2344,31 @@ impl App {
         let midi_playback_speed = self.preview_playback_speed.clone();
         let _midi_thread = thread::spawn(move || {
             while midi_thread_running.load(Ordering::Relaxed) {
+                let interval = Duration::from_nanos(CLOCK_TICK_CYCLE_32KHZ_NANOSEC);
                 let mut next = Instant::now();
                 while is_playing.load(Ordering::Relaxed) {
-                    // 再生速度に合わせて更新間隔を変更
-                    let speed = midi_playback_speed.load(Ordering::Relaxed);
-                    let interval_ns = CLOCK_TICK_CYCLE_32KHZ_NANOSEC as f64 / speed;
-                    let interval = Duration::from_nanos(interval_ns.round() as u64);
                     // 64kHzのサイクル数
                     let spc_64k_hz_cycle = if let Ok(config) = midi_output_configure.read() {
                         config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ
                     } else {
                         CLOCK_TICK_CYCLE_64KHZ
                     };
+                    // 再生速度
+                    let speed = midi_playback_speed.load(Ordering::Relaxed);
                     // MIDIのティックカウントを追従
                     let master_32k_ticks = master_32k_ticks.load(Ordering::Relaxed);
-                    while midi_32k_ticks < master_32k_ticks {
+                    const MIDI_TICK_MARGIN: u64 = 32;
+                    let loops = if (midi_32k_ticks + MIDI_TICK_MARGIN) < master_32k_ticks {
+                        // MIDIが遅れている場合は2倍速
+                        2
+                    } else if midi_32k_ticks < (master_32k_ticks + MIDI_TICK_MARGIN) {
+                        // MIDIが早すぎる場合はループを回さない
+                        0
+                    } else {
+                        1
+                    };
+                    for _ in 0..loops {
                         let mut midispc = midi_spc.lock().unwrap();
-                        let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
                         // 発音スピード分32kHzティック
                         midi_accum_32khz_ticks += speed;
                         while midi_accum_32khz_ticks > 1.0 {
@@ -2374,6 +2382,7 @@ impl App {
                         }
                         // MIDI出力
                         if let Some(msgs) = midispc.clock_tick_dsp() {
+                            let mut midi_bytes = 0;
                             // MIDI出力のロック
                             let mut conn_out = midi_out_conn.lock().unwrap();
                             for i in 0..msgs.num_messages {
@@ -2381,8 +2390,8 @@ impl App {
                                 conn_out.send(&msg.data[..msg.length]).unwrap();
                                 midi_bytes += msg.length;
                             }
+                            midi_output_bytes.fetch_add(midi_bytes, Ordering::Relaxed);
                         }
-                        midi_output_bytes.store(midi_bytes, Ordering::Relaxed);
                     }
                     // ビジーループで待つ
                     next += interval;
