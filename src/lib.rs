@@ -2361,10 +2361,8 @@ impl App {
                     let loops = if (midi_32k_ticks + MIDI_TICK_MARGIN) < master_32k_ticks {
                         // MIDIが遅れている場合は2倍速
                         2
-                    } else if midi_32k_ticks < (master_32k_ticks + MIDI_TICK_MARGIN) {
-                        // MIDIが早すぎる場合はループを回さない
-                        0
                     } else {
+                        // それ以外はタイマー精度を信じて1回処理
                         1
                     };
                     for _ in 0..loops {
