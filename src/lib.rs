@@ -209,7 +209,7 @@ pub struct App {
     stream_device: Option<Device>,
     stream_config: Option<StreamConfig>,
     stream: Option<Stream>,
-    spc_dsp_ticks: Arc<AtomicU64>,
+    spc_32k_ticks: Arc<AtomicU64>,
     midi_output_bytes: Arc<AtomicUsize>,
     stream_is_playing: Arc<AtomicBool>,
     midi_thread_running: Arc<AtomicBool>,
@@ -351,7 +351,7 @@ impl Default for App {
             stream_config: stream_config,
             stream_device: device.clone(),
             stream: None,
-            spc_dsp_ticks: Arc::new(AtomicU64::new(0)),
+            spc_32k_ticks: Arc::new(AtomicU64::new(0)),
             midi_output_bytes: Arc::new(AtomicUsize::new(0)),
             stream_is_playing: Arc::new(AtomicBool::new(false)),
             midi_thread_running: Arc::new(AtomicBool::new(false)),
@@ -597,7 +597,7 @@ impl App {
                                     spc
                                 }))));
                                 // DSPティック数・MIDI出力サイズをリセット
-                                self.spc_dsp_ticks.store(0, Ordering::Relaxed);
+                                self.spc_32k_ticks.store(0, Ordering::Relaxed);
                                 self.midi_output_bytes.store(0, Ordering::Relaxed);
                                 // メインウィンドウの表示更新
                                 if let Some(window) = self.windows.get_mut(&self.main_window_id) {
@@ -1509,7 +1509,7 @@ impl App {
                         window.as_mut().as_any_mut().downcast_mut().unwrap();
                     let midi_output_bytes = self.midi_output_bytes.load(Ordering::Relaxed);
                     let playback_time =
-                        self.spc_dsp_ticks.load(Ordering::Relaxed) as f32 / 32_000.0;
+                        self.spc_32k_ticks.load(Ordering::Relaxed) as f32 / 32_000.0;
                     main_win.playback_time_sec = playback_time;
                     main_win.midi_bit_rate = if playback_time > 0.0 {
                         (midi_output_bytes as f32 * 10.0) / playback_time // スタート・ストップビットの2bitを加えて1バイト当たり10bit送るとする
@@ -2259,7 +2259,7 @@ impl App {
         let pcm_playback_speed = self.preview_playback_speed.clone();
 
         // 32kHzティックカウント
-        let pcm_dsp_ticks = self.spc_dsp_ticks.clone();
+        let pcm_32k_ticks = self.spc_32k_ticks.clone();
 
         // 再生ストリーム作成
         let mut spc_cycle_count = 0;
@@ -2287,6 +2287,7 @@ impl App {
                                     CLOCK_TICK_CYCLE_64KHZ,
                                 );
                                 accum_32khz_ticks -= 1.0;
+                                pcm_32k_ticks.fetch_add(1, Ordering::Relaxed);
                             }
                             // PCM出力
                             if let Some(pcm) = spc.clock_tick_dsp() {
@@ -2296,7 +2297,6 @@ impl App {
                                     (pcm[1] as f32) * PCM_NORMALIZE_CONST,
                                 ]);
                             }
-                            pcm_dsp_ticks.fetch_add(1, Ordering::Relaxed);
                         }
                     }
 
@@ -2328,9 +2328,9 @@ impl App {
             self.send_channel_mode_sysex_message(&config);
         }
 
-        // 64kHzティックカウント
-        let mut midi_dsp_ticks = 0;
-        let master_dsp_ticks = self.spc_dsp_ticks.clone();
+        // 32kHzティックカウント
+        let mut midi_32k_ticks = 0;
+        let master_32k_ticks = self.spc_32k_ticks.clone();
 
         // MIDI再生スレッドを有効に
         self.midi_thread_running.store(true, Ordering::Relaxed);
@@ -2344,25 +2344,21 @@ impl App {
         let midi_playback_speed = self.preview_playback_speed.clone();
         let _midi_thread = thread::spawn(move || {
             while midi_thread_running.load(Ordering::Relaxed) {
-                let interval = Duration::from_nanos(CLOCK_TICK_CYCLE_32KHZ_NANOSEC);
                 let mut next = Instant::now();
                 while is_playing.load(Ordering::Relaxed) {
                     // 再生速度に合わせて更新間隔を変更
                     let speed = midi_playback_speed.load(Ordering::Relaxed);
+                    let interval_ns = CLOCK_TICK_CYCLE_32KHZ_NANOSEC as f64 / speed;
+                    let interval = Duration::from_nanos(interval_ns.round() as u64);
                     // 64kHzのサイクル数
                     let spc_64k_hz_cycle = if let Ok(config) = midi_output_configure.read() {
                         config.spc_clockup_factor * CLOCK_TICK_CYCLE_64KHZ
                     } else {
                         CLOCK_TICK_CYCLE_64KHZ
                     };
-                    // MIDIのティックカウントが遅れていたら2倍速にして追従
-                    let diff_ticks = if midi_dsp_ticks < master_dsp_ticks.load(Ordering::Relaxed) {
-                        2
-                    } else {
-                        1
-                    };
-                    let target_ticks = midi_dsp_ticks + diff_ticks;
-                    while midi_dsp_ticks < target_ticks {
+                    // MIDIのティックカウントを追従
+                    let master_32k_ticks = master_32k_ticks.load(Ordering::Relaxed);
+                    while midi_32k_ticks < master_32k_ticks {
                         let mut midispc = midi_spc.lock().unwrap();
                         let mut midi_bytes = midi_output_bytes.load(Ordering::Relaxed);
                         // 発音スピード分32kHzティック
@@ -2374,6 +2370,7 @@ impl App {
                                 spc_64k_hz_cycle,
                             );
                             midi_accum_32khz_ticks -= 1.0;
+                            midi_32k_ticks += 1;
                         }
                         // MIDI出力
                         if let Some(msgs) = midispc.clock_tick_dsp() {
@@ -2386,7 +2383,6 @@ impl App {
                             }
                         }
                         midi_output_bytes.store(midi_bytes, Ordering::Relaxed);
-                        midi_dsp_ticks += 1;
                     }
                     // ビジーループで待つ
                     next += interval;
@@ -2619,7 +2615,7 @@ impl App {
         self.stop_midi_all_sound();
 
         // Stopの場合は再生サンプル数をリセット
-        self.spc_dsp_ticks.store(0, Ordering::Relaxed);
+        self.spc_32k_ticks.store(0, Ordering::Relaxed);
         self.midi_output_bytes.store(0, Ordering::Relaxed);
 
         Ok(())
