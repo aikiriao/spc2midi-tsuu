@@ -1625,6 +1625,11 @@ impl App {
     ) {
         let analyze_duration_64khz_ticks = analyze_duration_sec * 64000;
 
+        // ピッチ・ピッチ基準値から音程の差を計算
+        fn pitch_to_semitone_width(pitch: u16, pitch_base: u16) -> f32 {
+            (((pitch as f32) / (pitch_base as f32)).log2() * 12.0).abs()
+        }
+
         // 音源情報を作り直す
         let mut infos = self.source_infos.write().unwrap();
         *infos = BTreeMap::new();
@@ -1642,35 +1647,49 @@ impl App {
         let mut start_address_map = BTreeMap::new();
         let mut using_channel_map = BTreeMap::new();
         let mut pitch_sequence_map: BTreeMap<u8, Vec<u16>> = BTreeMap::new();
+        let mut pitch_bend_width_map: BTreeMap<u8, u8> = BTreeMap::new();
+        let mut keyon_pitch = [0u16; 8];
         while tick64khz_count < analyze_duration_64khz_ticks {
             // キーオンが打たれていた時のサンプル番号・チャンネル使用状況・ピッチを取得
             // DSPを動かすとキーオンフラグが落ちることがあるので64kHzティック前に調べる
             execute_spc_until_next_clock(&mut midispc, &mut cycle_count, CLOCK_TICK_CYCLE_64KHZ);
             let keyon = read_dsp_register(&mut midispc, DSP_ADDRESS_KON);
-            if keyon != 0 {
+            let keyoff = read_dsp_register(&mut midispc, DSP_ADDRESS_KOFF);
+            for ch in 0..8 {
+                let pitch = ((read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0PITCHH)
+                    as u16)
+                    << 8)
+                    | (read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0PITCHL) as u16);
+                let sample_source =
+                    read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0SRCN);
                 let brr_dir_base_address =
                     (read_dsp_register(&mut midispc, DSP_ADDRESS_DIR) as u16) << 8;
-                for ch in 0..8 {
-                    if (keyon >> ch) & 1 != 0 {
-                        let sample_source =
-                            read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0SRCN);
-                        let dir_address =
-                            (brr_dir_base_address + 4 * (sample_source as u16)) as usize;
-                        start_address_map.insert(sample_source, dir_address);
-                        using_channel_map
-                            .entry(sample_source)
-                            .and_modify(|keyon_ch| *keyon_ch |= 1 << ch)
-                            .or_insert(1 << ch);
-                        let pitch =
-                            ((read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0PITCHH)
-                                as u16)
-                                << 8)
-                                | (read_dsp_register(&mut midispc, (ch << 4) | DSP_ADDRESS_V0PITCHL)
-                                    as u16);
-                        pitch_sequence_map
-                            .entry(sample_source)
-                            .or_default()
-                            .push(pitch);
+                if (keyon >> ch) & 1 != 0 {
+                    let dir_address = (brr_dir_base_address + 4 * (sample_source as u16)) as usize;
+                    start_address_map.insert(sample_source, dir_address);
+                    using_channel_map
+                        .entry(sample_source)
+                        .and_modify(|keyon_ch| *keyon_ch |= 1 << ch)
+                        .or_insert(1 << ch);
+                    pitch_sequence_map
+                        .entry(sample_source)
+                        .or_default()
+                        .push(pitch);
+                    keyon_pitch[ch as usize] = pitch;
+                }
+                if (keyoff >> ch) & 1 != 0 {
+                    keyon_pitch[ch as usize] = 0;
+                }
+                // ピッチベンド幅の更新
+                let pitch_base = keyon_pitch[ch as usize];
+                if pitch_base > 0 {
+                    let mut width = pitch_to_semitone_width(pitch, pitch_base).ceil() as u8;
+                    // 範囲クリップ
+                    width = width.max(1).min(48);
+                    if let Some(w) = pitch_bend_width_map.get_mut(&sample_source) {
+                        *w = *w.max(&mut width);
+                    } else {
+                        pitch_bend_width_map.insert(sample_source, width);
                     }
                 }
             }
@@ -1749,7 +1768,7 @@ impl App {
                     },
                     center_note: f32::round(center_note * 512.0) as u16,
                     noteon_velocity: 100,
-                    pitch_bend_width: 12,
+                    pitch_bend_width: *pitch_bend_width_map.get(srn).expect("Failed to find source"),
                     envelope_as_expression: false,
                     auto_pan: true,
                     fixed_pan: 64,
