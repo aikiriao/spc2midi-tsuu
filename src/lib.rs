@@ -1718,14 +1718,23 @@ impl App {
             let mut decoder = Decoder::new();
             let mut signal = Vec::new();
             let mut end_count = 0;
+            let mut end_passed = false;
             decoder.keyon(&midispc.ram, *dir_address);
             // 原音ピッチで終端までデコード
             loop {
                 let pcm = decoder.process(&midispc.ram, 0x1000) as f32;
                 signal.push(pcm * PCM_NORMALIZE_CONST);
+                // ENDフラグ通過を検知
+                if decoder.end {
+                    // ループフラグが立っていない波形はここで終わり
+                    if !decoder.loop_flag {
+                        break;
+                    }
+                    end_passed = true;
+                }
                 // ENDフラグが立ったらEDNフラグ内のブロックが終わるまででコード
                 // ENDフラグは、終端ブロックの1つ前のサンプルをデコードした時に立つため、17回カウント
-                if decoder.end {
+                if end_passed {
                     end_count += 1;
                     if end_count >= 17 {
                         break;
