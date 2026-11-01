@@ -30,12 +30,12 @@ use rfd::AsyncFileDialog;
 use rimd::{
     Event as MidiEvent, MetaEvent, MidiMessage, SMFFormat, SMFWriter, Track, TrackEvent, SMF,
 };
-use samplerate::{convert, ConverterType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::File;
+use std::io;
 use std::io::BufWriter;
 use std::num::NonZero;
 use std::path::PathBuf;
@@ -44,7 +44,6 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
-use std::{cmp, io};
 
 use spc700::decoder::*;
 use spc700::spc::*;
@@ -55,8 +54,8 @@ use spc700::types::*;
 const SPC2MIDI2_TITLE_STR: &'static str = "spc2midi-tsuu";
 /// SPCの出力サンプリングレート
 const SPC_SAMPLING_RATE: u32 = 32000;
-/// PCM正規化定数
-const PCM_NORMALIZE_CONST: f32 = 1.0 / 32768.0;
+/// PCM正規化定数（note: SPCのデコーダ出力幅は15bit）
+const PCM_NORMALIZE_CONST: f32 = 1.0 / 16384.0;
 /// 64KHz周期のクロックサイクル SPCのクロック(1.024MHz)を64KHzで割って得られる = 1024000 / 64000
 const CLOCK_TICK_CYCLE_64KHZ: u32 = 16;
 /// 64kHz間隔に相当するナノ秒
@@ -363,7 +362,7 @@ impl Default for App {
             midi_spc_on: Arc::new(AtomicBool::new(true)),
             midi_preview: Arc::new(AtomicBool::new(true)),
             preview_loop: Arc::new(AtomicBool::new(true)),
-            preview_volume: Arc::new(AtomicU8::new(40)),
+            preview_volume: Arc::new(AtomicU8::new(10)),
             channel_mute_flags: Arc::new(AtomicU8::new(0)),
             audio_out_device_name: Arc::new(RwLock::new(if let Some(device) = device {
                 Some({
@@ -1676,7 +1675,7 @@ impl App {
                         .push(pitch);
                     keyon_pitch[ch as usize] = pitch;
                 }
-                if (keyoff >> ch) & 1 != 0 {
+                if ((keyoff >> ch) & 1) != 0 {
                     keyon_pitch[ch as usize] = 0;
                 }
                 // ピッチベンド幅の更新
@@ -2438,6 +2437,8 @@ impl App {
 
     // プレビュー再生開始
     fn srn_play_start(&mut self, srn_no: u8) -> Result<(), PlayStreamError> {
+        const NUM_CHANNELS: usize = 2;
+
         // 再生対象の音源をコピー
         let infos = self.source_infos.read().unwrap();
         let source = if let Some(srn) = infos.get(&srn_no) {
@@ -2453,33 +2454,26 @@ impl App {
         let stream_device = self.stream_device.clone().unwrap();
         let stream_config = self.stream_config.clone().unwrap();
 
-        let num_channels = stream_config.channels as usize;
-        let is_playing = self.stream_is_playing.clone();
-        let loop_start_sample = f64::round(
-            (source.loop_start_sample * stream_config.sample_rate as usize) as f64
-                / SPC_SAMPLING_RATE as f64,
-        ) as usize;
-
-        // 出力先デバイスのレートに合わせてレート変換
-        let resampled_pcm = convert(
+        // リサンプラ初期化 32kHz -> デバイスの出力レート変換となるように
+        let latency = self.audio_output_latency_msec.load(Ordering::Relaxed) as f64 / 1000.0;
+        let (mut prod, mut cons) = fixed_resample::resampling_channel::<f32, NUM_CHANNELS>(
+            NonZero::new(NUM_CHANNELS).unwrap(),
             SPC_SAMPLING_RATE,
             stream_config.sample_rate,
-            1,
-            ConverterType::SincBestQuality,
-            &source.signal,
-        )
-        .unwrap();
-        let resampled_len = resampled_pcm.len();
+            fixed_resample::ResamplingChannelConfig {
+                latency_seconds: latency,
+                capacity_seconds: 3.0 * latency, // 2倍程度確保するべしとあるが、余裕を見て3倍
+                overflow_autocorrect_percent_threshold: None, // capacityを大きくするとOverflowと判定されやすくなるため判定を無効に
+                ..Default::default()
+            },
+        );
 
-        // 音源はモノラルなので出力チャンネル数分コピー
-        let mut output = vec![0.0f32; resampled_len * num_channels];
-        for smpl in 0..resampled_len {
-            for ch in 0..num_channels {
-                output[ch as usize + num_channels * smpl] = resampled_pcm[smpl];
-            }
-        }
-        // ループ開始位置は出力サンプル数で上限をかける
-        let loop_start_progress = cmp::min(num_channels * loop_start_sample, output.len() - 1);
+        assert_eq!(NUM_CHANNELS, stream_config.channels as usize);
+
+        let is_playing = self.stream_is_playing.clone();
+
+        let num_signal_samples = source.signal.len();
+        let loop_start_progress = source.loop_start_sample;
 
         // ループフラグ・プレビューボリューム
         let preview_loop = self.preview_loop.clone();
@@ -2493,42 +2487,47 @@ impl App {
         let stream = match stream_device.build_output_stream(
             &stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                // 一旦バッファを無音で埋める
-                buffer.fill(0.0);
-                // バッファにコピー
-                let num_copy_samples = cmp::min(output.len() - progress, buffer.len());
-                // 出力ボリュームを適用しながらバッファにコピー
+                let buffer_num_samples = buffer.len() / NUM_CHANNELS;
                 let volume =
                     preview_volume.load(Ordering::Relaxed) as f32 * PREVIEW_VOLUME_NORMALIZE_VALUE;
-                for smpl in 0..num_copy_samples {
-                    buffer[smpl] = volume * output[progress + smpl];
-                }
-                progress += num_copy_samples;
-                // 端点に来た時の処理
-                if progress >= output.len() {
-                    if preview_loop.load(Ordering::Relaxed) {
-                        // ループしながらバッファがいっぱいになるまでコピー
-                        let mut buffer_pos = num_copy_samples;
-                        progress = loop_start_progress;
-                        while buffer_pos < buffer.len() {
-                            let num_copy_samples =
-                                cmp::min(output.len() - progress, buffer.len() - buffer_pos);
-                            // 出力ボリュームを適用しながらバッファにコピー
-                            let volume = preview_volume.load(Ordering::Relaxed) as f32
-                                * PREVIEW_VOLUME_NORMALIZE_VALUE;
-                            for smpl in 0..num_copy_samples {
-                                buffer[buffer_pos + smpl] = volume * output[progress + smpl];
-                            }
-                            buffer_pos += num_copy_samples;
-                            progress += num_copy_samples;
-                            if progress >= output.len() {
+
+                // バッファを出力サンプルで埋める
+                buffer.fill(0.0);
+                let mut buffer_progress = 0;
+                while buffer_progress < buffer_num_samples {
+                    // 入力キューがいっぱいになるまで出力計算
+                    let nsamples = prod.available_frames();
+                    for _ in 0..nsamples {
+                        // レート変換にpush
+                        // モノラルチャンネル信号をチャンネル数分コピー
+                        let pcm = volume * source.signal[progress];
+                        prod.push_interleaved(&[pcm; NUM_CHANNELS]);
+                        progress += 1;
+                        // 端点に来た時の処理
+                        if progress >= num_signal_samples {
+                            if preview_loop.load(Ordering::Relaxed) {
                                 progress = loop_start_progress;
+                            } else {
+                                // 再生終了
+                                is_playing.store(false, Ordering::Relaxed);
+                                break;
                             }
                         }
-                    } else {
-                        // 再生終了
-                        is_playing.store(false, Ordering::Relaxed);
                     }
+
+                    // リサンプラー出力を取り出してバッファに書き出し
+                    let num_outputs = (buffer_num_samples - buffer_progress)
+                        .min(cons.available_frames())
+                        .max(0);
+                    let status = cons.read_interleaved(
+                        &mut buffer[buffer_progress * NUM_CHANNELS
+                            ..(buffer_progress + num_outputs) * NUM_CHANNELS],
+                    );
+                    if let ReadStatus::UnderflowOccurred { .. } = status {
+                        eprintln!("input stream fell behind: try increasing channel latency");
+                    }
+
+                    buffer_progress += num_outputs;
                 }
             },
             |err| eprintln!("[{}] {err}", SPC2MIDI2_TITLE_STR),
