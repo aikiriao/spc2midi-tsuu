@@ -2480,14 +2480,11 @@ impl App {
 
         assert_eq!(NUM_CHANNELS, stream_config.channels as usize);
 
-        let is_playing = self.stream_is_playing.clone();
-
         // ループフラグ・プレビューボリューム
         let preview_loop = self.preview_loop.clone();
         let preview_volume = self.preview_volume.clone();
         const PREVIEW_VOLUME_NORMALIZE_VALUE: f32 = 1.0 / 128.0;
 
-        // 終端ブロックを通過したか？
         let mut end_passed = false;
 
         // デコーダ作成
@@ -2523,18 +2520,16 @@ impl App {
                         // レート変換にpush
                         // モノラルチャンネル信号をチャンネル数分コピー
                         // TODO: ピッチ変更再生
-                        let mut pcm = decoder.process(ram.as_ref(), 0x1000) as f32;
-                        pcm *= volume;
+                        let pcm = if end_passed {
+                            0.0
+                        } else {
+                            volume * (decoder.process(ram.as_ref(), 0x1000) as f32)
+                        };
                         prod.push_interleaved(&[pcm; NUM_CHANNELS]);
-                        // 端点に来た時の処理
-                        if decoder.end {
-                            end_passed = true;
-                        }
                         // 再生終了
-                        if end_passed && !decoder.end {
-                            if !preview_loop.load(Ordering::Relaxed) {
-                                is_playing.store(false, Ordering::Relaxed);
-                                break;
+                        if decoder.end {
+                            if !decoder.loop_flag || !preview_loop.load(Ordering::Relaxed) {
+                                end_passed = true;
                             }
                         }
                     }
