@@ -169,6 +169,8 @@ pub struct SourceInformation {
     pub signal: Vec<f32>,
     /// パワースペクトル
     pub power_spectrum: Vec<f32>,
+    /// 波形ディレクトリアドレス
+    pub dir_address: usize,
     /// 開始アドレス
     pub start_address: usize,
     /// 終端アドレス

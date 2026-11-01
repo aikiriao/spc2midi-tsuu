@@ -1747,6 +1747,7 @@ impl App {
             let source_info = SourceInformation {
                 signal: signal.clone(),
                 power_spectrum: compute_power_spectrum(&signal),
+                dir_address: *dir_address as usize,
                 start_address: start_address,
                 end_address: start_address + (signal.len() * 9) / 16,
                 loop_start_sample: ((loop_address - start_address) * 16) / 9,
@@ -2472,24 +2473,36 @@ impl App {
 
         let is_playing = self.stream_is_playing.clone();
 
-        let num_signal_samples = source.signal.len();
-        let loop_start_progress = source.loop_start_sample;
-
         // ループフラグ・プレビューボリューム
         let preview_loop = self.preview_loop.clone();
         let preview_volume = self.preview_volume.clone();
         const PREVIEW_VOLUME_NORMALIZE_VALUE: f32 = 1.0 / 128.0;
 
-        // 再生サンプル数（ワンショットのプレビュー再生なので再生サンプルはselfに保持しない）
-        let mut progress = 0;
+        // 終端ブロックを通過したか？
+        let mut end_passed = false;
+
+        // デコーダ作成
+        let mut decoder = Decoder::new();
+        let ram = if let Some(spc_ref) = &self.pcm_spc {
+            let spc = spc_ref.clone();
+            if let Ok(spc) = spc.lock() {
+                Box::new(spc.ram.clone())
+            } else {
+                return Err(PlayStreamError::DeviceNotAvailable);
+            }
+        } else {
+            return Err(PlayStreamError::DeviceNotAvailable);
+        };
+        decoder.keyon(ram.as_ref(), source.dir_address);
 
         // 再生ストリーム作成
         let stream = match stream_device.build_output_stream(
             &stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let buffer_num_samples = buffer.len() / NUM_CHANNELS;
-                let volume =
-                    preview_volume.load(Ordering::Relaxed) as f32 * PREVIEW_VOLUME_NORMALIZE_VALUE;
+                let volume = preview_volume.load(Ordering::Relaxed) as f32
+                    * PREVIEW_VOLUME_NORMALIZE_VALUE
+                    * PCM_NORMALIZE_CONST;
 
                 // バッファを出力サンプルで埋める
                 buffer.fill(0.0);
@@ -2500,15 +2513,17 @@ impl App {
                     for _ in 0..nsamples {
                         // レート変換にpush
                         // モノラルチャンネル信号をチャンネル数分コピー
-                        let pcm = volume * source.signal[progress];
+                        // TODO: ピッチ変更再生
+                        let mut pcm = decoder.process(ram.as_ref(), 0x1000) as f32;
+                        pcm *= volume;
                         prod.push_interleaved(&[pcm; NUM_CHANNELS]);
-                        progress += 1;
                         // 端点に来た時の処理
-                        if progress >= num_signal_samples {
-                            if preview_loop.load(Ordering::Relaxed) {
-                                progress = loop_start_progress;
-                            } else {
-                                // 再生終了
+                        if decoder.end {
+                            end_passed = true;
+                        }
+                        // 再生終了
+                        if end_passed && !decoder.end {
+                            if !preview_loop.load(Ordering::Relaxed) {
                                 is_playing.store(false, Ordering::Relaxed);
                                 break;
                             }
