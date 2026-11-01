@@ -498,6 +498,7 @@ impl App {
                         self.midi_preview.clone(),
                         self.preview_loop.clone(),
                         self.preview_volume.clone(),
+                        self.stream_is_playing.clone(),
                     );
                     self.windows.insert(id, Box::new(window));
                     return open.map(Message::SRCNWindowOpened);

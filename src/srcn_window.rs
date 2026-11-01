@@ -7,7 +7,7 @@ use iced::keyboard::key::Named;
 use iced::widget::canvas::{self, stroke, Cache, Canvas, Event, Frame, Geometry, Path, Stroke};
 use iced::widget::{
     button, checkbox, column, combo_box, container, row, scrollable, slider, stack, text,
-    text_input, tooltip,
+    text_input, tooltip, Text,
 };
 use iced::window;
 use iced::{
@@ -34,6 +34,7 @@ pub struct SRCNWindow {
     preview_loop: Arc<AtomicBool>,
     preview_volume: Arc<AtomicU8>,
     program_box: combo_box::State<Program>,
+    preview_playback_is_playing: Arc<AtomicBool>,
     pub program_search_query: Option<String>,
     cache: Cache,
 }
@@ -367,7 +368,18 @@ impl SPC2MIDI2Window for SRCNWindow {
         ];
         let preview_controller = row![
             tooltip(
-                button("Play/Stop").on_press(Message::ReceivedSRCNPlayStartRequest(self.srn_no)),
+                button(
+                    Text::new(
+                        if self.preview_playback_is_playing.load(Ordering::Relaxed) {
+                            "Stop"
+                        } else {
+                            "Play"
+                        }
+                    )
+                    .align_x(alignment::Horizontal::Center)
+                )
+                .on_press(Message::ReceivedSRCNPlayStartRequest(self.srn_no))
+                .width(70),
                 "Play / Stop (F6)",
                 tooltip::Position::Top,
             ),
@@ -460,6 +472,7 @@ impl SRCNWindow {
         midi_preview: Arc<AtomicBool>,
         preview_loop: Arc<AtomicBool>,
         preview_volume: Arc<AtomicU8>,
+        preview_playback_is_playing: Arc<AtomicBool>,
     ) -> Self {
         Self {
             window_id: window_id,
@@ -470,6 +483,7 @@ impl SRCNWindow {
             midi_preview: midi_preview,
             preview_loop: preview_loop,
             preview_volume: preview_volume,
+            preview_playback_is_playing: preview_playback_is_playing,
             program_box: combo_box::State::new(Program::ALL.to_vec()),
             program_search_query: None,
             cache: Cache::default(),
