@@ -1718,14 +1718,19 @@ impl App {
         for (srn, dir_address) in start_address_map.iter() {
             let mut decoder = Decoder::new();
             let mut signal = Vec::new();
+            let mut end_count = 0;
             decoder.keyon(&midispc.ram, *dir_address);
             // 原音ピッチで終端までデコード
             loop {
                 let pcm = decoder.process(&midispc.ram, 0x1000) as f32;
                 signal.push(pcm * PCM_NORMALIZE_CONST);
-                // 最後のブロックはデコードしない（ループを繋ぐため）
+                // ENDフラグが立ったらEDNフラグ内のブロックが終わるまででコード
+                // ENDフラグは、終端ブロックの1つ前のサンプルをデコードした時に立つため、17回カウント
                 if decoder.end {
-                    break;
+                    end_count += 1;
+                    if end_count >= 17 {
+                        break;
+                    }
                 }
             }
             // データ追記
