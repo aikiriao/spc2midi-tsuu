@@ -2377,6 +2377,7 @@ impl App {
         // 32kHzティックカウント
         let mut midi_32k_ticks = 0;
         let master_32k_ticks = self.spc_32k_ticks.clone();
+        let mut initial_ticks = true;
 
         // MIDI再生スレッドを有効に
         self.midi_thread_running.store(true, Ordering::Relaxed);
@@ -2403,8 +2404,21 @@ impl App {
                     let speed = midi_playback_speed.load(Ordering::Relaxed);
                     // MIDIのティックカウントを追従
                     let master_32k_ticks = master_32k_ticks.load(Ordering::Relaxed);
+                    if initial_ticks {
+                        const INITIAL_TICKS: u64 = (SPC_SAMPLING_RATE / 2) as u64;
+                        // ある程度のティックが過ぎたらマスターティックと強制的に一致させて適応開始
+                        if master_32k_ticks >= INITIAL_TICKS {
+                            midi_32k_ticks = master_32k_ticks;
+                            initial_ticks = false;
+                        }
+                    }
+                    // 処理回数ループの決定
                     const MIDI_TICK_MARGIN: u64 = 320;
-                    let loops = if (midi_32k_ticks + MIDI_TICK_MARGIN) < master_32k_ticks {
+                    let loops = if initial_ticks {
+                        // 再生開始直後はタイマー精度を信じる
+                        // PCM出力がバッファリングのために急増するため
+                        1
+                    } else if (midi_32k_ticks + MIDI_TICK_MARGIN) < master_32k_ticks {
                         // MIDIが遅れている場合は2倍速
                         2
                     } else if midi_32k_ticks > (master_32k_ticks + MIDI_TICK_MARGIN) {

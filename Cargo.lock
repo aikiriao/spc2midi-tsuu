@@ -4221,7 +4221,7 @@ dependencies = [
 
 [[package]]
 name = "spc2midi-tsuu"
-version = "0.2.123"
+version = "0.2.124"
 dependencies = [
  "atomic_float",
  "clap",
