@@ -20,7 +20,7 @@ use crate::srcn_window::*;
 use crate::types::*;
 use atomic_float::AtomicF64;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, PauseStreamError, PlayStreamError, Stream, StreamConfig};
+use cpal::{Device, Stream, StreamConfig};
 use fixed_resample::ReadStatus;
 use iced::keyboard::key::Named;
 use iced::widget::{center, space};
@@ -2227,7 +2227,7 @@ impl App {
     }
 
     // 再生開始
-    fn play_start(&mut self) -> Result<(), PlayStreamError> {
+    fn play_start(&mut self) -> Result<(), cpal::Error> {
         const NUM_CHANNELS: usize = 2;
 
         // SPCの参照をクローン
@@ -2240,7 +2240,10 @@ impl App {
 
         // オーディオデバイスとMIDI出力ポートの存在確認
         if self.stream_device.is_none() || self.stream_config.is_none() {
-            return Err(PlayStreamError::DeviceNotAvailable);
+            return Err(cpal::Error::with_message(
+                cpal::ErrorKind::DeviceNotAvailable,
+                "There are no devices",
+            ));
         }
         let stream_device = self.stream_device.clone().unwrap();
         let stream_config = self.stream_config.clone().unwrap();
@@ -2248,7 +2251,10 @@ impl App {
         let midi_out_conn = if let Some(midi_out_conn_ref) = &self.midi_out_conn {
             midi_out_conn_ref.clone()
         } else {
-            return Err(PlayStreamError::DeviceNotAvailable);
+            return Err(cpal::Error::with_message(
+                cpal::ErrorKind::DeviceNotAvailable,
+                "Failed to prepare MIDI playback",
+            ));
         };
 
         // リサンプラ初期化 32kHz -> デバイスの出力レート変換となるように
@@ -2300,7 +2306,7 @@ impl App {
         let mut spc_cycle_count = 0;
         let mut accum_32khz_ticks = 0.0;
         let stream = match stream_device.build_output_stream(
-            &stream_config,
+            stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let speed = pcm_playback_speed.load(Ordering::Relaxed);
                 let buffer_num_samples = buffer.len() / NUM_CHANNELS;
@@ -2354,7 +2360,12 @@ impl App {
             None,
         ) {
             Ok(stream) => stream,
-            Err(_) => return Err(PlayStreamError::DeviceNotAvailable),
+            Err(_) => {
+                return Err(cpal::Error::with_message(
+                    cpal::ErrorKind::DeviceNotAvailable,
+                    "Playback error",
+                ))
+            }
         };
 
         // MIDIのシステムとチャンネルモードを設定
@@ -2447,7 +2458,7 @@ impl App {
     }
 
     // プレビュー再生開始
-    fn srn_play_start(&mut self, srn_no: u8) -> Result<(), PlayStreamError> {
+    fn srn_play_start(&mut self, srn_no: u8) -> Result<(), cpal::Error> {
         const NUM_CHANNELS: usize = 2;
 
         // 再生対象の音源をコピー
@@ -2460,7 +2471,10 @@ impl App {
 
         // オーディオデバイスの存在確認
         if self.stream_device.is_none() || self.stream_config.is_none() {
-            return Err(PlayStreamError::DeviceNotAvailable);
+            return Err(cpal::Error::with_message(
+                cpal::ErrorKind::DeviceNotAvailable,
+                "There are no devices",
+            ));
         }
         let stream_device = self.stream_device.clone().unwrap();
         let stream_config = self.stream_config.clone().unwrap();
@@ -2495,16 +2509,22 @@ impl App {
             if let Ok(spc) = spc.lock() {
                 Box::new(spc.ram.clone())
             } else {
-                return Err(PlayStreamError::DeviceNotAvailable);
+                return Err(cpal::Error::with_message(
+                    cpal::ErrorKind::DeviceNotAvailable,
+                    "None of SPC initialized",
+                ));
             }
         } else {
-            return Err(PlayStreamError::DeviceNotAvailable);
+            return Err(cpal::Error::with_message(
+                cpal::ErrorKind::DeviceNotAvailable,
+                "None of SPC initialized",
+            ));
         };
         decoder.keyon(ram.as_ref(), source.dir_address);
 
         // 再生ストリーム作成
         let stream = match stream_device.build_output_stream(
-            &stream_config,
+            stream_config,
             move |buffer: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let buffer_num_samples = buffer.len() / NUM_CHANNELS;
                 let volume = preview_volume.load(Ordering::Relaxed) as f32
@@ -2554,7 +2574,12 @@ impl App {
             None,
         ) {
             Ok(stream) => stream,
-            Err(_) => return Err(PlayStreamError::DeviceNotAvailable),
+            Err(_) => {
+                return Err(cpal::Error::with_message(
+                    cpal::ErrorKind::DeviceNotAvailable,
+                    "Failed to start playback",
+                ))
+            }
         };
 
         // 再生開始
@@ -2659,7 +2684,7 @@ impl App {
     }
 
     // 再生停止
-    fn stream_play_stop(&mut self) -> Result<(), PauseStreamError> {
+    fn stream_play_stop(&mut self) -> Result<(), cpal::Error> {
         if let Some(stream) = &self.stream {
             self.stream_is_playing.store(false, Ordering::Relaxed);
             stream.pause()?;
@@ -2676,7 +2701,7 @@ impl App {
     }
 
     // 再生一時停止
-    fn stream_play_pause(&mut self) -> Result<(), PauseStreamError> {
+    fn stream_play_pause(&mut self) -> Result<(), cpal::Error> {
         if let Some(stream) = &self.stream {
             self.stream_is_playing.store(false, Ordering::Relaxed);
             stream.pause()?;
@@ -2686,7 +2711,7 @@ impl App {
     }
 
     // 再生再開
-    fn stream_play_resume(&mut self) -> Result<(), PlayStreamError> {
+    fn stream_play_resume(&mut self) -> Result<(), cpal::Error> {
         self.stream_is_playing.store(true, Ordering::Relaxed);
         if let Some(stream) = &self.stream {
             stream.play()?;
