@@ -197,6 +197,7 @@ pub enum Message {
     DisplayNoteTypeChanged(DisplayNoteType),
     AudioLatencyMsecChanged(usize),
     SPCLoadAutoDrumDetectionChanged(bool),
+    SPCLoadEnablePitchBendForDrumChanged(bool),
     SPCLoadAutoPitchBendRangeDetectionChanged(bool),
     SPCLoadFixedPitchBendWidthChanged(u8),
     Tick,
@@ -1519,6 +1520,11 @@ impl App {
                     load_config.auto_drum_detection = flag;
                 }
             }
+            Message::SPCLoadEnablePitchBendForDrumChanged(flag) => {
+                if let Ok(mut load_config) = self.spc_load_config.write() {
+                    load_config.enable_pitch_bend_for_drum = flag;
+                }
+            }
             Message::SPCLoadAutoPitchBendRangeDetectionChanged(flag) => {
                 if let Ok(mut load_config) = self.spc_load_config.write() {
                     load_config.auto_pitch_bend_range_detection = flag;
@@ -1827,6 +1833,9 @@ impl App {
             } else {
                 spc_load_config.fixed_pitch_bend_width
             };
+            // ピッチベンドを有効にするか
+            let enable_pitch_bend =
+                (pitch_bend_width > 0) && (spc_load_config.enable_pitch_bend_for_drum || !is_drum);
             params.insert(*srn, {
                 SourceParameter {
                     mute: false,
@@ -1845,7 +1854,7 @@ impl App {
                     fixed_volume: 100,
                     fixed_reverb_send: 0,
                     chorus_send: 0,
-                    enable_pitch_bend: !is_drum && (pitch_bend_width > 0),
+                    enable_pitch_bend: enable_pitch_bend,
                     echo_as_reverb_send: false,
                     update_parameter_after_noteon: true,
                     retrigger_noteon_on_exceed_pitch_bend_width: true,

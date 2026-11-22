@@ -167,6 +167,8 @@ pub enum SampleListRowColorStyle {
 pub struct SPCLoadConfigure {
     /// ドラムの自動検出を行うか
     pub auto_drum_detection: bool,
+    /// ドラムのピッチベンドをロード時に有効にするか
+    pub enable_pitch_bend_for_drum: bool,
     /// ピッチベンド幅を自動検出するか
     pub auto_pitch_bend_range_detection: bool,
     /// 自動検出しない場合の固定ピッチベンド幅
@@ -356,6 +358,7 @@ impl SPCLoadConfigure {
     pub fn new() -> Self {
         Self {
             auto_drum_detection: true,
+            enable_pitch_bend_for_drum: false,
             auto_pitch_bend_range_detection: true,
             fixed_pitch_bend_width: 12,
         }

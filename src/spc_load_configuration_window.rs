@@ -25,6 +25,13 @@ impl SPC2MIDI2Window for SPCLoadConfigurationWindow {
             .padding(10)
             .align_y(alignment::Alignment::Center)
             .width(Length::Fill),
+            row![checkbox(spc_load_configure.enable_pitch_bend_for_drum)
+                .label("Enable Pitch Bend for Drum")
+                .on_toggle(move |flag| Message::SPCLoadEnablePitchBendForDrumChanged(flag))]
+            .spacing(10)
+            .padding(10)
+            .align_y(alignment::Alignment::Center)
+            .width(Length::Fill),
             row![
                 checkbox(spc_load_configure.auto_pitch_bend_range_detection)
                     .label("Auto Pitch Bend Width Detection")
