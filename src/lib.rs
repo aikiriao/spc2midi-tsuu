@@ -1240,6 +1240,9 @@ impl App {
                         | (MIDISystem::XG, MIDISystem::NONE)
                         | (MIDISystem::XG, MIDISystem::GMLevel1)
                         | (MIDISystem::XG, MIDISystem::GMLevel2) => {
+                            for ch in 0..16 {
+                                config.part_mode[ch] = MIDIPartMode::GM(GMPartMode::Normal);
+                            }
                             config.part_mode[9] = MIDIPartMode::GM(GMPartMode::Drum);
                         }
                         // GM -> XG
