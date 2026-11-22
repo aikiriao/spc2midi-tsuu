@@ -103,12 +103,12 @@ impl std::fmt::Display for MIDIPartMode {
             MIDIPartMode::GM(mode) => match mode {
                 GMPartMode::Normal => "Normal",
                 GMPartMode::Drum => "Drum",
-            }
+            },
             MIDIPartMode::GS(mode) => match mode {
                 GSPartMode::Normal => "Normal",
                 GSPartMode::RhythmMAP1 => "DrumMAP1",
                 GSPartMode::RhythmMAP2 => "DrumMAP2",
-            }
+            },
             MIDIPartMode::XG(mode) => match mode {
                 XGPartMode::Normal => "Normal",
                 XGPartMode::Drum => "Drum",
@@ -116,7 +116,7 @@ impl std::fmt::Display for MIDIPartMode {
                 XGPartMode::DrumSetup2 => "DrumSetup2",
                 XGPartMode::DrumSetup3 => "DrumSetup3",
                 XGPartMode::DrumSetup4 => "DrumSetup4",
-            }
+            },
         })
     }
 }
@@ -159,6 +159,18 @@ pub enum SampleListRowColorStyle {
     Stripe,
     /// 単色
     Solid,
+}
+
+/// SPCの読み込み設定
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct SPCLoadConfigure {
+    /// ドラムの自動検出を行うか
+    pub auto_drum_detection: bool,
+    /// ピッチベンド幅を自動検出するか
+    pub auto_pitch_bend_range_detection: bool,
+    /// 自動検出しない場合の固定ピッチベンド幅
+    pub fixed_pitch_bend_width: u8,
 }
 
 /// 音源情報
@@ -336,6 +348,16 @@ impl PlaybackStatus {
             pitch: [0; 8],
             envelope: [0; 8],
             volume: [[0, 0]; 8],
+        }
+    }
+}
+
+impl SPCLoadConfigure {
+    pub fn new() -> Self {
+        Self {
+            auto_drum_detection: true,
+            auto_pitch_bend_range_detection: true,
+            fixed_pitch_bend_width: 12,
         }
     }
 }

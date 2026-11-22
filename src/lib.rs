@@ -5,6 +5,7 @@ mod midi_drum_channel_assignment_window;
 mod midi_output_configuration_window;
 mod program;
 mod source_estimation;
+mod spc_load_configuration_window;
 mod srcn_ch_routing_window;
 mod srcn_window;
 mod types;
@@ -15,6 +16,7 @@ use crate::midi_drum_channel_assignment_window::*;
 use crate::midi_output_configuration_window::*;
 use crate::program::*;
 use crate::source_estimation::*;
+use crate::spc_load_configuration_window::*;
 use crate::srcn_ch_routing_window::*;
 use crate::srcn_window::*;
 use crate::types::*;
@@ -123,6 +125,8 @@ pub enum Message {
     SRCNChannelRoutingWindowOpened(window::Id),
     OpenMIDIDrumChannelAssignmentWindow,
     MIDIDrumChannelAssignmentWindowOpened(window::Id),
+    OpenSPCLoadConfigrationWindow,
+    SPCLoadConfigrationWindowOpened(window::Id),
     WindowClosed(window::Id),
     OpenFile,
     FileOpened(Result<(PathBuf, LoadedFile), Error>),
@@ -192,6 +196,9 @@ pub enum Message {
     DisplaySourceIDTypeChanged(DisplaySourceIDType),
     DisplayNoteTypeChanged(DisplayNoteType),
     AudioLatencyMsecChanged(usize),
+    SPCLoadAutoDrumDetectionChanged(bool),
+    SPCLoadAutoPitchBendRangeDetectionChanged(bool),
+    SPCLoadFixedPitchBendWidthChanged(u8),
     Tick,
 }
 
@@ -227,6 +234,7 @@ pub struct App {
     display_source_id_type: Arc<RwLock<DisplaySourceIDType>>,
     display_note_type: Arc<RwLock<DisplayNoteType>>,
     preview_playback_speed: Arc<AtomicF64>,
+    spc_load_config: Arc<RwLock<SPCLoadConfigure>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -380,6 +388,7 @@ impl Default for App {
             display_source_id_type: Arc::new(RwLock::new(DisplaySourceIDType::StartAddress)),
             display_note_type: Arc::new(RwLock::new(DisplayNoteType::NoteNumber)),
             preview_playback_speed: Arc::new(AtomicF64::new(1.0)),
+            spc_load_config: Arc::new(RwLock::new(SPCLoadConfigure::new())),
         }
     }
 }
@@ -534,9 +543,19 @@ impl App {
                     self.midi_output_configure.clone(),
                 );
                 self.windows.insert(id, Box::new(window));
-                return open.map(Message::SRCNChannelRoutingWindowOpened);
+                return open.map(Message::MIDIDrumChannelAssignmentWindowOpened);
             }
             Message::MIDIDrumChannelAssignmentWindowOpened(_id) => {}
+            Message::OpenSPCLoadConfigrationWindow => {
+                let (id, open) = window::open(window::Settings {
+                    size: iced::Size::new(600.0, 200.0),
+                    ..Default::default()
+                });
+                let window = SPCLoadConfigurationWindow::new(self.spc_load_config.clone());
+                self.windows.insert(id, Box::new(window));
+                return open.map(Message::SPCLoadConfigrationWindowOpened);
+            }
+            Message::SPCLoadConfigrationWindowOpened(_id) => {}
             Message::WindowClosed(id) => {
                 if id == self.main_window_id {
                     return iced::exit();
@@ -1495,6 +1514,21 @@ impl App {
                 self.audio_output_latency_msec
                     .store(msec, Ordering::Relaxed);
             }
+            Message::SPCLoadAutoDrumDetectionChanged(flag) => {
+                if let Ok(mut load_config) = self.spc_load_config.write() {
+                    load_config.auto_drum_detection = flag;
+                }
+            }
+            Message::SPCLoadAutoPitchBendRangeDetectionChanged(flag) => {
+                if let Ok(mut load_config) = self.spc_load_config.write() {
+                    load_config.auto_pitch_bend_range_detection = flag;
+                }
+            }
+            Message::SPCLoadFixedPitchBendWidthChanged(width) => {
+                if let Ok(mut load_config) = self.spc_load_config.write() {
+                    load_config.fixed_pitch_bend_width = width;
+                }
+            }
             Message::Tick => {
                 // 再生情報取得
                 if let Some(midi_spc_ref) = &self.midi_spc {
@@ -1717,6 +1751,12 @@ impl App {
             config.beats_per_minute = Self::round_bpm(bpm);
         }
 
+        // SPCロード設定
+        let spc_load_config = self
+            .spc_load_config
+            .read()
+            .expect("Failed to read spc load configure");
+
         // 波形情報の読み込み
         for (srn, dir_address) in start_address_map.iter() {
             let mut decoder = Decoder::new();
@@ -1773,11 +1813,21 @@ impl App {
             // ドラム音はドラムチャンネルがあることを要求
             // ドラムチャンネルをなくした状態で読む場合があるため
             let drum_channels_list = self.get_drum_channels_list();
-            let is_drum = is_drum & (drum_channels_list.len() > 0);
-            params.insert(*srn, {
-                let pitch_bend_width = *pitch_bend_width_map
+            // ドラム判定
+            let is_drum = if spc_load_config.auto_drum_detection {
+                is_drum & (drum_channels_list.len() > 0)
+            } else {
+                false
+            };
+            // ピッチベンド幅
+            let pitch_bend_width = if spc_load_config.auto_pitch_bend_range_detection {
+                *pitch_bend_width_map
                     .get(srn)
-                    .expect("Failed to find source");
+                    .expect("Failed to find source")
+            } else {
+                spc_load_config.fixed_pitch_bend_width
+            };
+            params.insert(*srn, {
                 SourceParameter {
                     mute: false,
                     program: if is_drum {

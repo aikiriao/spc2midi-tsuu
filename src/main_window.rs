@@ -442,6 +442,14 @@ impl SPC2MIDI2Window for MainWindow {
                         .width(Length::Fill)
                         .height(Length::Shrink)),
                         (menu_button(
+                            text("SPC Load Configuration...")
+                                .height(Length::Shrink)
+                                .align_y(alignment::Vertical::Center),
+                            Message::OpenSPCLoadConfigrationWindow,
+                        )
+                        .width(Length::Fill)
+                        .height(Length::Shrink)),
+                        (menu_button(
                             text("MIDI Output Configuration...")
                                 .height(Length::Shrink)
                                 .align_y(alignment::Vertical::Center),
