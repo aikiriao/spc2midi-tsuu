@@ -57,6 +57,15 @@ impl SPC2MIDI2Window for SPCLoadConfigurationWindow {
             .padding(10)
             .width(Length::Fill)
             .align_y(alignment::Alignment::Center),
+            row![checkbox(spc_load_configure.preserve_source_parameter)
+                .label("Preserve Source Parameters (Configs)")
+                .on_toggle(
+                    move |flag| Message::SPCLoadPreserveSourceParameterOnReloadChanged(flag)
+                )]
+            .spacing(10)
+            .padding(10)
+            .align_y(alignment::Alignment::Center)
+            .width(Length::Fill),
         ]
         .spacing(10)
         .padding(10)

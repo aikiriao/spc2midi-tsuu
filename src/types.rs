@@ -173,6 +173,8 @@ pub struct SPCLoadConfigure {
     pub auto_pitch_bend_range_detection: bool,
     /// 自動検出しない場合の固定ピッチベンド幅
     pub fixed_pitch_bend_width: u8,
+    /// SPCを再度読み込んだ時にパラメータを保持するか
+    pub preserve_source_parameter: bool,
 }
 
 /// 音源情報
@@ -361,6 +363,7 @@ impl SPCLoadConfigure {
             enable_pitch_bend_for_drum: false,
             auto_pitch_bend_range_detection: true,
             fixed_pitch_bend_width: 12,
+            preserve_source_parameter: false,
         }
     }
 }

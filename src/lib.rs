@@ -200,6 +200,7 @@ pub enum Message {
     SPCLoadEnablePitchBendForDrumChanged(bool),
     SPCLoadAutoPitchBendRangeDetectionChanged(bool),
     SPCLoadFixedPitchBendWidthChanged(u8),
+    SPCLoadPreserveSourceParameterChanged(bool),
     Tick,
 }
 
@@ -549,7 +550,7 @@ impl App {
             Message::MIDIDrumChannelAssignmentWindowOpened(_id) => {}
             Message::OpenSPCLoadConfigrationWindow => {
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(600.0, 200.0),
+                    size: iced::Size::new(600.0, 250.0),
                     ..Default::default()
                 });
                 let window = SPCLoadConfigurationWindow::new(self.spc_load_config.clone());
@@ -1535,6 +1536,11 @@ impl App {
                     load_config.fixed_pitch_bend_width = width;
                 }
             }
+            Message::SPCLoadPreserveSourceParameterChanged(flag) => {
+                if let Ok(mut load_config) = self.spc_load_config.write() {
+                    load_config.preserve_source_parameter = flag;
+                }
+            }
             Message::Tick => {
                 // 再生情報取得
                 if let Some(midi_spc_ref) = &self.midi_spc {
@@ -1673,11 +1679,19 @@ impl App {
             (((pitch as f32) / (pitch_base as f32)).log2() * 12.0).abs()
         }
 
+        // SPCロード設定
+        let spc_load_config = self
+            .spc_load_config
+            .read()
+            .expect("Failed to read spc load configure");
+
         // 音源情報を作り直す
         let mut infos = self.source_infos.write().unwrap();
         *infos = BTreeMap::new();
         let mut params = self.source_parameter.write().unwrap();
-        *params = BTreeMap::new();
+        if !spc_load_config.preserve_source_parameter {
+            *params = BTreeMap::new();
+        }
 
         // 一定期間シミュレートし、サンプルソース番号とそれに紐づく開始アドレスとキーオンされたチャンネルを取得
         let mut midispc: Box<spc700::spc::SPC<spc700::mididsp::MIDIDSP>> = Box::new({
@@ -1757,12 +1771,6 @@ impl App {
             config.beats_per_minute = Self::round_bpm(bpm);
         }
 
-        // SPCロード設定
-        let spc_load_config = self
-            .spc_load_config
-            .read()
-            .expect("Failed to read spc load configure");
-
         // 波形情報の読み込み
         for (srn, dir_address) in start_address_map.iter() {
             let mut decoder = Decoder::new();
@@ -1836,37 +1844,40 @@ impl App {
             // ピッチベンドを有効にするか
             let enable_pitch_bend =
                 (pitch_bend_width > 0) && (spc_load_config.enable_pitch_bend_for_drum || !is_drum);
-            params.insert(*srn, {
-                SourceParameter {
-                    mute: false,
-                    program: if is_drum {
-                        Program::AcousticBassDrum
-                    } else {
-                        Program::AcousticGrand
-                    },
-                    center_note: f32::round(center_note * 512.0) as u16,
-                    noteon_velocity: 100,
-                    pitch_bend_width: pitch_bend_width.max(1),
-                    envelope_as_expression: false,
-                    auto_pan: true,
-                    fixed_pan: 64,
-                    auto_volume: true,
-                    fixed_volume: 100,
-                    fixed_reverb_send: 0,
-                    chorus_send: 0,
-                    enable_pitch_bend: enable_pitch_bend,
-                    echo_as_reverb_send: false,
-                    update_parameter_after_noteon: true,
-                    retrigger_noteon_on_exceed_pitch_bend_width: true,
-                    channel_routing: if is_drum {
-                        [drum_channels_list[0]; 8]
-                    } else {
-                        [0, 1, 2, 3, 4, 5, 6, 7]
-                    },
-                    channel_mute: [false; 8],
-                    instrument_name: "".to_string(),
-                }
-            });
+            let new_param = SourceParameter {
+                mute: false,
+                program: if is_drum {
+                    Program::AcousticBassDrum
+                } else {
+                    Program::AcousticGrand
+                },
+                center_note: f32::round(center_note * 512.0) as u16,
+                noteon_velocity: 100,
+                pitch_bend_width: pitch_bend_width.max(1),
+                envelope_as_expression: false,
+                auto_pan: true,
+                fixed_pan: 64,
+                auto_volume: true,
+                fixed_volume: 100,
+                fixed_reverb_send: 0,
+                chorus_send: 0,
+                enable_pitch_bend: enable_pitch_bend,
+                echo_as_reverb_send: false,
+                update_parameter_after_noteon: true,
+                retrigger_noteon_on_exceed_pitch_bend_width: true,
+                channel_routing: if is_drum {
+                    [drum_channels_list[0]; 8]
+                } else {
+                    [0, 1, 2, 3, 4, 5, 6, 7]
+                },
+                channel_mute: [false; 8],
+                instrument_name: "".to_string(),
+            };
+
+            // すでに存在するパラメータで、かつパラメータを保持するなら上書きしない
+            if !(params.contains_key(srn) && spc_load_config.preserve_source_parameter) {
+                params.insert(*srn, new_param);
+            }
         }
     }
 
