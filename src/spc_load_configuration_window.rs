@@ -60,7 +60,7 @@ impl SPC2MIDI2Window for SPCLoadConfigurationWindow {
             row![checkbox(spc_load_configure.preserve_source_parameter)
                 .label("Preserve Source Parameters (Configs)")
                 .on_toggle(
-                    move |flag| Message::SPCLoadPreserveSourceParameterOnReloadChanged(flag)
+                    move |flag| Message::SPCLoadPreserveSourceParameterChanged(flag)
                 )]
             .spacing(10)
             .padding(10)
